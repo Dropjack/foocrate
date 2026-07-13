@@ -17,6 +17,6 @@ DECLARE_COMPONENT_VERSION(
     "Refrain",
     "0.1.0",
     "Native integrated Columns UI component for foobar2000.\n"
-    "Step 04 provides the native Refrain panel and synchronized playback controls.");
+    "Native playback controls with versioned settings and foobar2000 Preferences integration.");
 
 VALIDATE_COMPONENT_FILENAME("foo_refrain.dll");

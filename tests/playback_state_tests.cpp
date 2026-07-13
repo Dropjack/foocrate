@@ -33,6 +33,9 @@ int main() {
     assert(formatPlaybackTime(65.9) == L"1:05");
     assert(formatPlaybackTime(3661.0) == L"1:01:01");
     assert(formatPlaybackTime(0.0, false) == L"--:--");
+    assert(formatRemainingTime(30.0, 120.0) == L"-1:30");
+    assert(formatRemainingTime(150.0, 120.0) == L"-0:00");
+    assert(formatRemainingTime(0.0, 0.0) == L"--:--");
 
     PlaybackState state;
     state.playing = true;

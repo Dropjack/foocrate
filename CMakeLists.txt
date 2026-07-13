@@ -29,6 +29,10 @@ add_library(foo_refrain MODULE
   src/playback_panel.cpp
   src/playback_panel.h
   src/playback_state.h
+  src/preferences.cpp
+  src/settings.cpp
+  src/settings.h
+  src/settings_model.h
 )
 
 set_target_properties(foo_refrain PROPERTIES
@@ -57,6 +61,7 @@ target_link_libraries(foo_refrain PRIVATE
   d2d1
   dwrite
   shlwapi
+  shell32
   winmm
 )
 
@@ -82,6 +87,11 @@ if(BUILD_TESTING)
   )
   target_compile_options(refrain_playback_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME playback_state COMMAND refrain_playback_state_tests)
+
+  add_executable(refrain_settings_model_tests tests/settings_model_tests.cpp)
+  target_include_directories(refrain_settings_model_tests PRIVATE src)
+  target_compile_options(refrain_settings_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME settings_model COMMAND refrain_settings_model_tests)
 endif()
 
 find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)

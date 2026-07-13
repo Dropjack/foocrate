@@ -97,4 +97,11 @@ struct PlaybackState {
     return buffer;
 }
 
+[[nodiscard]] inline std::wstring formatRemainingTime(double position, double length) {
+    if (!std::isfinite(position) || !std::isfinite(length) || length <= 0.0) {
+        return L"--:--";
+    }
+    return L"-" + formatPlaybackTime(std::max(0.0, length - position));
+}
+
 } // namespace refrain

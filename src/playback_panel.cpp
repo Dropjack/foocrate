@@ -1,5 +1,6 @@
 #include "playback_panel.h"
 #include "playback_state.h"
+#include "settings.h"
 
 #include <windows.h>
 #include <windowsx.h>
@@ -36,6 +37,7 @@ enum class ControlId {
     stop,
     mute,
     volume,
+    settings,
 };
 
 struct Layout {
@@ -46,13 +48,15 @@ struct Layout {
     D2D1_RECT_F stop{};
     D2D1_RECT_F mute{};
     D2D1_RECT_F volume{};
+    D2D1_RECT_F settings{};
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
     float surfaceTop{};
 };
 
 [[nodiscard]] bool contains(const D2D1_RECT_F& rect, D2D1_POINT_2F point) noexcept {
-    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+    return rect.right > rect.left && rect.bottom > rect.top
+        && point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
 }
 
 [[nodiscard]] D2D1_POINT_2F pointFromLParam(LPARAM value, float scale) noexcept {
@@ -101,8 +105,10 @@ public:
             registerPlaybackCallback();
             refreshFromCore();
             createTooltip(wnd);
+            registerSettingsWindow(wnd);
             return 0;
         case WM_DESTROY:
+            unregisterSettingsWindow(wnd);
             unregisterPlaybackCallback();
             if (GetCapture() == wnd) {
                 ReleaseCapture();
@@ -187,6 +193,9 @@ public:
             break;
         case kRefreshMessage:
             refreshFromCore();
+            return 0;
+        case kSettingsChangedMessage:
+            applySettingsChange();
             return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
@@ -356,6 +365,9 @@ private:
         layout.mute = D2D1::RectF(std::max(center + 100.0F, width - 190.0F), buttonY, std::max(center + 136.0F, width - 154.0F), buttonY + 36.0F);
         layout.volume = D2D1::RectF(std::max(center + 142.0F, width - 146.0F), buttonY + 8.0F,
             width - 16.0F, buttonY + 28.0F);
+        if (readSettings().showSettingsButton) {
+            layout.settings = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
+        }
         return layout;
     }
 
@@ -368,6 +380,7 @@ private:
         if (contains(layout.stop, point)) return m_state.playing ? ControlId::stop : ControlId::none;
         if (contains(layout.mute, point)) return ControlId::mute;
         if (contains(layout.volume, point)) return m_state.customVolume ? ControlId::none : ControlId::volume;
+        if (contains(layout.settings, point)) return ControlId::settings;
         return ControlId::none;
     }
 
@@ -380,6 +393,7 @@ private:
         case ControlId::playPause:
         case ControlId::next:
         case ControlId::mute: return true;
+        case ControlId::settings: return readSettings().showSettingsButton;
         default: return false;
         }
     }
@@ -413,12 +427,19 @@ private:
         drawButton(layout.next, ControlId::next);
         drawButton(layout.stop, ControlId::stop);
         drawButton(layout.mute, ControlId::mute);
+        if (readSettings().showSettingsButton) {
+            drawButton(layout.settings, ControlId::settings);
+        }
         drawVolume(layout);
 
         const auto displayPosition = m_previewing ? m_previewPosition : m_state.position;
         drawText(formatPlaybackTime(displayPosition, m_state.playing), layout.elapsed, DWRITE_TEXT_ALIGNMENT_CENTER,
             m_state.playing ? m_foreground.Get() : m_disabled.Get());
-        drawText(formatPlaybackTime(m_state.length, m_state.hasKnownLength()), layout.total,
+        const auto settings = readSettings();
+        const auto rightTime = settings.timeDisplay == TimeDisplayMode::remaining
+            ? formatRemainingTime(displayPosition, m_state.length)
+            : formatPlaybackTime(m_state.length, m_state.hasKnownLength());
+        drawText(rightTime, layout.total,
             DWRITE_TEXT_ALIGNMENT_CENTER, m_state.hasKnownLength() ? m_foreground.Get() : m_disabled.Get());
 
         const auto result = m_renderTarget->EndDraw();
@@ -518,6 +539,18 @@ private:
                 m_renderTarget->DrawLine(D2D1::Point2F(cx + 9.0F, cy + 2.0F), D2D1::Point2F(cx + 5.0F, cy + 5.0F), brush, 1.5F);
             }
             break;
+        case ControlId::settings: {
+            const auto radius = 8.0F;
+            m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), radius, radius), brush, 2.0F);
+            m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 2.5F, 2.5F), brush, 2.0F);
+            for (int index = 0; index < 8; ++index) {
+                const auto angle = static_cast<float>(index) * 3.14159265F / 4.0F;
+                m_renderTarget->DrawLine(
+                    D2D1::Point2F(cx + std::cos(angle) * 9.0F, cy + std::sin(angle) * 9.0F),
+                    D2D1::Point2F(cx + std::cos(angle) * 12.0F, cy + std::sin(angle) * 12.0F), brush, 2.0F);
+            }
+            break;
+        }
         default:
             break;
         }
@@ -642,18 +675,28 @@ private:
     }
 
     bool onKeyDown(HWND wnd, WPARAM key) {
-        constexpr std::array<ControlId, 5> buttons{
-            ControlId::previous, ControlId::playPause, ControlId::next, ControlId::stop, ControlId::mute};
+        const std::array<ControlId, 6> allButtons{
+            ControlId::settings, ControlId::previous, ControlId::playPause,
+            ControlId::next, ControlId::stop, ControlId::mute};
+        std::array<ControlId, 6> buttons{};
+        const auto settingsVisible = readSettings().showSettingsButton;
+        auto buttonCount = std::size_t{};
+        for (const auto button : allButtons) {
+            if (button != ControlId::settings || settingsVisible) {
+                buttons[buttonCount++] = button;
+            }
+        }
         if (key == VK_TAB) {
             uie::window::g_on_tab(wnd);
             return true;
         }
         if (key == VK_LEFT || key == VK_RIGHT) {
-            auto current = std::find(buttons.begin(), buttons.end(), m_focus);
-            auto index = current == buttons.end() ? 1LL : static_cast<long long>(current - buttons.begin());
+            auto current = std::find(buttons.begin(), buttons.begin() + static_cast<std::ptrdiff_t>(buttonCount), m_focus);
+            auto index = current == buttons.begin() + static_cast<std::ptrdiff_t>(buttonCount)
+                ? (settingsVisible ? 2LL : 1LL) : static_cast<long long>(current - buttons.begin());
             index += key == VK_RIGHT ? 1LL : -1LL;
-            if (index < 0) index = static_cast<long long>(buttons.size()) - 1LL;
-            if (index >= static_cast<long long>(buttons.size())) index = 0;
+            if (index < 0) index = static_cast<long long>(buttonCount) - 1LL;
+            if (index >= static_cast<long long>(buttonCount)) index = 0;
             m_focus = buttons[static_cast<std::size_t>(index)];
             invalidate();
             return true;
@@ -680,6 +723,7 @@ private:
         case ControlId::next: api->userNext(); break;
         case ControlId::stop: api->userStop(); break;
         case ControlId::mute: api->userMute(); break;
+        case ControlId::settings: showRefrainPreferences(); break;
         default: break;
         }
     }
@@ -727,21 +771,29 @@ private:
         info.lpszText = const_cast<wchar_t*>(L"");
         SendMessage(m_tooltip, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&info));
         SendMessage(m_tooltip, TTM_SETMAXTIPWIDTH, 0, 320);
+        SendMessage(m_tooltip, TTM_ACTIVATE, readSettings().showTooltips ? TRUE : FALSE, 0);
     }
 
     void updateTooltip(ControlId id) {
         if (!m_tooltip || !get_wnd()) {
             return;
         }
-        switch (id) {
-        case ControlId::seek: m_tooltipText = L"Seek"; break;
-        case ControlId::previous: m_tooltipText = L"Previous"; break;
-        case ControlId::playPause: m_tooltipText = m_state.playing && !m_state.paused ? L"Pause" : L"Play"; break;
-        case ControlId::next: m_tooltipText = L"Next"; break;
-        case ControlId::stop: m_tooltipText = L"Stop"; break;
-        case ControlId::mute: m_tooltipText = m_state.muted() ? L"Unmute" : L"Mute"; break;
-        case ControlId::volume: m_tooltipText = L"Volume (mouse wheel supported)"; break;
-        default: m_tooltipText.clear(); break;
+        if (!readSettings().showTooltips) {
+            m_tooltipText.clear();
+            SendMessage(m_tooltip, TTM_ACTIVATE, FALSE, 0);
+        } else {
+            SendMessage(m_tooltip, TTM_ACTIVATE, TRUE, 0);
+            switch (id) {
+            case ControlId::seek: m_tooltipText = L"Seek"; break;
+            case ControlId::previous: m_tooltipText = L"Previous"; break;
+            case ControlId::playPause: m_tooltipText = m_state.playing && !m_state.paused ? L"Pause" : L"Play"; break;
+            case ControlId::next: m_tooltipText = L"Next"; break;
+            case ControlId::stop: m_tooltipText = L"Stop"; break;
+            case ControlId::mute: m_tooltipText = m_state.muted() ? L"Unmute" : L"Mute"; break;
+            case ControlId::volume: m_tooltipText = L"Volume (mouse wheel supported)"; break;
+            case ControlId::settings: m_tooltipText = L"Refrain settings"; break;
+            default: m_tooltipText.clear(); break;
+            }
         }
         TOOLINFO info{sizeof(info)};
         info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
@@ -749,6 +801,18 @@ private:
         info.uId = reinterpret_cast<UINT_PTR>(get_wnd());
         info.lpszText = m_tooltipText.data();
         SendMessage(m_tooltip, TTM_UPDATETIPTEXT, 0, reinterpret_cast<LPARAM>(&info));
+    }
+
+    void applySettingsChange() {
+        const auto settings = readSettings();
+        SendMessage(m_tooltip, TTM_ACTIVATE, settings.showTooltips ? TRUE : FALSE, 0);
+        if (!settings.showSettingsButton) {
+            if (m_hover == ControlId::settings) m_hover = ControlId::none;
+            if (m_active == ControlId::settings) m_active = ControlId::none;
+            if (m_focus == ControlId::settings) m_focus = ControlId::playPause;
+        }
+        updateTooltip(m_hover);
+        invalidate();
     }
 
     PlaybackState m_state;
