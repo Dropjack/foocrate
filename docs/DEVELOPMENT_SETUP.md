@@ -127,9 +127,41 @@ ESLyric 的版本来自 DLL 版本资源；Playback Statistics DLL 没有 Window
 - 自动测试通过只能说明“实现完成待验收”；只有用户明确确认后才能标记“已验收”。
 - 如果一个测试工具确实成为必要依赖，必须先说明解决什么问题、为什么现有工具不够、安装的最小内容和卸载/升级影响，再请用户决定。
 
-## 6. 计划中的构建与部署形态
+## 6. 构建、测试、打包与部署
 
-当前尚未创建 CMake/Visual Studio 工程，因此下面是已批准方向，不是声称已经可运行的命令：
+步骤 03 已建立并实际验证 Visual Studio 2022 x64 CMake 工程。普通 PowerShell 中继续使用 Visual Studio 自带程序的完整路径：
+
+```powershell
+$cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
+
+& $cmake --preset vs2022-x64
+& $cmake --build --preset debug --parallel
+& $ctest --preset debug
+& $cmake --build --preset release --parallel
+& $ctest --preset release
+& $cmake --build --preset package-release
+```
+
+产物位于已忽略的 `build/vs2022-x64`：
+
+- Debug DLL：`Debug/foo_refrain.dll`；
+- Release DLL：`Release/foo_refrain.dll`；
+- 方便用户找到的安装包：仓库根目录 `dist/Refrain-0.1.0.fb2k-component`。
+
+`dist/` 与 `build/` 一样被 Git 忽略。`build/` 保存编译中间产物，`dist/` 只保存用户可以直接安装的最终包；人工安装时不需要再进入多层构建目录。
+
+部署到开发实例前必须先关闭该实例，然后执行：
+
+```powershell
+& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-component.ps1 `
+  -Instance dev `
+  -ComponentDll build/vs2022-x64/Release/foo_refrain.dll
+```
+
+脚本只接受 `dev` 或 `test`，只接受仓库 `build/` 内名为 `foo_refrain.dll` 的文件，并把绝对目标限制在 `.local/foobar-dev` 或 `.local/foobar-test`。它不能接收 C 盘或参考目录作为目标，也没有日常实例回退路径。
+
+已验证的工程形态：
 
 1. 构建目标为 Windows x64 的 foobar2000 组件 DLL。
 2. Debug 与 Release 都必须可构建；Release 用于最终打包，Debug 用于开发实例诊断。
@@ -138,7 +170,7 @@ ESLyric 的版本来自 DLL 版本资源；Playback Statistics DLL 没有 Window
 5. 如果 Columns UI 无法在不覆盖用户配置的前提下自动建立完整根布局，则额外提供明确版本的布局导入文件，并把导入、升级和回滚写入安装说明。不能未经确认覆盖用户现有 Columns UI 布局。
 6. ESLyric、Playback Statistics 等第三方组件独立安装。除非其再分发许可经过明确核对，否则不得塞入 Refrain 包。
 
-工程建立后，本文必须补充实际可复制的配置、构建、测试、打包和部署命令，不能只写抽象步骤。
+步骤 03 的包只包含根目录下的 `foo_refrain.dll`。foobar2000 x64 会把包内容解压到 `profile/user-components-x64/foo_refrain/`，因此包内不得再增加 `x64/` 目录；否则 DLL 会落到多余的嵌套目录而无法加载。SDK 构建会输出临时 `shared.dll` 以产生与 foobar2000 自带 `shared.dll` 匹配的导入库，但打包和部署脚本不会复制该临时 DLL。
 
 ## 7. 环境复核命令原则
 

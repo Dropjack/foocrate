@@ -1,0 +1,18 @@
+#pragma once
+
+#include <guiddef.h>
+#include <string_view>
+
+namespace refrain {
+
+inline constexpr std::string_view kComponentName{"Refrain"};
+inline constexpr std::string_view kComponentVersion{"0.1.0"};
+inline constexpr std::string_view kComponentFileName{"foo_refrain.dll"};
+inline constexpr GUID kComponentGuid{
+    0x5aeac28d,
+    0xed01,
+    0x4574,
+    {0xa9, 0x9b, 0xf9, 0xa2, 0x44, 0xb5, 0xb8, 0x15},
+};
+
+} // namespace refrain
