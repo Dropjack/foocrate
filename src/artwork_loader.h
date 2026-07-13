@@ -1,0 +1,31 @@
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include <windows.h>
+#include <mmsystem.h>
+#include <objbase.h>
+#include <ole2.h>
+
+#include <foobar2000/SDK/foobar2000.h>
+
+namespace refrain {
+
+enum class ArtworkStatus {
+    ready,
+    missing,
+    unavailable,
+    aborted,
+};
+
+struct ArtworkPixels {
+    ArtworkStatus status{ArtworkStatus::unavailable};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::vector<std::uint8_t> bgra;
+};
+
+[[nodiscard]] ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept;
+
+} // namespace refrain

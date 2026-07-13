@@ -23,12 +23,15 @@ include(CTest)
 include(cmake/Foobar2000Sdk.cmake)
 
 add_library(foo_refrain MODULE
+  src/artwork_loader.cpp
+  src/artwork_loader.h
   src/component.cpp
   src/component_identity.h
   src/foo_refrain.rc
   src/playback_panel.cpp
   src/playback_panel.h
   src/playback_state.h
+  src/now_playing_state.h
   src/preferences.cpp
   src/settings.cpp
   src/settings.h
@@ -60,6 +63,7 @@ target_link_libraries(foo_refrain PRIVATE
   comctl32
   d2d1
   dwrite
+  windowscodecs
   shlwapi
   shell32
   winmm
@@ -92,6 +96,11 @@ if(BUILD_TESTING)
   target_include_directories(refrain_settings_model_tests PRIVATE src)
   target_compile_options(refrain_settings_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME settings_model COMMAND refrain_settings_model_tests)
+
+  add_executable(refrain_now_playing_state_tests tests/now_playing_state_tests.cpp)
+  target_include_directories(refrain_now_playing_state_tests PRIVATE src)
+  target_compile_options(refrain_now_playing_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME now_playing_state COMMAND refrain_now_playing_state_tests)
 endif()
 
 find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)

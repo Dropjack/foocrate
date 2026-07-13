@@ -1,4 +1,6 @@
 #include "playback_panel.h"
+#include "artwork_loader.h"
+#include "now_playing_state.h"
 #include "playback_state.h"
 #include "settings.h"
 
@@ -13,9 +15,16 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <cwchar>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <columns_ui-sdk-8.1.0/ui_extension.h>
 #include <foobar2000/SDK/foobar2000.h>
@@ -27,6 +36,7 @@ using Microsoft::WRL::ComPtr;
 
 constexpr GUID kPlaybackPanelGuid{0x9e26e4b0, 0x41a9, 0x4b08, {0xa3, 0x55, 0x74, 0x55, 0x10, 0x82, 0xc5, 0xf2}};
 constexpr UINT kRefreshMessage = WM_APP + 0x421;
+constexpr UINT kArtworkReadyMessage = WM_APP + 0x423;
 
 enum class ControlId {
     none,
@@ -38,6 +48,15 @@ enum class ControlId {
     mute,
     volume,
     settings,
+    artwork,
+    trackTitle,
+    artistAlbum,
+    codecBitrate,
+    rating1,
+    rating2,
+    rating3,
+    rating4,
+    rating5,
 };
 
 struct Layout {
@@ -51,7 +70,26 @@ struct Layout {
     D2D1_RECT_F settings{};
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
+    D2D1_RECT_F header{};
+    D2D1_RECT_F artwork{};
+    std::array<D2D1_RECT_F, 5> ratings{};
+    D2D1_RECT_F trackTitle{};
+    D2D1_RECT_F artistAlbum{};
+    D2D1_RECT_F codecBitrate{};
     float surfaceTop{};
+};
+
+struct ArtworkAsyncState {
+    std::atomic_bool alive{true};
+    std::atomic_uint64_t generation{};
+    HWND window{};
+    std::mutex abortMutex;
+    std::shared_ptr<abort_callback_impl> aborter;
+};
+
+struct ArtworkCompletion {
+    std::uint64_t generation{};
+    ArtworkPixels pixels;
 };
 
 [[nodiscard]] bool contains(const D2D1_RECT_F& rect, D2D1_POINT_2F point) noexcept {
@@ -69,10 +107,28 @@ struct Layout {
     return width > 0.0F ? static_cast<float>(clampUnit((x - rect.left) / width)) : 0.0F;
 }
 
-class PlaybackPanel : public uie::container_uie_window_v3, public play_callback {
+[[nodiscard]] std::wstring utf8ToWide(const char* text) {
+    if (!text || *text == '\0') return {};
+    const auto count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, nullptr, 0);
+    if (count <= 1) return {};
+    std::wstring result(static_cast<std::size_t>(count), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, result.data(), count) <= 0) return {};
+    result.pop_back();
+    return result;
+}
+
+class PlaybackPanel : public uie::container_uie_window_v3,
+                      public play_callback,
+                      private playlist_callback_impl_base,
+                      private metadb_io_callback_dynamic_impl_base {
 public:
-    PlaybackPanel() = default;
+    PlaybackPanel()
+        : playlist_callback_impl_base(playlist_callback::flag_on_item_focus_change
+              | playlist_callback::flag_on_playlist_activate
+              | playlist_callback::flag_on_items_modified
+              | playlist_callback::flag_on_items_modified_fromplayback) {}
     ~PlaybackPanel() {
+        stopArtworkWork();
         unregisterPlaybackCallback();
         releaseDeviceResources();
     }
@@ -100,6 +156,8 @@ public:
     LRESULT on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) override {
         switch (msg) {
         case WM_CREATE:
+            if (!m_artworkAsync->alive.load()) m_artworkAsync = std::make_shared<ArtworkAsyncState>();
+            m_artworkAsync->window = wnd;
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
             registerPlaybackCallback();
@@ -108,6 +166,7 @@ public:
             registerSettingsWindow(wnd);
             return 0;
         case WM_DESTROY:
+            stopArtworkWork();
             unregisterSettingsWindow(wnd);
             unregisterPlaybackCallback();
             if (GetCapture() == wnd) {
@@ -186,7 +245,8 @@ public:
             }
             break;
         case WM_SETCURSOR:
-            if (LOWORD(lp) == HTCLIENT && (m_hover == ControlId::seek || m_hover == ControlId::volume)) {
+            if (LOWORD(lp) == HTCLIENT && (m_hover == ControlId::seek || m_hover == ControlId::volume
+                    || isRatingControl(m_hover))) {
                 SetCursor(LoadCursor(nullptr, IDC_HAND));
                 return TRUE;
             }
@@ -196,6 +256,9 @@ public:
             return 0;
         case kSettingsChangedMessage:
             applySettingsChange();
+            return 0;
+        case kArtworkReadyMessage:
+            applyArtworkCompletion(*reinterpret_cast<ArtworkCompletion*>(lp));
             return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
@@ -214,7 +277,7 @@ public:
         m_state.position = 0.0;
         m_state.length = 0.0;
         m_previewing = false;
-        invalidate();
+        requestRefresh();
     }
     void on_playback_seek(double time) override {
         m_state.position = std::max(0.0, time);
@@ -238,7 +301,37 @@ public:
         invalidate();
     }
 
+    void on_item_focus_change(t_size, t_size, t_size) override {
+        if (!playback_control::get()->is_playing()) requestRefresh();
+    }
+    void on_playlist_activate(t_size, t_size) override {
+        if (!playback_control::get()->is_playing()) requestRefresh();
+    }
+    void on_items_modified(t_size, const bit_array&) override { requestRefresh(); }
+    void on_items_modified_fromplayback(t_size, const bit_array&, play_control::t_display_level) override {
+        requestRefresh();
+    }
+    void on_changed_sorted(metadb_handle_list_cref items, bool fromHook) override {
+        if (m_target.is_empty()) return;
+        for (const auto& item : items) {
+            if (item == m_target) {
+                refreshNowPlayingText(false);
+                if (!fromHook) startArtworkWork(m_target);
+                invalidate();
+                return;
+            }
+        }
+    }
+
 private:
+    [[nodiscard]] static bool isRatingControl(ControlId id) noexcept {
+        return id >= ControlId::rating1 && id <= ControlId::rating5;
+    }
+
+    [[nodiscard]] static int ratingForControl(ControlId id) noexcept {
+        return isRatingControl(id) ? static_cast<int>(id) - static_cast<int>(ControlId::rating1) + 1 : 0;
+    }
+
     [[nodiscard]] float dpiScale() const noexcept { return m_dpi / 96.0F; }
 
     void registerPlaybackCallback() {
@@ -278,6 +371,7 @@ private:
         m_state.setVolume(api->get_volume());
         auto apiV3 = playback_control_v3::get();
         m_state.customVolume = apiV3->custom_volume_is_active();
+        refreshNowPlayingTarget();
         invalidate();
     }
 
@@ -289,6 +383,15 @@ private:
             DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                 reinterpret_cast<IUnknown**>(m_dwriteFactory.ReleaseAndGetAddressOf()));
         }
+        if (m_titleScript.is_empty()) {
+            auto compiler = titleformat_compiler::get();
+            compiler->compile_safe(m_titleScript, "$if2(%title%,$if2($filename(%path%),Unknown title))");
+            compiler->compile_safe(m_artistScript, "$if2(%artist%,Unknown artist)");
+            compiler->compile_safe(m_albumScript, "$if2(%album%,Unknown album)");
+            compiler->compile_safe(m_codecScript, "$if2(%codec%,Unknown codec)");
+            compiler->compile_safe(m_bitrateScript, "$if2(%bitrate%,Unknown bitrate)");
+            compiler->compile_safe(m_ratingScript, "$if2(%rating%,0)");
+        }
         createTextResources();
     }
 
@@ -299,7 +402,14 @@ private:
         if (SUCCEEDED(m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0F, L"", m_textFormat.ReleaseAndGetAddressOf()))) {
             m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            m_textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
+        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"", m_titleFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0F, L"", m_secondaryFormat.ReleaseAndGetAddressOf());
+        configureTextFormat(m_titleFormat.Get());
+        configureTextFormat(m_secondaryFormat.Get());
     }
 
     bool createDeviceResources(HWND wnd) {
@@ -325,13 +435,19 @@ private:
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xA5A099), m_disabled.ReleaseAndGetAddressOf());
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xE7A43B), m_accent.ReleaseAndGetAddressOf());
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xFFFFFF), m_light.ReleaseAndGetAddressOf());
+        createArtworkBitmap();
         return m_background && m_surface && m_foreground && m_disabled && m_accent && m_light;
     }
 
-    void releaseTextResources() noexcept { m_textFormat.Reset(); }
+    void releaseTextResources() noexcept {
+        m_secondaryFormat.Reset();
+        m_titleFormat.Reset();
+        m_textFormat.Reset();
+    }
 
     void releaseDeviceResources() noexcept {
         m_light.Reset();
+        m_artworkBitmap.Reset();
         m_accent.Reset();
         m_disabled.Reset();
         m_foreground.Reset();
@@ -368,11 +484,41 @@ private:
         if (readSettings().showSettingsButton) {
             layout.settings = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
         }
+
+        if (top > 170.0F && width > 220.0F) {
+            const auto panelWidth = std::min(width, std::clamp(width * 0.23F, 280.0F, 440.0F));
+            const auto left = width - panelWidth;
+            const auto artworkSize = std::max(32.0F, std::min(panelWidth - 32.0F, top - 112.0F));
+            const auto artLeft = left + (panelWidth - artworkSize) * 0.5F;
+            layout.artwork = D2D1::RectF(artLeft, 16.0F, artLeft + artworkSize, 16.0F + artworkSize);
+            constexpr float starSize = 20.0F;
+            constexpr float starGap = 6.0F;
+            const auto starsWidth = starSize * 5.0F + starGap * 4.0F;
+            const auto starsLeft = left + (panelWidth - starsWidth) * 0.5F;
+            const auto starsTop = layout.artwork.bottom + 8.0F;
+            for (std::size_t index = 0; index < layout.ratings.size(); ++index) {
+                const auto x = starsLeft + static_cast<float>(index) * (starSize + starGap);
+                layout.ratings[index] = D2D1::RectF(x, starsTop, x + starSize, starsTop + starSize);
+            }
+            layout.trackTitle = D2D1::RectF(left + 12.0F, starsTop + 25.0F, width - 12.0F, starsTop + 49.0F);
+            layout.artistAlbum = D2D1::RectF(left + 12.0F, starsTop + 49.0F, width - 12.0F, starsTop + 69.0F);
+            layout.codecBitrate = D2D1::RectF(left + 12.0F, starsTop + 69.0F, width - 12.0F, starsTop + 89.0F);
+            layout.header = D2D1::RectF(left, 0.0F, width, std::min(top, starsTop + 97.0F));
+        }
         return layout;
     }
 
     [[nodiscard]] ControlId hitTest(HWND wnd, D2D1_POINT_2F point) const {
         const auto layout = calculateLayout(wnd);
+        for (std::size_t index = 0; index < layout.ratings.size(); ++index) {
+            if (contains(layout.ratings[index], point)) {
+                return static_cast<ControlId>(static_cast<int>(ControlId::rating1) + static_cast<int>(index));
+            }
+        }
+        if (contains(layout.artwork, point)) return ControlId::artwork;
+        if (contains(layout.trackTitle, point)) return ControlId::trackTitle;
+        if (contains(layout.artistAlbum, point)) return ControlId::artistAlbum;
+        if (contains(layout.codecBitrate, point)) return ControlId::codecBitrate;
         if (contains(layout.seek, point)) return m_state.canSeek() ? ControlId::seek : ControlId::none;
         if (contains(layout.previous, point)) return ControlId::previous;
         if (contains(layout.playPause, point)) return ControlId::playPause;
@@ -394,6 +540,11 @@ private:
         case ControlId::next:
         case ControlId::mute: return true;
         case ControlId::settings: return readSettings().showSettingsButton;
+        case ControlId::rating1:
+        case ControlId::rating2:
+        case ControlId::rating3:
+        case ControlId::rating4:
+        case ControlId::rating5: return m_ratingAvailable && m_target.is_valid();
         default: return false;
         }
     }
@@ -421,6 +572,7 @@ private:
         m_renderTarget->DrawLine(D2D1::Point2F(0.0F, layout.surfaceTop), D2D1::Point2F(size.width, layout.surfaceTop),
             m_disabled.Get(), 1.0F);
 
+        drawNowPlayingHeader(layout);
         drawSeek(layout);
         drawButton(layout.previous, ControlId::previous);
         drawButton(layout.playPause, ControlId::playPause);
@@ -450,9 +602,284 @@ private:
             m_foreground.Reset();
             m_surface.Reset();
             m_background.Reset();
+            m_artworkBitmap.Reset();
             m_renderTarget.Reset();
         }
         EndPaint(wnd, &paintStruct);
+    }
+
+    void configureTextFormat(IDWriteTextFormat* format) {
+        if (!format || !m_dwriteFactory) return;
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        ComPtr<IDWriteInlineObject> ellipsis;
+        if (SUCCEEDED(m_dwriteFactory->CreateEllipsisTrimmingSign(format, ellipsis.ReleaseAndGetAddressOf()))) {
+            format->SetTrimming(&trimming, ellipsis.Get());
+        }
+    }
+
+    void createArtworkBitmap() {
+        if (!m_renderTarget || m_artworkBitmap || m_artworkPixels.status != ArtworkStatus::ready
+            || m_artworkPixels.width == 0 || m_artworkPixels.height == 0 || m_artworkPixels.bgra.empty()) {
+            return;
+        }
+        const auto stride = m_artworkPixels.width * 4U;
+        m_renderTarget->CreateBitmap(D2D1::SizeU(m_artworkPixels.width, m_artworkPixels.height),
+            m_artworkPixels.bgra.data(), stride,
+            D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                D2D1_ALPHA_MODE_PREMULTIPLIED), m_dpi, m_dpi), m_artworkBitmap.ReleaseAndGetAddressOf());
+    }
+
+    void drawNowPlayingHeader(const Layout& layout) {
+        if (!contains(layout.header, D2D1::Point2F(layout.header.left + 1.0F, layout.header.top + 1.0F))) return;
+        m_renderTarget->DrawLine(D2D1::Point2F(layout.header.left, layout.header.top),
+            D2D1::Point2F(layout.header.left, layout.header.bottom), m_disabled.Get(), 1.0F);
+        m_renderTarget->DrawLine(D2D1::Point2F(layout.header.left, layout.header.bottom),
+            D2D1::Point2F(layout.header.right, layout.header.bottom), m_disabled.Get(), 1.0F);
+
+        createArtworkBitmap();
+        if (m_artworkBitmap) {
+            const auto bitmapSize = m_artworkBitmap->GetSize();
+            const auto scale = std::min((layout.artwork.right - layout.artwork.left) / bitmapSize.width,
+                (layout.artwork.bottom - layout.artwork.top) / bitmapSize.height);
+            const auto drawWidth = bitmapSize.width * scale;
+            const auto drawHeight = bitmapSize.height * scale;
+            const auto left = (layout.artwork.left + layout.artwork.right - drawWidth) * 0.5F;
+            const auto top = (layout.artwork.top + layout.artwork.bottom - drawHeight) * 0.5F;
+            m_renderTarget->DrawBitmap(m_artworkBitmap.Get(), D2D1::RectF(left, top, left + drawWidth, top + drawHeight),
+                1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        } else {
+            m_renderTarget->FillRectangle(layout.artwork, m_surface.Get());
+            m_renderTarget->DrawRectangle(layout.artwork, m_disabled.Get(), 1.0F);
+            const wchar_t* status = L"No artwork";
+            if (m_artworkLoading) status = L"Loading artwork...";
+            else if (m_artworkPixels.status == ArtworkStatus::unavailable) status = L"Artwork unavailable";
+            drawTextWith(status, layout.artwork, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+        }
+
+        const auto hoverRating = ratingForControl(m_hover);
+        const auto shownRating = hoverRating > 0 && m_ratingAvailable ? hoverRating : m_rating;
+        for (std::size_t index = 0; index < layout.ratings.size(); ++index) {
+            const auto& rect = layout.ratings[index];
+            const auto center = D2D1::Point2F((rect.left + rect.right) * 0.5F, (rect.top + rect.bottom) * 0.5F);
+            const auto active = static_cast<int>(index) < shownRating;
+            const auto brush = m_ratingAvailable && m_target.is_valid()
+                ? (active ? m_accent.Get() : m_disabled.Get()) : m_disabled.Get();
+            drawStar(center, 9.0F, brush, active);
+        }
+
+        drawTextWith(m_trackTitle, layout.trackTitle, m_titleFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
+            m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
+        drawTextWith(m_artistAlbum, layout.artistAlbum, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
+            m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
+        drawTextWith(m_codecBitrate, layout.codecBitrate, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
+            m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
+    }
+
+    void drawStar(D2D1_POINT_2F center, float radius, ID2D1Brush* brush, bool filled) {
+        ComPtr<ID2D1PathGeometry> geometry;
+        ComPtr<ID2D1GeometrySink> sink;
+        if (FAILED(m_d2dFactory->CreatePathGeometry(geometry.ReleaseAndGetAddressOf()))
+            || FAILED(geometry->Open(sink.ReleaseAndGetAddressOf()))) return;
+        std::array<D2D1_POINT_2F, 10> points{};
+        for (std::size_t index = 0; index < points.size(); ++index) {
+            const auto angle = -3.14159265F / 2.0F + static_cast<float>(index) * 3.14159265F / 5.0F;
+            const auto pointRadius = index % 2 == 0 ? radius : radius * 0.43F;
+            points[index] = D2D1::Point2F(center.x + std::cos(angle) * pointRadius,
+                center.y + std::sin(angle) * pointRadius);
+        }
+        sink->BeginFigure(points[0], filled ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddLines(points.data() + 1, static_cast<UINT32>(points.size() - 1));
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        if (SUCCEEDED(sink->Close())) {
+            if (filled) m_renderTarget->FillGeometry(geometry.Get(), brush);
+            else m_renderTarget->DrawGeometry(geometry.Get(), brush, 1.3F);
+        }
+    }
+
+    void drawTextWith(const std::wstring& text, D2D1_RECT_F rect, IDWriteTextFormat* format,
+        DWRITE_TEXT_ALIGNMENT alignment, ID2D1Brush* brush) {
+        if (!format) return;
+        format->SetTextAlignment(alignment);
+        m_renderTarget->DrawTextW(text.c_str(), static_cast<UINT32>(text.size()), format, rect, brush,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    [[nodiscard]] std::wstring formatTargetField(const titleformat_object::ptr& script,
+        const wchar_t* fallback) const {
+        if (m_target.is_empty() || script.is_empty()) return fallback;
+        pfc::string8 output;
+        bool formatted = false;
+        metadb_handle_ptr nowPlaying;
+        const auto playback = playback_control::get();
+        if (m_state.playing && playback->get_now_playing(nowPlaying) && nowPlaying == m_target) {
+            formatted = playback->playback_format_title(nullptr, output, script, nullptr,
+                playback_control::display_level_all);
+        } else {
+            formatted = m_target->format_title(nullptr, output, script, nullptr);
+        }
+        auto converted = formatted ? utf8ToWide(output.c_str()) : std::wstring{};
+        return converted.empty() ? fallback : converted;
+    }
+
+    void refreshNowPlayingTarget() {
+        metadb_handle_ptr target;
+        if (m_state.playing) {
+            playback_control::get()->get_now_playing(target);
+        } else {
+            playlist_manager::get()->activeplaylist_get_focus_item_handle(target);
+        }
+        const auto changed = target != m_target;
+        if (changed) {
+            m_target = target;
+            startArtworkWork(m_target);
+        }
+        refreshNowPlayingText(changed);
+    }
+
+    void refreshNowPlayingText(bool targetChanged) {
+        if (m_target.is_empty()) {
+            m_trackTitle = L"Nothing selected";
+            m_artistAlbum = L"Unknown artist | Unknown album";
+            m_codecBitrate = L"Unknown codec | Unknown bitrate";
+            m_rating = 0;
+            m_ratingAvailable = false;
+            return;
+        }
+        m_trackTitle = formatTargetField(m_titleScript, L"Unknown title");
+        m_artistAlbum = formatTargetField(m_artistScript, L"Unknown artist") + L" | "
+            + formatTargetField(m_albumScript, L"Unknown album");
+        const auto codec = formatTargetField(m_codecScript, L"Unknown codec");
+        auto bitrate = formatTargetField(m_bitrateScript, L"Unknown bitrate");
+        if (bitrate != L"Unknown bitrate" && bitrate.find(L"kbps") == std::wstring::npos) bitrate += L" kbps";
+        m_codecBitrate = codec + L" | " + bitrate;
+        const auto ratingText = formatTargetField(m_ratingScript, L"0");
+        wchar_t* end{};
+        m_rating = normalizeRating(std::wcstod(ratingText.c_str(), &end));
+        if (targetChanged) m_ratingAvailable = haveAllRatingCommands(m_target);
+    }
+
+    [[nodiscard]] static std::string appendMenuNodeName(std::string path, contextmenu_node* node) {
+        if (!node) return path;
+        const auto* name = node->get_name();
+        if (!name || *name == '\0' || std::strcmp(name, "Root") == 0) return path;
+        if (!path.empty()) path += '/';
+        path += name;
+        return path;
+    }
+
+    [[nodiscard]] static contextmenu_node* findContextCommand(contextmenu_node* node, const char* fullName,
+        std::string treePath = {}) {
+        if (!node) return nullptr;
+        treePath = appendMenuNodeName(std::move(treePath), node);
+        if (node->get_type() == contextmenu_item_node::TYPE_COMMAND) {
+            pfc::string8 name;
+            if (node->get_full_name(name) && menuPathMatches(name.c_str(), fullName)) return node;
+            if (menuPathMatches(treePath, fullName)) return node;
+            return nullptr;
+        }
+        if (node->get_type() == contextmenu_item_node::TYPE_POPUP) {
+            for (t_size index = 0; index < node->get_num_children(); ++index) {
+                if (auto* found = findContextCommand(node->get_child(index), fullName, treePath)) return found;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] static service_ptr_t<contextmenu_manager> createRatingMenu(const metadb_handle_ptr& target) {
+        if (target.is_empty()) return {};
+        auto manager = contextmenu_manager::g_create();
+        metadb_handle_list items;
+        items.add_item(target);
+        manager->init_context(items, contextmenu_manager::flag_view_full);
+        return manager;
+    }
+
+    [[nodiscard]] static bool haveAllRatingCommands(const metadb_handle_ptr& target) {
+        try {
+            const auto manager = createRatingMenu(target);
+            if (manager.is_empty()) return false;
+            if (!findContextCommand(manager->get_root(), "Playback Statistics/Rating/<not set>")) return false;
+            for (int value = 1; value <= 5; ++value) {
+                const auto name = std::string("Playback Statistics/Rating/") + std::to_string(value);
+                if (!findContextCommand(manager->get_root(), name.c_str())) return false;
+            }
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void executeRating(int clickedRating) {
+        const auto target = m_target;
+        if (target.is_empty() || !m_ratingAvailable || clickedRating < 1 || clickedRating > 5) return;
+        try {
+            const auto value = ratingCommandValue(m_rating, clickedRating);
+            const auto commandName = value == 0
+                ? std::string("Playback Statistics/Rating/<not set>")
+                : std::string("Playback Statistics/Rating/") + std::to_string(value);
+            const auto manager = createRatingMenu(target);
+            if (manager.is_empty()) return;
+            if (auto* command = findContextCommand(manager->get_root(), commandName.c_str())) {
+                command->execute();
+                requestRefresh();
+            } else {
+                m_ratingAvailable = false;
+                updateTooltip(m_hover);
+                invalidate();
+            }
+        } catch (...) {
+            m_ratingAvailable = false;
+            updateTooltip(m_hover);
+            invalidate();
+        }
+    }
+
+    void startArtworkWork(const metadb_handle_ptr& target) {
+        const auto state = m_artworkAsync;
+        const auto generation = state->generation.fetch_add(1) + 1;
+        auto aborter = std::make_shared<abort_callback_impl>();
+        {
+            std::scoped_lock lock(state->abortMutex);
+            if (state->aborter) state->aborter->abort();
+            state->aborter = aborter;
+        }
+        m_artworkBitmap.Reset();
+        m_artworkPixels = {target.is_valid() ? ArtworkStatus::unavailable : ArtworkStatus::missing};
+        m_artworkLoading = target.is_valid();
+        if (target.is_empty()) return;
+
+        fb2k::splitTask([state, target, generation, aborter] {
+            auto pixels = loadFrontArtwork(target, *aborter);
+            if (pixels.status == ArtworkStatus::aborted) return;
+            fb2k::inMainThread([state, generation, pixels = std::move(pixels)]() mutable {
+                if (!state->alive.load() || state->generation.load() != generation || !IsWindow(state->window)) return;
+                ArtworkCompletion completion{generation, std::move(pixels)};
+                SendMessage(state->window, kArtworkReadyMessage, 0, reinterpret_cast<LPARAM>(&completion));
+            });
+        });
+    }
+
+    void applyArtworkCompletion(ArtworkCompletion& completion) {
+        if (!m_artworkAsync->alive.load() || completion.generation != m_artworkAsync->generation.load()) return;
+        m_artworkLoading = false;
+        m_artworkPixels = std::move(completion.pixels);
+        m_artworkBitmap.Reset();
+        createArtworkBitmap();
+        updateTooltip(m_hover);
+        invalidate();
+    }
+
+    void stopArtworkWork() noexcept {
+        const auto state = m_artworkAsync;
+        state->alive.store(false);
+        state->window = nullptr;
+        state->generation.fetch_add(1);
+        std::scoped_lock lock(state->abortMutex);
+        if (state->aborter) state->aborter->abort();
+        state->aborter.reset();
     }
 
     void drawSeek(const Layout& layout) {
@@ -716,6 +1143,10 @@ private:
     }
 
     void activate(ControlId id) {
+        if (isRatingControl(id)) {
+            executeRating(ratingForControl(id));
+            return;
+        }
         auto api = playback_control::get();
         switch (id) {
         case ControlId::previous: api->userPrev(); break;
@@ -792,7 +1223,25 @@ private:
             case ControlId::mute: m_tooltipText = m_state.muted() ? L"Unmute" : L"Mute"; break;
             case ControlId::volume: m_tooltipText = L"Volume (mouse wheel supported)"; break;
             case ControlId::settings: m_tooltipText = L"Refrain settings"; break;
+            case ControlId::artwork:
+                if (m_artworkLoading) m_tooltipText = L"Loading artwork...";
+                else if (m_artworkPixels.status == ArtworkStatus::ready) m_tooltipText = L"Front cover";
+                else if (m_artworkPixels.status == ArtworkStatus::missing) m_tooltipText = L"No artwork";
+                else m_tooltipText = L"Artwork unavailable";
+                break;
+            case ControlId::trackTitle: m_tooltipText = m_trackTitle; break;
+            case ControlId::artistAlbum: m_tooltipText = m_artistAlbum; break;
+            case ControlId::codecBitrate: m_tooltipText = m_codecBitrate; break;
             default: m_tooltipText.clear(); break;
+            }
+            if (isRatingControl(id)) {
+                if (!m_ratingAvailable) {
+                    m_tooltipText = L"Playback Statistics rating command unavailable";
+                } else {
+                    const auto value = ratingForControl(id);
+                    m_tooltipText = value == m_rating
+                        ? L"Clear rating" : L"Set rating to " + std::to_wstring(value);
+                }
             }
         }
         TOOLINFO info{sizeof(info)};
@@ -816,6 +1265,15 @@ private:
     }
 
     PlaybackState m_state;
+    metadb_handle_ptr m_target;
+    std::wstring m_trackTitle{L"Nothing selected"};
+    std::wstring m_artistAlbum{L"Unknown artist | Unknown album"};
+    std::wstring m_codecBitrate{L"Unknown codec | Unknown bitrate"};
+    int m_rating{};
+    bool m_ratingAvailable{};
+    ArtworkPixels m_artworkPixels{ArtworkStatus::missing};
+    bool m_artworkLoading{};
+    std::shared_ptr<ArtworkAsyncState> m_artworkAsync{std::make_shared<ArtworkAsyncState>()};
     bool m_callbackRegistered{};
     bool m_trackingMouse{};
     bool m_previewing{};
@@ -830,7 +1288,16 @@ private:
     ComPtr<ID2D1Factory> m_d2dFactory;
     ComPtr<IDWriteFactory> m_dwriteFactory;
     ComPtr<ID2D1HwndRenderTarget> m_renderTarget;
+    ComPtr<ID2D1Bitmap> m_artworkBitmap;
     ComPtr<IDWriteTextFormat> m_textFormat;
+    ComPtr<IDWriteTextFormat> m_titleFormat;
+    ComPtr<IDWriteTextFormat> m_secondaryFormat;
+    titleformat_object::ptr m_titleScript;
+    titleformat_object::ptr m_artistScript;
+    titleformat_object::ptr m_albumScript;
+    titleformat_object::ptr m_codecScript;
+    titleformat_object::ptr m_bitrateScript;
+    titleformat_object::ptr m_ratingScript;
     ComPtr<ID2D1SolidColorBrush> m_background;
     ComPtr<ID2D1SolidColorBrush> m_surface;
     ComPtr<ID2D1SolidColorBrush> m_foreground;
