@@ -28,6 +28,8 @@ add_library(foo_refrain MODULE
   src/component.cpp
   src/component_identity.h
   src/foo_refrain.rc
+  src/lyrics_host.cpp
+  src/lyrics_host.h
   src/playback_panel.cpp
   src/playback_panel.h
   src/playback_state.h

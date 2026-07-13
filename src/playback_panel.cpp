@@ -1,5 +1,6 @@
 #include "playback_panel.h"
 #include "artwork_loader.h"
+#include "lyrics_host.h"
 #include "now_playing_state.h"
 #include "playback_state.h"
 #include "settings.h"
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <cwctype>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,6 +39,7 @@ using Microsoft::WRL::ComPtr;
 constexpr GUID kPlaybackPanelGuid{0x9e26e4b0, 0x41a9, 0x4b08, {0xa3, 0x55, 0x74, 0x55, 0x10, 0x82, 0xc5, 0xf2}};
 constexpr UINT kRefreshMessage = WM_APP + 0x421;
 constexpr UINT kArtworkReadyMessage = WM_APP + 0x423;
+constexpr UINT kLyricsMiddleClickMessage = WM_APP + 0x424;
 
 enum class ControlId {
     none,
@@ -57,6 +60,8 @@ enum class ControlId {
     rating3,
     rating4,
     rating5,
+    rightDivider,
+    trackDetails,
 };
 
 struct Layout {
@@ -71,12 +76,21 @@ struct Layout {
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
     D2D1_RECT_F header{};
+    D2D1_RECT_F rightColumn{};
+    D2D1_RECT_F rightDivider{};
+    D2D1_RECT_F lowerRight{};
     D2D1_RECT_F artwork{};
     std::array<D2D1_RECT_F, 5> ratings{};
     D2D1_RECT_F trackTitle{};
     D2D1_RECT_F artistAlbum{};
     D2D1_RECT_F codecBitrate{};
     float surfaceTop{};
+};
+
+struct DetailRow {
+    std::wstring field;
+    std::wstring value;
+    bool heading{};
 };
 
 struct ArtworkAsyncState {
@@ -164,8 +178,11 @@ public:
             refreshFromCore();
             createTooltip(wnd);
             registerSettingsWindow(wnd);
+            initializeLowerRightView();
+            createLyricsHost(wnd);
             return 0;
         case WM_DESTROY:
+            m_lyricsHost.destroy();
             stopArtworkWork();
             unregisterSettingsWindow(wnd);
             unregisterPlaybackCallback();
@@ -181,6 +198,7 @@ public:
             if (m_renderTarget) {
                 m_renderTarget->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
             }
+            syncLyricsHost(wnd);
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         case WM_DPICHANGED:
@@ -219,6 +237,15 @@ public:
         case WM_LBUTTONUP:
             onLeftButtonUp(wnd, lp);
             return 0;
+        case WM_MBUTTONUP:
+            if (contains(calculateLayout(wnd).rightColumn, pointFromLParam(lp, dpiScale()))) {
+                toggleLowerRightView();
+            }
+            return 0;
+        case WM_RBUTTONUP:
+            showTrackDetailsMenu(wnd, pointFromLParam(lp, dpiScale()),
+                POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+            return 0;
         case WM_CAPTURECHANGED:
             if (reinterpret_cast<HWND>(lp) != wnd) {
                 cancelInteraction();
@@ -245,6 +272,10 @@ public:
             }
             break;
         case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT && m_hover == ControlId::rightDivider) {
+                SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+                return TRUE;
+            }
             if (LOWORD(lp) == HTCLIENT && (m_hover == ControlId::seek || m_hover == ControlId::volume
                     || isRatingControl(m_hover))) {
                 SetCursor(LoadCursor(nullptr, IDC_HAND));
@@ -260,6 +291,9 @@ public:
         case kArtworkReadyMessage:
             applyArtworkCompletion(*reinterpret_cast<ArtworkCompletion*>(lp));
             return 0;
+        case kLyricsMiddleClickMessage:
+            toggleLowerRightView();
+            return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -269,14 +303,20 @@ public:
         m_state.paused = paused;
         requestRefresh();
     }
-    void on_playback_new_track(metadb_handle_ptr) override { requestRefresh(); }
-    void on_playback_stop(play_control::t_stop_reason) override {
+    void on_playback_new_track(metadb_handle_ptr) override {
+        if (readSettings().lyricsAutoSwitch) setLowerRightView(LowerRightView::lyrics, false);
+        requestRefresh();
+    }
+    void on_playback_stop(play_control::t_stop_reason reason) override {
         m_state.playing = false;
         m_state.paused = false;
         m_state.seekable = false;
         m_state.position = 0.0;
         m_state.length = 0.0;
         m_previewing = false;
+        if (reason != play_control::stop_reason_starting_another && readSettings().lyricsAutoSwitch) {
+            setLowerRightView(LowerRightView::trackDetails, false);
+        }
         requestRefresh();
     }
     void on_playback_seek(double time) override {
@@ -333,6 +373,52 @@ private:
     }
 
     [[nodiscard]] float dpiScale() const noexcept { return m_dpi / 96.0F; }
+
+    [[nodiscard]] RECT lowerRightPixels(HWND wnd) const {
+        const auto rect = calculateLayout(wnd).lowerRight;
+        const auto scale = dpiScale();
+        return {static_cast<LONG>(std::lround(rect.left * scale)),
+            static_cast<LONG>(std::lround(rect.top * scale)),
+            static_cast<LONG>(std::lround(rect.right * scale)),
+            static_cast<LONG>(std::lround(rect.bottom * scale))};
+    }
+
+    void initializeLowerRightView() {
+        const auto settings = readSettings();
+        m_autoSwitchEnabled = settings.lyricsAutoSwitch;
+        m_lowerRightView = settings.lyricsAutoSwitch
+            ? (playback_control::get()->is_playing() ? LowerRightView::lyrics : LowerRightView::trackDetails)
+            : settings.lowerRightView;
+    }
+
+    void createLyricsHost(HWND wnd) {
+        (void)m_lyricsHost.create(wnd, get_host(), lowerRightPixels(wnd), kLyricsMiddleClickMessage);
+        syncLyricsHost(wnd);
+    }
+
+    void syncLyricsHost(HWND wnd) {
+        if (!wnd || !IsWindow(wnd)) return;
+        m_lyricsHost.resize(lowerRightPixels(wnd));
+        m_lyricsHost.setVisible(m_lowerRightView == LowerRightView::lyrics);
+        InvalidateRect(wnd, nullptr, FALSE);
+    }
+
+    void setLowerRightView(LowerRightView view, bool persist) {
+        if (m_lowerRightView == view && !persist) return;
+        m_lowerRightView = view;
+        if (persist) {
+            auto settings = readSettings();
+            settings.lowerRightView = view;
+            writeSettings(settings);
+        }
+        if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
+    }
+
+    void toggleLowerRightView() {
+        setLowerRightView(m_lowerRightView == LowerRightView::lyrics
+                ? LowerRightView::trackDetails : LowerRightView::lyrics,
+            !readSettings().lyricsAutoSwitch);
+    }
 
     void registerPlaybackCallback() {
         if (!m_callbackRegistered) {
@@ -488,7 +574,15 @@ private:
         if (top > 170.0F && width > 220.0F) {
             const auto panelWidth = std::min(width, std::clamp(width * 0.23F, 280.0F, 440.0F));
             const auto left = width - panelWidth;
-            const auto artworkSize = std::max(32.0F, std::min(panelWidth - 32.0F, top - 112.0F));
+            const auto storedPermille = m_dragHeaderPermille >= 0
+                ? m_dragHeaderPermille : readSettings().rightHeaderPermille;
+            const auto headerRatio = static_cast<float>(storedPermille) / 1000.0F;
+            const auto dividerY = std::clamp(top * headerRatio, 150.0F, std::max(151.0F, top - 80.0F));
+            layout.rightColumn = D2D1::RectF(left, 0.0F, width, top);
+            layout.rightDivider = D2D1::RectF(left, dividerY - 4.0F, width, dividerY + 4.0F);
+            layout.lowerRight = D2D1::RectF(left, dividerY + 4.0F, width, top);
+            const auto artworkSize = std::max(32.0F,
+                std::min(panelWidth - 32.0F, dividerY - 112.0F));
             const auto artLeft = left + (panelWidth - artworkSize) * 0.5F;
             layout.artwork = D2D1::RectF(artLeft, 16.0F, artLeft + artworkSize, 16.0F + artworkSize);
             constexpr float starSize = 20.0F;
@@ -503,7 +597,7 @@ private:
             layout.trackTitle = D2D1::RectF(left + 12.0F, starsTop + 25.0F, width - 12.0F, starsTop + 49.0F);
             layout.artistAlbum = D2D1::RectF(left + 12.0F, starsTop + 49.0F, width - 12.0F, starsTop + 69.0F);
             layout.codecBitrate = D2D1::RectF(left + 12.0F, starsTop + 69.0F, width - 12.0F, starsTop + 89.0F);
-            layout.header = D2D1::RectF(left, 0.0F, width, std::min(top, starsTop + 97.0F));
+            layout.header = D2D1::RectF(left, 0.0F, width, dividerY - 4.0F);
         }
         return layout;
     }
@@ -519,6 +613,10 @@ private:
         if (contains(layout.trackTitle, point)) return ControlId::trackTitle;
         if (contains(layout.artistAlbum, point)) return ControlId::artistAlbum;
         if (contains(layout.codecBitrate, point)) return ControlId::codecBitrate;
+        if (contains(layout.rightDivider, point)) return ControlId::rightDivider;
+        if (m_lowerRightView == LowerRightView::trackDetails && contains(layout.lowerRight, point)) {
+            return ControlId::trackDetails;
+        }
         if (contains(layout.seek, point)) return m_state.canSeek() ? ControlId::seek : ControlId::none;
         if (contains(layout.previous, point)) return ControlId::previous;
         if (contains(layout.playPause, point)) return ControlId::playPause;
@@ -545,6 +643,8 @@ private:
         case ControlId::rating3:
         case ControlId::rating4:
         case ControlId::rating5: return m_ratingAvailable && m_target.is_valid();
+        case ControlId::rightDivider:
+        case ControlId::trackDetails: return true;
         default: return false;
         }
     }
@@ -573,6 +673,20 @@ private:
             m_disabled.Get(), 1.0F);
 
         drawNowPlayingHeader(layout);
+        if (layout.rightDivider.right > layout.rightDivider.left) {
+            m_renderTarget->FillRectangle(layout.rightDivider,
+                m_active == ControlId::rightDivider || m_hover == ControlId::rightDivider
+                    ? m_accent.Get() : m_surface.Get());
+            m_renderTarget->DrawLine(D2D1::Point2F(layout.rightDivider.left, (layout.rightDivider.top + layout.rightDivider.bottom) * 0.5F),
+                D2D1::Point2F(layout.rightDivider.right, (layout.rightDivider.top + layout.rightDivider.bottom) * 0.5F),
+                m_disabled.Get(), 1.0F);
+        }
+        if (m_lowerRightView == LowerRightView::trackDetails) {
+            drawTrackDetails(layout);
+        } else if (!m_lyricsHost.available()) {
+            drawTextWith(m_lyricsHost.statusText(), layout.lowerRight, m_secondaryFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+        }
         drawSeek(layout);
         drawButton(layout.previous, ControlId::previous);
         drawButton(layout.playPause, ControlId::playPause);
@@ -699,6 +813,39 @@ private:
         }
     }
 
+    void drawTrackDetails(const Layout& layout) {
+        if (layout.lowerRight.right <= layout.lowerRight.left) return;
+        m_renderTarget->DrawLine(D2D1::Point2F(layout.lowerRight.left, layout.lowerRight.top),
+            D2D1::Point2F(layout.lowerRight.left, layout.lowerRight.bottom), m_disabled.Get(), 1.0F);
+        constexpr float rowHeight = 22.0F;
+        auto y = layout.lowerRight.top + 4.0F - m_detailScroll;
+        for (std::size_t index = 0; index < m_detailRows.size(); ++index) {
+            const auto& row = m_detailRows[index];
+            const auto rowRect = D2D1::RectF(layout.lowerRight.left + 8.0F, y,
+                layout.lowerRight.right - 8.0F, y + rowHeight);
+            if (rowRect.bottom >= layout.lowerRight.top && rowRect.top <= layout.lowerRight.bottom) {
+                if (index < m_detailSelected.size() && m_detailSelected[index]) {
+                    m_renderTarget->FillRectangle(rowRect, m_surface.Get());
+                }
+                if (row.heading) {
+                    drawTextWith(row.field, rowRect, m_titleFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
+                        m_accent.Get());
+                } else {
+                    const auto split = layout.lowerRight.left + (layout.lowerRight.right - layout.lowerRight.left) * 0.38F;
+                    drawTextWith(row.field, D2D1::RectF(rowRect.left, rowRect.top, split - 4.0F, rowRect.bottom),
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_disabled.Get());
+                    drawTextWith(row.value, D2D1::RectF(split, rowRect.top, rowRect.right, rowRect.bottom),
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+                }
+            }
+            y += rowHeight;
+        }
+        if (m_detailRows.empty()) {
+            drawTextWith(L"No track details", layout.lowerRight, m_secondaryFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+        }
+    }
+
     void drawTextWith(const std::wstring& text, D2D1_RECT_F rect, IDWriteTextFormat* format,
         DWRITE_TEXT_ALIGNMENT alignment, ID2D1Brush* brush) {
         if (!format) return;
@@ -724,6 +871,87 @@ private:
         return converted.empty() ? fallback : converted;
     }
 
+    [[nodiscard]] std::wstring formatTargetExpression(const char* expression) const {
+        titleformat_object::ptr script;
+        titleformat_compiler::get()->compile_safe(script, expression);
+        return formatTargetField(script, L"");
+    }
+
+    void addDetailSection(const wchar_t* name) {
+        m_detailRows.push_back({name, {}, true});
+    }
+
+    void addDetailRow(std::wstring field, std::wstring value) {
+        if (!value.empty() && value != L"?") m_detailRows.push_back({std::move(field), std::move(value), false});
+    }
+
+    void rebuildTrackDetails() {
+        m_detailRows.clear();
+        m_detailSelected.clear();
+        m_detailScroll = 0.0F;
+        if (m_target.is_empty()) return;
+
+        const auto container = m_target->get_info_ref();
+        if (container.is_empty()) return;
+        const auto& info = container->info();
+
+        addDetailSection(L"Metadata");
+        for (t_size index = 0; index < info.meta_get_count(); ++index) {
+            const auto name = utf8ToWide(info.meta_enum_name(index));
+            auto normalized = name;
+            std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                [](wchar_t value) { return static_cast<wchar_t>(std::towupper(value)); });
+            if (normalized.find(L"LYRICS") != std::wstring::npos
+                || normalized.rfind(L"MUSICBRAINZ", 0) == 0
+                || normalized.find(L"ARTWORK") != std::wstring::npos) continue;
+            std::wstring values;
+            for (t_size valueIndex = 0; valueIndex < info.meta_enum_value_count(index); ++valueIndex) {
+                if (!values.empty()) values += L"; ";
+                values += utf8ToWide(info.meta_enum_value(index, valueIndex));
+            }
+            addDetailRow(name, std::move(values));
+        }
+
+        addDetailSection(L"Location");
+        addDetailRow(L"File name", formatTargetExpression("%filename_ext%"));
+        addDetailRow(L"Folder", formatTargetExpression("$directory(%path%)"));
+        addDetailRow(L"Path", utf8ToWide(m_target->get_path()));
+        addDetailRow(L"Subsong", std::to_wstring(m_target->get_subsong_index()));
+        addDetailRow(L"File size", formatTargetExpression("%filesize_natural%"));
+        addDetailRow(L"Last modified", formatTargetExpression("%last_modified%"));
+
+        addDetailSection(L"Technical");
+        addDetailRow(L"Duration", formatPlaybackTime(info.get_length(), info.get_length() > 0.0));
+        for (t_size index = 0; index < info.info_get_count(); ++index) {
+            const auto name = utf8ToWide(info.info_enum_name(index));
+            auto normalized = name;
+            std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                [](wchar_t value) { return static_cast<wchar_t>(std::towupper(value)); });
+            if (normalized == L"MD5") continue;
+            addDetailRow(name, utf8ToWide(info.info_enum_value(index)));
+        }
+
+        addDetailSection(L"Playback Statistics");
+        const auto statisticsStart = m_detailRows.size();
+        addDetailRow(L"Rating", formatTargetExpression("[%rating%]"));
+        addDetailRow(L"Play count", formatTargetExpression("[%play_count%]"));
+        addDetailRow(L"First played", formatTargetExpression("[%first_played%]"));
+        addDetailRow(L"Last played", formatTargetExpression("[%last_played%]"));
+        addDetailRow(L"Added", formatTargetExpression("[%added%]"));
+        if (m_detailRows.size() == statisticsStart && !m_ratingAvailable) {
+            addDetailRow(L"Status", L"Playback Statistics unavailable");
+        }
+
+        if (readSettings().showReplayGain) {
+            addDetailSection(L"ReplayGain");
+            addDetailRow(L"Track gain", formatTargetExpression("[%replaygain_track_gain%]"));
+            addDetailRow(L"Track peak", formatTargetExpression("[%replaygain_track_peak%]"));
+            addDetailRow(L"Album gain", formatTargetExpression("[%replaygain_album_gain%]"));
+            addDetailRow(L"Album peak", formatTargetExpression("[%replaygain_album_peak%]"));
+        }
+        m_detailSelected.resize(m_detailRows.size());
+    }
+
     void refreshNowPlayingTarget() {
         metadb_handle_ptr target;
         if (m_state.playing) {
@@ -737,6 +965,7 @@ private:
             startArtworkWork(m_target);
         }
         refreshNowPlayingText(changed);
+        if (changed) rebuildTrackDetails();
     }
 
     void refreshNowPlayingText(bool targetChanged) {
@@ -746,6 +975,7 @@ private:
             m_codecBitrate = L"Unknown codec | Unknown bitrate";
             m_rating = 0;
             m_ratingAvailable = false;
+            rebuildTrackDetails();
             return;
         }
         m_trackTitle = formatTargetField(m_titleScript, L"Unknown title");
@@ -759,6 +989,7 @@ private:
         wchar_t* end{};
         m_rating = normalizeRating(std::wcstod(ratingText.c_str(), &end));
         if (targetChanged) m_ratingAvailable = haveAllRatingCommands(m_target);
+        rebuildTrackDetails();
     }
 
     [[nodiscard]] static std::string appendMenuNodeName(std::string path, contextmenu_node* node) {
@@ -869,6 +1100,8 @@ private:
         m_artworkBitmap.Reset();
         createArtworkBitmap();
         updateTooltip(m_hover);
+        rebuildTrackDetails();
+        if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
         invalidate();
     }
 
@@ -1023,6 +1256,105 @@ private:
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
+    [[nodiscard]] std::optional<std::size_t> detailRowAt(HWND wnd, D2D1_POINT_2F point) const {
+        const auto layout = calculateLayout(wnd);
+        if (m_lowerRightView != LowerRightView::trackDetails || !contains(layout.lowerRight, point)) return {};
+        const auto relative = point.y - layout.lowerRight.top - 4.0F + m_detailScroll;
+        if (relative < 0.0F) return {};
+        const auto index = static_cast<std::size_t>(relative / 22.0F);
+        if (index >= m_detailRows.size() || m_detailRows[index].heading) return {};
+        return index;
+    }
+
+    void selectDetailRow(std::size_t index) {
+        if (index >= m_detailRows.size() || m_detailRows[index].heading) return;
+        if (m_detailSelected.size() != m_detailRows.size()) m_detailSelected.resize(m_detailRows.size());
+        const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (shift && m_detailAnchor < m_detailRows.size()) {
+            if (!ctrl) std::fill(m_detailSelected.begin(), m_detailSelected.end(), false);
+            const auto first = std::min(index, m_detailAnchor);
+            const auto last = std::max(index, m_detailAnchor);
+            for (auto current = first; current <= last; ++current) {
+                if (!m_detailRows[current].heading) m_detailSelected[current] = true;
+            }
+        } else if (ctrl) {
+            m_detailSelected[index] = !m_detailSelected[index];
+            m_detailAnchor = index;
+        } else {
+            std::fill(m_detailSelected.begin(), m_detailSelected.end(), false);
+            m_detailSelected[index] = true;
+            m_detailAnchor = index;
+        }
+        invalidate();
+    }
+
+    [[nodiscard]] std::wstring selectedDetailsText(bool valuesOnly = false) const {
+        std::wstring text;
+        for (std::size_t index = 0; index < m_detailRows.size(); ++index) {
+            if (index >= m_detailSelected.size() || !m_detailSelected[index] || m_detailRows[index].heading) continue;
+            if (!text.empty()) text += L"\r\n";
+            if (!valuesOnly) text += m_detailRows[index].field + L": ";
+            text += m_detailRows[index].value;
+        }
+        return text;
+    }
+
+    static void copyToClipboard(HWND owner, const std::wstring& text) {
+        if (text.empty() || !OpenClipboard(owner)) return;
+        EmptyClipboard();
+        const auto bytes = (text.size() + 1) * sizeof(wchar_t);
+        if (const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+            if (auto* destination = GlobalLock(memory)) {
+                std::memcpy(destination, text.c_str(), bytes);
+                GlobalUnlock(memory);
+                if (!SetClipboardData(CF_UNICODETEXT, memory)) GlobalFree(memory);
+            } else {
+                GlobalFree(memory);
+            }
+        }
+        CloseClipboard();
+    }
+
+    void showTrackDetailsMenu(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
+        if (m_lowerRightView != LowerRightView::trackDetails
+            || !contains(calculateLayout(wnd).lowerRight, point)) return;
+        if (const auto row = detailRowAt(wnd, point); row &&
+            (*row >= m_detailSelected.size() || !m_detailSelected[*row])) {
+            std::fill(m_detailSelected.begin(), m_detailSelected.end(), false);
+            m_detailSelected[*row] = true;
+            m_detailAnchor = *row;
+        }
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        AppendMenuW(menu, MF_STRING, 1, L"Copy value");
+        AppendMenuW(menu, MF_STRING, 2, L"Copy row");
+        AppendMenuW(menu, MF_STRING, 3, L"Select all");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 4, L"Properties");
+        ClientToScreen(wnd, &clientPoint);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            clientPoint.x, clientPoint.y, 0, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command == 1) copyToClipboard(wnd, selectedDetailsText(true));
+        else if (command == 2) copyToClipboard(wnd, selectedDetailsText(false));
+        else if (command == 3) {
+            m_detailSelected.resize(m_detailRows.size());
+            for (std::size_t index = 0; index < m_detailRows.size(); ++index) {
+                m_detailSelected[index] = !m_detailRows[index].heading;
+            }
+            invalidate();
+        } else if (command == 4 && m_target.is_valid()) {
+            try {
+                const auto manager = createRatingMenu(m_target);
+                if (manager.is_valid()) {
+                    if (auto* properties = findContextCommand(manager->get_root(), "Properties")) properties->execute();
+                }
+            } catch (...) {
+            }
+        }
+    }
+
     void onMouseMove(HWND wnd, LPARAM lp) {
         if (!m_trackingMouse) {
             TRACKMOUSEEVENT event{sizeof(event), TME_LEAVE, wnd, 0};
@@ -1036,6 +1368,8 @@ private:
             updateSeekPreview(wnd, point.x);
         } else if (m_active == ControlId::volume && !m_state.customVolume) {
             updateVolume(wnd, point.x);
+        } else if (m_active == ControlId::rightDivider) {
+            updateRightDivider(wnd, point.y);
         }
     }
 
@@ -1043,6 +1377,11 @@ private:
         SetFocus(wnd);
         const auto point = pointFromLParam(lp, dpiScale());
         const auto hit = hitTest(wnd, point);
+        if (hit == ControlId::trackDetails) {
+            if (const auto row = detailRowAt(wnd, point)) selectDetailRow(*row);
+            m_focus = ControlId::trackDetails;
+            return;
+        }
         if (!isEnabled(hit)) {
             return;
         }
@@ -1054,6 +1393,9 @@ private:
             updateSeekPreview(wnd, point.x);
         } else if (hit == ControlId::volume) {
             updateVolume(wnd, point.x);
+        } else if (hit == ControlId::rightDivider) {
+            m_dragHeaderPermille = static_cast<int>(readSettings().rightHeaderPermille);
+            updateRightDivider(wnd, point.y);
         }
         invalidate();
     }
@@ -1069,6 +1411,9 @@ private:
             ? committedSeekTarget(m_previewing, hit == ControlId::seek, m_state.canSeek(),
                   m_previewPosition, m_state.length)
             : std::nullopt;
+        const auto committedHeaderPermille = active == ControlId::rightDivider
+            ? std::clamp(m_dragHeaderPermille, 250, 800)
+            : -1;
         m_active = ControlId::none;
         if (active == ControlId::seek) {
             m_previewing = false;
@@ -1080,6 +1425,12 @@ private:
             if (seekTarget) {
                 playback_control::get()->playback_seek(*seekTarget);
             }
+        } else if (active == ControlId::rightDivider) {
+            auto settings = readSettings();
+            settings.rightHeaderPermille = committedHeaderPermille;
+            m_dragHeaderPermille = -1;
+            writeSettings(settings);
+            syncLyricsHost(wnd);
         } else if (active != ControlId::volume && active == hit) {
             activate(active);
         }
@@ -1098,6 +1449,13 @@ private:
             } else {
                 playback_control::get()->volume_down();
             }
+        } else if (m_lowerRightView == LowerRightView::trackDetails && contains(layout.lowerRight, point)) {
+            const auto contentHeight = static_cast<float>(m_detailRows.size()) * 22.0F + 8.0F;
+            const auto viewportHeight = layout.lowerRight.bottom - layout.lowerRight.top;
+            const auto maximum = std::max(0.0F, contentHeight - viewportHeight);
+            m_detailScroll = std::clamp(m_detailScroll
+                    + (GET_WHEEL_DELTA_WPARAM(wp) > 0 ? -66.0F : 66.0F), 0.0F, maximum);
+            invalidate();
         }
     }
 
@@ -1116,6 +1474,24 @@ private:
         if (key == VK_TAB) {
             uie::window::g_on_tab(wnd);
             return true;
+        }
+        if (m_focus == ControlId::trackDetails) {
+            if (key == 'C' && (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+                copyToClipboard(wnd, selectedDetailsText(false));
+                return true;
+            }
+            if (key == VK_PRIOR || key == VK_NEXT || key == VK_HOME || key == VK_END) {
+                const auto layout = calculateLayout(wnd);
+                const auto contentHeight = static_cast<float>(m_detailRows.size()) * 22.0F + 8.0F;
+                const auto viewportHeight = layout.lowerRight.bottom - layout.lowerRight.top;
+                const auto maximum = std::max(0.0F, contentHeight - viewportHeight);
+                if (key == VK_HOME) m_detailScroll = 0.0F;
+                else if (key == VK_END) m_detailScroll = maximum;
+                else m_detailScroll = std::clamp(m_detailScroll
+                        + (key == VK_PRIOR ? -viewportHeight : viewportHeight), 0.0F, maximum);
+                invalidate();
+                return true;
+            }
         }
         if (key == VK_LEFT || key == VK_RIGHT) {
             auto current = std::find(buttons.begin(), buttons.begin() + static_cast<std::ptrdiff_t>(buttonCount), m_focus);
@@ -1170,9 +1546,17 @@ private:
         playback_control::get()->set_volume(volumeDbFromFraction(fractionAtX(x, layout.volume)));
     }
 
+    void updateRightDivider(HWND wnd, float y) {
+        const auto top = calculateLayout(wnd).surfaceTop;
+        if (top <= 0.0F) return;
+        m_dragHeaderPermille = std::clamp(static_cast<int>(std::lround(y / top * 1000.0F)), 250, 800);
+        syncLyricsHost(wnd);
+    }
+
     void cancelInteraction() {
         m_active = ControlId::none;
         m_previewing = false;
+        m_dragHeaderPermille = -1;
         if (GetCapture() == get_wnd()) {
             ReleaseCapture();
         }
@@ -1254,6 +1638,14 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
+        if (settings.lyricsAutoSwitch != m_autoSwitchEnabled) {
+            m_autoSwitchEnabled = settings.lyricsAutoSwitch;
+            m_lowerRightView = settings.lyricsAutoSwitch
+                ? (playback_control::get()->is_playing() ? LowerRightView::lyrics : LowerRightView::trackDetails)
+                : settings.lowerRightView;
+        } else if (!settings.lyricsAutoSwitch) {
+            m_lowerRightView = settings.lowerRightView;
+        }
         SendMessage(m_tooltip, TTM_ACTIVATE, settings.showTooltips ? TRUE : FALSE, 0);
         if (!settings.showSettingsButton) {
             if (m_hover == ControlId::settings) m_hover = ControlId::none;
@@ -1277,6 +1669,14 @@ private:
     bool m_callbackRegistered{};
     bool m_trackingMouse{};
     bool m_previewing{};
+    LowerRightView m_lowerRightView{LowerRightView::lyrics};
+    bool m_autoSwitchEnabled{true};
+    int m_dragHeaderPermille{-1};
+    float m_detailScroll{};
+    std::vector<DetailRow> m_detailRows;
+    std::vector<bool> m_detailSelected;
+    std::size_t m_detailAnchor{static_cast<std::size_t>(-1)};
+    LyricsHost m_lyricsHost;
     double m_previewPosition{};
     float m_dpi{96.0F};
     ControlId m_hover{ControlId::none};

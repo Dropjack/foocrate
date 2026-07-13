@@ -20,6 +20,9 @@ enum ControlId : int {
     timeMode = 1001,
     showTooltips = 1002,
     showSettingsButton = 1003,
+    lyricsAutoSwitch = 1004,
+    lowerRightView = 1005,
+    showReplayGain = 1006,
     dependencyStatusBase = 1100,
     dependencyButtonBase = 1200,
 };
@@ -152,6 +155,17 @@ private:
         m_settingsButton = addControl(L"BUTTON", L"Show settings button",
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showSettingsButton);
 
+        m_lyricsGroup = addControl(L"BUTTON", L"Lyrics and track details", BS_GROUPBOX, 0);
+        m_lyricsAutoSwitch = addControl(L"BUTTON", L"Automatically show lyrics while playing",
+            BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::lyricsAutoSwitch);
+        m_lowerViewLabel = addControl(L"STATIC", L"Manual/default view:", SS_LEFT, 0);
+        m_lowerRightView = addControl(L"COMBOBOX", nullptr,
+            CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::lowerRightView);
+        SendMessageW(m_lowerRightView, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Lyrics"));
+        SendMessageW(m_lowerRightView, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Track details"));
+        m_showReplayGain = addControl(L"BUTTON", L"Show ReplayGain section in track details",
+            BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showReplayGain);
+
         m_dependenciesGroup = addControl(L"BUTTON", L"Dependencies (read-only)", BS_GROUPBOX, 0);
         for (std::size_t index = 0; index < m_dependencies.size(); ++index) {
             const auto& dependency = m_dependencies[index];
@@ -192,15 +206,21 @@ private:
         MoveWindow(m_tooltips, margin24, scaled(66), scaled(250), scaled(24), TRUE);
         MoveWindow(m_settingsButton, margin24, scaled(98), scaled(250), scaled(24), TRUE);
 
-        MoveWindow(m_dependenciesGroup, margin8, scaled(148), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
+        MoveWindow(m_lyricsGroup, margin8, scaled(148), width > margin16 ? width - margin16 : 1, scaled(132), TRUE);
+        MoveWindow(m_lyricsAutoSwitch, margin24, scaled(174), scaled(330), scaled(24), TRUE);
+        MoveWindow(m_lowerViewLabel, margin24, scaled(208), scaled(130), scaled(22), TRUE);
+        MoveWindow(m_lowerRightView, scaled(160), scaled(204), scaled(170), scaled(200), TRUE);
+        MoveWindow(m_showReplayGain, margin24, scaled(240), scaled(340), scaled(24), TRUE);
+
+        MoveWindow(m_dependenciesGroup, margin8, scaled(290), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
         for (std::size_t index = 0; index < m_dependencyLabels.size(); ++index) {
-            const auto y = scaled(176 + static_cast<int>(index) * 38);
+            const auto y = scaled(318 + static_cast<int>(index) * 38);
             MoveWindow(m_dependencyLabels[index], margin24, y + scaled(5),
                 contentWidth > scaled(190) ? contentWidth - scaled(190) : 1, scaled(22), TRUE);
             MoveWindow(m_dependencyButtons[index], width > scaled(174) ? width - scaled(166) : margin8,
                 y, scaled(142), scaled(28), TRUE);
         }
-        MoveWindow(m_dependencyNote, margin24, scaled(292),
+        MoveWindow(m_dependencyNote, margin24, scaled(434),
             contentWidth > margin16 ? contentWidth - margin16 : 1, scaled(34), TRUE);
     }
 
@@ -213,7 +233,10 @@ private:
             return;
         }
         if ((id == ControlId::timeMode && notification == CBN_SELCHANGE)
-            || ((id == ControlId::showTooltips || id == ControlId::showSettingsButton) && notification == BN_CLICKED)) {
+            || (id == ControlId::lowerRightView && notification == CBN_SELCHANGE)
+            || ((id == ControlId::showTooltips || id == ControlId::showSettingsButton
+                    || id == ControlId::lyricsAutoSwitch || id == ControlId::showReplayGain)
+                && notification == BN_CLICKED)) {
             notifyChanged();
         }
     }
@@ -224,6 +247,11 @@ private:
         values.timeDisplay = selection == 1 ? TimeDisplayMode::remaining : TimeDisplayMode::total;
         values.showTooltips = SendMessageW(m_tooltips, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.showSettingsButton = SendMessageW(m_settingsButton, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        values.lyricsAutoSwitch = SendMessageW(m_lyricsAutoSwitch, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        values.lowerRightView = SendMessageW(m_lowerRightView, CB_GETCURSEL, 0, 0) == 1
+            ? LowerRightView::trackDetails : LowerRightView::lyrics;
+        values.showReplayGain = SendMessageW(m_showReplayGain, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        values.rightHeaderPermille = m_draft.rightHeaderPermille;
         return values;
     }
 
@@ -233,6 +261,12 @@ private:
         SendMessageW(m_tooltips, BM_SETCHECK, m_draft.showTooltips ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(m_settingsButton, BM_SETCHECK,
             m_draft.showSettingsButton ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(m_lyricsAutoSwitch, BM_SETCHECK,
+            m_draft.lyricsAutoSwitch ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(m_lowerRightView, CB_SETCURSEL,
+            m_draft.lowerRightView == LowerRightView::trackDetails ? 1 : 0, 0);
+        SendMessageW(m_showReplayGain, BM_SETCHECK,
+            m_draft.showReplayGain ? BST_CHECKED : BST_UNCHECKED, 0);
     }
 
     void notifyChanged() const {
@@ -255,6 +289,11 @@ private:
     HWND m_timeMode{};
     HWND m_tooltips{};
     HWND m_settingsButton{};
+    HWND m_lyricsGroup{};
+    HWND m_lyricsAutoSwitch{};
+    HWND m_lowerViewLabel{};
+    HWND m_lowerRightView{};
+    HWND m_showReplayGain{};
     HWND m_dependenciesGroup{};
     std::vector<HWND> m_dependencyLabels;
     std::vector<HWND> m_dependencyButtons;

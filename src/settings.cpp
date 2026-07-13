@@ -21,11 +21,23 @@ constexpr GUID kShowTooltipsGuid{
     0x39608393, 0xf962, 0x46b0, {0x86, 0xbf, 0x8c, 0xe9, 0x2e, 0x46, 0xbc, 0xd1}};
 constexpr GUID kShowSettingsButtonGuid{
     0x70e58186, 0xa678, 0x4b86, {0xa5, 0x70, 0x1e, 0x7f, 0x2f, 0x58, 0x39, 0x84}};
+constexpr GUID kLyricsAutoSwitchGuid{
+    0xeaf337c3, 0x7b42, 0x40ba, {0xb8, 0x49, 0x95, 0x31, 0xb6, 0xe8, 0xf5, 0xc1}};
+constexpr GUID kLowerRightViewGuid{
+    0x477edb2d, 0x0155, 0x43bc, {0xb0, 0x57, 0x45, 0x98, 0xd7, 0x21, 0xc3, 0x54}};
+constexpr GUID kShowReplayGainGuid{
+    0x26b186af, 0x9781, 0x45c0, {0x93, 0x91, 0x95, 0x32, 0xa4, 0x0c, 0x86, 0x1d}};
+constexpr GUID kRightHeaderPermilleGuid{
+    0x6434bf69, 0x3e63, 0x4f17, {0x86, 0x44, 0xa1, 0xd1, 0xe3, 0x20, 0xf1, 0x4c}};
 
 cfg_int g_configVersion(kConfigVersionGuid, 0);
 cfg_int g_timeDisplay(kTimeDisplayGuid, static_cast<std::int64_t>(TimeDisplayMode::total));
 cfg_bool g_showTooltips(kShowTooltipsGuid, true);
 cfg_bool g_showSettingsButton(kShowSettingsButtonGuid, true);
+cfg_bool g_lyricsAutoSwitch(kLyricsAutoSwitchGuid, true);
+cfg_int g_lowerRightView(kLowerRightViewGuid, static_cast<std::int64_t>(LowerRightView::lyrics));
+cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
+cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
@@ -61,13 +73,18 @@ void notifySettingsWindows() {
 } // namespace
 
 SettingsValues readSettings() {
-    const StoredSettings stored{
-        g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(), g_showSettingsButton.get()};
+    const StoredSettings stored{g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(),
+        g_showSettingsButton.get(), g_lyricsAutoSwitch.get(), g_lowerRightView.get(),
+        g_showReplayGain.get(), g_rightHeaderPermille.get()};
     const auto migration = migrateSettings(stored);
     if (migration.rewriteKnownValues) {
         g_timeDisplay = static_cast<t_int32>(migration.values.timeDisplay);
         g_showTooltips = migration.values.showTooltips;
         g_showSettingsButton = migration.values.showSettingsButton;
+        g_lyricsAutoSwitch = migration.values.lyricsAutoSwitch;
+        g_lowerRightView = static_cast<t_int32>(migration.values.lowerRightView);
+        g_showReplayGain = migration.values.showReplayGain;
+        g_rightHeaderPermille = static_cast<t_int32>(migration.values.rightHeaderPermille);
         g_configVersion = static_cast<t_int32>(migration.versionToKeep);
     }
     return migration.values;
@@ -75,10 +92,16 @@ SettingsValues readSettings() {
 
 void writeSettings(const SettingsValues& values) {
     const auto normalized = migrateSettings({kCurrentSettingsVersion,
-        static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton});
+        static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
+        values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView),
+        values.showReplayGain, values.rightHeaderPermille});
     g_timeDisplay = static_cast<t_int32>(normalized.values.timeDisplay);
     g_showTooltips = normalized.values.showTooltips;
     g_showSettingsButton = normalized.values.showSettingsButton;
+    g_lyricsAutoSwitch = normalized.values.lyricsAutoSwitch;
+    g_lowerRightView = static_cast<t_int32>(normalized.values.lowerRightView);
+    g_showReplayGain = normalized.values.showReplayGain;
+    g_rightHeaderPermille = static_cast<t_int32>(normalized.values.rightHeaderPermille);
     g_configVersion = static_cast<t_int32>(std::max<std::int64_t>(g_configVersion.get(), kCurrentSettingsVersion));
     notifySettingsWindows();
 }
