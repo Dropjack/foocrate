@@ -78,12 +78,38 @@
 - Columns UI：用户确认安装 3.5.0 stable；
 - 两个实例中的 `foo_ui_columns.dll` SHA-256 相同：`CE0AC312C25F1685C0571F567D5D56E961957DF7DA4333B349B62B1DB7C5D368`。
 
-截至最后核对，两个实例的 `profile/user-components-x64` 中只发现 `foo_ui_columns`。下列已经批准的运行依赖尚未部署到这两个实例：
+两个实例的 `profile/user-components-x64` 中均已存在以下相同依赖：
 
-- ESLyric 1.0.6.7；
-- Playback Statistics 3.1.10。
+| 组件 | 已安装版本 | dev/test DLL SHA-256 |
+| --- | --- | --- |
+| Columns UI | 3.5.0 stable | `CE0AC312C25F1685C0571F567D5D56E961957DF7DA4333B349B62B1DB7C5D368` |
+| ESLyric x64 | 1.0.6.7 | `E03FCDC635787610AFFF2406F8B8F14E2BF5BA3002C222DBB0A5C7A27AF07285` |
+| Playback Statistics x64 | 3.1.10 | `4674FC4013B45DB3A004F71A61E449ED08222B46223269DFA71F847934D59F19` |
 
-安装这些依赖是后续环境准备步骤，不应在产品规格任务中悄悄部署。安装时要分别验证开发和测试实例，记录组件版本、来源和文件哈希；不能从只读参考目录直接复制组件，也不能把闭源组件提交进仓库。
+ESLyric 的版本来自 DLL 版本资源；Playback Statistics DLL 没有 Windows 文件版本资源，版本由二进制内嵌组件元数据 `3.1.10` 与 foobar2000 Components 页面共同核对。组件二进制只存在于已忽略的 `.local`，不能从只读参考目录复制，也不能提交进仓库。
+
+### 4.1 第三方组件更新边界
+
+- Refrain 只维护兼容性，不成为 ESLyric 或 Playback Statistics 的下载器、镜像或自动更新器。
+- Playback Statistics 托管于 foobar2000 官方组件仓库，可优先使用 foobar2000 的 `Help > Check for updated components` 或 Preferences 的 Components 页面检查更新。
+- ESLyric 由其 GitHub Releases 独立发布，不在 foobar2000 官方组件仓库时由用户从作者发布页取得 `.fb2k-component`，通过 Components 页面安装更新。
+- 用户不必更新这些组件，也不必在它们每次发布时重新测试或重新打包 Refrain；一个验证可用的版本组合可以长期冻结使用。
+- 用户自行更新后，Refrain 以所需能力是否仍存在为运行判断，不因版本号高于基线就拒绝启动。缺少歌词面板、评分命令或 `%rating%` 行为实际改变时，对应功能进入不兼容状态并提示，其他功能继续使用。
+- 只有更新后发生真实故障，或者准备发布新的 Refrain 版本时，维护流程才使用 `foobar-dev` 和 `foobar-test` 复现、修复与回归。日常用户更新不要求保留或运行这两个实例。
+- Refrain 的正式版本说明记录发布时实际测试的基线组合。这是可复现证据，不是要求用户永远停留在该版本，也不是要求项目追随每一次上游发布。
+
+### 4.2 开发目录不是运行依赖
+
+正式 `.fb2k-component` 安装到 C 盘日常 foobar2000 后，运行只需要该实例中的 Refrain、Columns UI 及用户选择启用的外部组件。`D:\Dev\Refrain`、源代码、SDK、构建目录、`foobar-dev` 和 `foobar-test` 都不是运行时依赖。
+
+项目完成后可以把源代码推送到 Git 远端或制作源码归档，再删除本机 D 盘工作副本；已安装的 Refrain 仍可继续使用。只有将来需要修改、重新构建或调查兼容故障时，才重新克隆/恢复项目并建立隔离实例。
+
+### 4.3 第三方再分发状态
+
+- Columns UI 官方组件页将项目标为开源，但 Refrain 仍不重复打包其运行时二进制，用户从官方渠道独立安装。
+- Playback Statistics 官方组件页提供下载，但未发现授予 Refrain 再分发其二进制的明确许可。
+- ESLyric 作者 release 仓库未列出明确的二进制再分发许可。
+- 因此 Refrain 当前对三者均采用“记录权威来源、检测安装状态、用户独立安装”的方案。未来若要合包，必须先取得并保存明确授权，不能把公开下载误认为再分发许可。
 
 ## 5. 测试期间如何避免影响日常听歌环境
 

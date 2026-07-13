@@ -1,6 +1,6 @@
 # 001 Foobox Basic 交互取证
 
-- 状态：规格核对中
+- 状态：已验收
 - TODO 步骤：`01 完成 Foobox Basic 交互取证`
 - Fork 提交标题：`完成 Foobox Basic 交互取证`
 - 前置提交：`5a0836e 整理项目规格与开发路线`
@@ -342,7 +342,7 @@ Basic 布局没有注册 Biography、Visualization 或 Video 面板。`base.js` 
 - 产物：最终总规格、任务验证记录和提交清单。
 - 用户检查方法：核对规格第 3、4、6、11 节及本任务结论。
 - 通过标准：用户明确验收步骤 01，并批准产品总规格进入下一阶段。
-- 状态：进行中
+- 状态：已完成
 
 ## 验证记录
 
@@ -355,6 +355,7 @@ Basic 布局没有注册 Biography、Visualization 或 Video 面板。`base.js` 
 - 2026-07-13：用户主动将范围收窄为 Album-only 的 `Album Cover Browser`，只保留媒体库/播放列表来源选择；批准其余新增结构名称。
 - 2026-07-13：右上改名为 `Now Playing Header`，固定同时显示封面、评分、歌名、`Artist | Album`、`Codec | Bitrate`；详细愿景进入独立模块规格。
 - 2026-07-13：建立 `Album Cover Browser` 与 `Now Playing Header` 两份模块规格；完成全仓库旧命名、旧字段、路线编号、本地链接和文本格式一致性检查。
+- 2026-07-13：用户明确回复“验收通过”，步骤 01 与产品总规格获准进入下一阶段；对应提交为 `9a32c60 完成 Foobox Basic 交互取证`。
 - 尚未启动参考程序，尚未写入或部署到任何 foobar2000 实例。
 
 ## 用户检查点
@@ -365,4 +366,4 @@ Basic 布局没有注册 Biography、Visualization 或 Video 面板。`base.js` 
 - [x] 文件事实、实际观察和产品决定没有混淆。
 - [x] 分批问题均已回答或明确分派给后续模块。
 - [x] 产品规格、模块规格和 TODO 已同步且无冲突。
-- [ ] 用户明确验收并同意提交 `完成 Foobox Basic 交互取证`。
+- [x] 用户明确验收并已提交 `完成 Foobox Basic 交互取证`。
