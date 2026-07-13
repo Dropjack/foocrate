@@ -1,5 +1,26 @@
-# 自动启动入口
+# Mandatory startup protocol
 
-开始任何工作前，必须完整阅读 `docs/PROJECT_RULES.md`。该文档是本项目唯一的详细项目章程；本文件只作为支持 `AGENTS.md` 自动发现的工具入口，避免把自动入口与项目章程混为一谈。
+This file is intentionally written in ASCII so that its instructions remain readable before PowerShell UTF-8 handling has been initialized.
 
-随后完整阅读 `tasks/README.md` 和其中标出的当前任务，再执行任何检查或修改。
+Before any inspection, inference, or modification in this repository:
+
+1. In Windows PowerShell, initialize UTF-8 output before displaying any repository text:
+
+   ```powershell
+   [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+   $OutputEncoding = [Console]::OutputEncoding
+   ```
+
+2. Never use PowerShell `Get-Content` without an explicit `-Encoding utf8` argument for repository text. For the mandatory startup documents, read raw bytes and decode them with strict UTF-8 error detection:
+
+   ```powershell
+   $Utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
+   $Text = $Utf8Strict.GetString([System.IO.File]::ReadAllBytes($Path))
+   ```
+
+3. Fully read `docs/PROJECT_RULES.md`, then `tasks/README.md`, then the current task named by that index.
+
+4. If any output is mojibake, discard it. Fix the decoding or display method and reread the original bytes before drawing conclusions or taking action. Never rewrite a file merely because the terminal displayed it incorrectly.
+
+`docs/PROJECT_RULES.md` is the sole detailed project charter. This file is only the automatically discovered, encoding-safe entry point.
