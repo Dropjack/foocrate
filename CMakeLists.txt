@@ -26,6 +26,9 @@ add_library(foo_refrain MODULE
   src/component.cpp
   src/component_identity.h
   src/foo_refrain.rc
+  src/playback_panel.cpp
+  src/playback_panel.h
+  src/playback_state.h
 )
 
 set_target_properties(foo_refrain PROPERTIES
@@ -50,6 +53,10 @@ target_link_libraries(foo_refrain PRIVATE
   refrain_shared
   refrain_columns_ui_sdk
   refrain_libppui_sdk
+  comctl32
+  d2d1
+  dwrite
+  shlwapi
   winmm
 )
 
@@ -64,6 +71,17 @@ if(BUILD_TESTING)
   )
   target_compile_options(refrain_identity_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME component_identity COMMAND refrain_identity_tests)
+
+  add_executable(refrain_playback_state_tests tests/playback_state_tests.cpp)
+  target_include_directories(refrain_playback_state_tests PRIVATE src)
+  target_compile_definitions(refrain_playback_state_tests PRIVATE
+    _UNICODE
+    UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+  )
+  target_compile_options(refrain_playback_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_state COMMAND refrain_playback_state_tests)
 endif()
 
 find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)

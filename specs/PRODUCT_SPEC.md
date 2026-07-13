@@ -5,7 +5,7 @@
 - 最后更新：2026-07-13
 - 参考：Foobox 8 Basic、任务 001 中的五张原始截图、foobar2000 2.25.10
 - 作用：这是 Refrain 产品范围和用户可见行为的唯一总规格；具体功能实现前仍需建立对应模块规格和中文程序逻辑
-- 模块规格：[`Album Cover Browser`](modules/ALBUM_COVER_BROWSER.md)、[`Now Playing Header`](modules/NOW_PLAYING_HEADER.md)
+- 模块规格：[`Playback Shell`](modules/PLAYBACK_SHELL.md)、[`Album Cover Browser`](modules/ALBUM_COVER_BROWSER.md)、[`Now Playing Header`](modules/NOW_PLAYING_HEADER.md)
 
 ## 1. 产品定义
 

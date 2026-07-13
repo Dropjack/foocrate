@@ -188,12 +188,18 @@ target_link_libraries(refrain_shared PRIVATE
   dbghelp
 )
 
-add_library(refrain_columns_ui_sdk INTERFACE)
-target_include_directories(refrain_columns_ui_sdk SYSTEM INTERFACE
+add_library(refrain_columns_ui_sdk STATIC
+  "${REFRAIN_COLUMNS_UI_SDK_DIR}/container_window_v3.cpp"
+  "${REFRAIN_COLUMNS_UI_SDK_DIR}/ui_extension.cpp"
+  "${REFRAIN_COLUMNS_UI_SDK_DIR}/win32_helpers.cpp"
+)
+target_include_directories(refrain_columns_ui_sdk SYSTEM PUBLIC
   "${REFRAIN_THIRD_PARTY_DIR}"
   "${REFRAIN_COLUMNS_UI_SDK_DIR}"
 )
-target_link_libraries(refrain_columns_ui_sdk INTERFACE refrain_foobar2000_sdk refrain_pfc)
+target_compile_definitions(refrain_columns_ui_sdk PUBLIC _UNICODE UNICODE NOMINMAX)
+target_compile_options(refrain_columns_ui_sdk PRIVATE /W3 /permissive- /Zc:__cplusplus)
+target_link_libraries(refrain_columns_ui_sdk PUBLIC refrain_foobar2000_sdk refrain_pfc refrain_shared shlwapi)
 
 # libPPUI requires WTL only when its concrete controls are built. Step 03 establishes
 # the stable include target; later UI code can opt into concrete sources as needed.

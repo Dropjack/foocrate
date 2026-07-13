@@ -1,4 +1,5 @@
 #include "component_identity.h"
+#include "playback_panel.h"
 
 #include <windows.h>
 #include <mmsystem.h>
@@ -16,6 +17,6 @@ DECLARE_COMPONENT_VERSION(
     "Refrain",
     "0.1.0",
     "Native integrated Columns UI component for foobar2000.\n"
-    "Step 03 provides component metadata and build infrastructure only; no UI panel is registered yet.");
+    "Step 04 provides the native Refrain panel and synchronized playback controls.");
 
 VALIDATE_COMPONENT_FILENAME("foo_refrain.dll");
