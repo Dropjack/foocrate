@@ -1,0 +1,41 @@
+# 本地 foobar2000 开发/测试实例及运行数据
+.local/
+
+# Visual Studio、CMake 和常见构建产物
+.vs/
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.sln.cache
+*.VC.db
+*.VC.opendb
+*.user
+*.suo
+*.tlog
+*.obj
+*.pch
+*.pdb
+*.ipdb
+*.iobj
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# 测试、覆盖率、诊断与临时文件
+Testing/
+test-results/
+coverage/
+*.log
+*.tmp
+*.bak
+*.dmp
+
+# 操作系统和编辑器临时文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
