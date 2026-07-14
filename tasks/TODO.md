@@ -1,8 +1,9 @@
 # Refrain 项目 TODO 与提交路线
 
 - 最后更新：2026-07-14
-- 当前步骤：`12 实现播放列表管理侧栏`
-- 当前状态：已验收，等待用户提交
+- 当前步骤：`13 实现搜索筛选与 Album List 入口`
+- 当前状态：已验收
+- 提交状态：等待用户提交步骤 13；确认提交后才推进步骤 14
 - 使用方式：两位数字是路线编号；用户可用“编号 + 标题”指挥 Codex，Fork 提交标题使用编号后的文字
 
 ## 1. 如何使用这份 TODO
@@ -179,14 +180,16 @@
 - 用户手动检查：对普通列表执行全部操作；检查重名、空名、Esc、删除当前列表、多列表拖动；确认 FavPop、FavScore 等自动列表不会被改写查询或当普通列表错误处理。
 - 通过标准：外部创建/删除/改名实时同步；危险操作明确且作用于正确对象；重启和升级不改变用户播放列表数据。
 - 当前规格：[`../specs/modules/PLAYLIST_BROWSER.md`](../specs/modules/PLAYLIST_BROWSER.md) 0.2，已验收。智能列表直接使用 foobar2000 查询/标题格式语法与 Foobox 同义模板；背景菜单包含 Add/Load/Save，单行可 Save This；Refrain 拖放操作禁止同一精确曲目引用重复，空白拖放创建并激活冲突安全命名的 `Dragged Items`。Default Playlist 使用独立临时语义色。Debug/Release 与各 9 项测试通过，Release 已部署到隔离 `foobar-dev`；用户完成逻辑与颜色人工检查并确认通过。
+- 提交记录：已由用户提交为 `b8fd427 实现播放列表管理侧栏`；其后的 `c4edb56` 仅补充 AGENTS.md 中 Visual Studio CMake/CTest 固定路径，不改变任务 12 功能。
 
-### [ ] 13 实现搜索筛选与 Album List 入口
+### [x] 13 实现搜索筛选与 Album List 入口
 
 - 前置：步骤 12 已提交；搜索范围和筛选行为已由本模块规格确认。
 - 目标：完成左栏顶部入口并坚持用户熟悉的 Foobox 媒体库方案。
-- Codex 工作：实现当前播放列表搜索、中文输入法、清除、无结果和取消；实现经批准的筛选入口；媒体库按钮调用 foobar2000 正式 `Library/Album List` 命令；命令缺失或媒体库关闭时给出反馈。
-- 用户手动检查：中文/英文/特殊字符搜索、空查询、无结果、大列表输入、输入法组合；打开 Album List 并使用用户已有视图；确认没有 ReFacets、JS Smooth Browser 或 Refrain 自建媒体库。
-- 通过标准：搜索不吞全局快捷键、不破坏列表选择；Album List 配置由 foobar2000 原样保存，Refrain 升级不覆盖。
+- Codex 工作：不实现 Refrain 歌曲搜索，保留 foobar2000 的 `Ctrl+F`；在 Playlist Browser 顶部实现只匹配播放列表名称的 Filter、中文输入法、清除、无结果和实时外部变化；在左下角增加按钮调用 foobar2000 正式 Album List 命令，缺失时给出反馈。
+- 用户手动检查：中文/英文/特殊字符播放列表名称筛选、空查询、无结果、输入法组合及外部改名/新建；确认 `Ctrl+F` 仍交给 foobar2000；从左下按钮打开 Album List 并使用已有视图；确认没有 ReFacets、JS Smooth Browser 或 Refrain 自建媒体库。
+- 通过标准：Filter 不修改播放列表或曲目，不吞全局 `Ctrl+F`；Album List 配置由 foobar2000 原样保存，Refrain 升级不覆盖。
+- 当前规格：[`../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md`](../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md) 0.1，已验收。Debug/Release 与各 9 项测试通过，组件包已生成并只部署到隔离 `foobar-dev`；用户确认 Filter 与四个左下按钮布局没有遮挡，并复测通过任意输入法连续输入不丢焦点、Esc 不清空、仅 `×` 清空以及其余任务 13 行为。
 
 ## 8. F 环节：还原完整外观与交互
 

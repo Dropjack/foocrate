@@ -94,6 +94,7 @@
 - 2026-07-14：`x64 Debug`、`x64 Release` 均在 `/W4 /WX` 下构建成功；Debug/Release 各 9/9 自动测试通过。Release 包 `dist/Refrain-0.1.0.fb2k-component` 已生成并只部署到 `.local/foobar-dev`。
 - 2026-07-14：按用户追加验收意见，为 Default Playlist 的名称和项目数加入临时灰蓝色 `#5F7495`；Active/Playing/Selected 的原状态表达保持不变。重新完成 Debug/Release 构建与两套 9/9 测试，生成组件包并部署、重启且确认 `.local/foobar-dev` 已加载同哈希 Release DLL。
 - 2026-07-14：用户完成任务 12 人工验收，确认全部内容未发现逻辑问题，Default Playlist 独立颜色也符合当前阶段要求；剩余视觉优化明确留到步骤 14–16。任务 12 标记为已验收，等待用户以 `实现播放列表管理侧栏` 提交。
+- 2026-07-14：用户已提交 `b8fd427 实现播放列表管理侧栏`；后续独立提交 `c4edb56` 只补充构建工具路径说明。工作树干净，任务 13 可以开始。
 
 ## 人工验收步骤
 

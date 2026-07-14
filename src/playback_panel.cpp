@@ -63,6 +63,8 @@ constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
 constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kStatusTimer = 0x5272;
+constexpr UINT_PTR kPlaylistFilterEditId = 0x5273;
+constexpr UINT_PTR kPlaylistFilterClearId = 0x5274;
 
 std::vector<HWND> g_queueWindows;
 std::atomic_bool g_defaultPlaylistApplied{};
@@ -108,6 +110,7 @@ enum class ControlId {
     settings,
     playlistWorkspace,
     albumWorkspace,
+    albumList,
     queueToggle,
     artwork,
     trackTitle,
@@ -159,6 +162,7 @@ struct Layout {
     D2D1_RECT_F settings{};
     D2D1_RECT_F playlistWorkspace{};
     D2D1_RECT_F albumWorkspace{};
+    D2D1_RECT_F albumList{};
     D2D1_RECT_F queueToggle{};
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
@@ -173,6 +177,8 @@ struct Layout {
     D2D1_RECT_F playlistScrollThumb{};
     D2D1_RECT_F playlistBrowser{};
     D2D1_RECT_F playlistBrowserHeader{};
+    D2D1_RECT_F playlistBrowserFilter{};
+    D2D1_RECT_F playlistBrowserFilterClear{};
     D2D1_RECT_F playlistBrowserBody{};
     D2D1_RECT_F playlistBrowserDivider{};
     D2D1_RECT_F artwork{};
@@ -364,6 +370,7 @@ public:
             refreshQueueSnapshot();
             refreshFromCore();
             createTooltip(wnd);
+            createPlaylistFilterControls(wnd);
             registerSettingsWindow(wnd);
             initializeLowerRightView();
             createLyricsHost(wnd);
@@ -396,6 +403,8 @@ public:
             stopArtworkWork();
             unregisterSettingsWindow(wnd);
             unregisterPlaybackCallback();
+            m_playlistFilterEdit = nullptr;
+            m_playlistFilterClear = nullptr;
             if (GetCapture() == wnd) {
                 ReleaseCapture();
             }
@@ -411,6 +420,7 @@ public:
             }
             clampPlaylistScroll();
             clampAlbumScroll();
+            syncPlaylistFilterControls(wnd);
             syncLyricsHost(wnd);
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
@@ -421,6 +431,7 @@ public:
             if (m_renderTarget) {
                 m_renderTarget->SetDpi(m_dpi, m_dpi);
             }
+            syncPlaylistFilterControls(wnd);
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         case WM_GETMINMAXINFO: {
@@ -495,6 +506,16 @@ public:
             return 0;
         case WM_GETDLGCODE:
             return DLGC_WANTARROWS | DLGC_WANTCHARS;
+        case WM_COMMAND:
+            if (LOWORD(wp) == kPlaylistFilterEditId && HIWORD(wp) == EN_CHANGE) {
+                updatePlaylistFilterFromEditor();
+                return 0;
+            }
+            if (LOWORD(wp) == kPlaylistFilterClearId && HIWORD(wp) == BN_CLICKED) {
+                clearPlaylistFilter(true);
+                return 0;
+            }
+            break;
         case WM_KEYDOWN:
             if (onKeyDown(wnd, wp)) {
                 return 0;
@@ -1372,7 +1393,10 @@ private:
         }
         m_workspace = workspace;
         if (workspace == Workspace::playlist) rebuildPlaylistSnapshot(false);
-        if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
+        if (const auto wnd = get_wnd()) {
+            syncPlaylistFilterControls(wnd);
+            syncLyricsHost(wnd);
+        }
         invalidate();
     }
 
@@ -1826,6 +1850,123 @@ private:
         return !nullGuid(bridge) && sameGuid(bridge, guid);
     }
 
+    static LRESULT CALLBACK playlistFilterSubclass(HWND window, UINT message, WPARAM wp, LPARAM lp,
+        UINT_PTR, DWORD_PTR reference) {
+        auto* self = reinterpret_cast<PlaybackPanel*>(reference);
+        if (message == WM_KEYDOWN && wp == 'F' && self
+            && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+            && self->get_host()->get_keyboard_shortcuts_enabled()
+            && uie::window::g_process_keydown_keyboard_shortcuts(wp)) {
+            return 0;
+        }
+        if (message == WM_NCDESTROY) RemoveWindowSubclass(window, playlistFilterSubclass, 1);
+        return DefSubclassProc(window, message, wp, lp);
+    }
+
+    void createPlaylistFilterControls(HWND wnd) {
+        m_playlistFilterEdit = CreateWindowExW(0, L"EDIT", L"",
+            WS_CHILD | WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP,
+            0, 0, 0, 0, wnd, reinterpret_cast<HMENU>(kPlaylistFilterEditId),
+            core_api::get_my_instance(), nullptr);
+        m_playlistFilterClear = CreateWindowExW(0, L"BUTTON", L"×",
+            WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP,
+            0, 0, 0, 0, wnd, reinterpret_cast<HMENU>(kPlaylistFilterClearId),
+            core_api::get_my_instance(), nullptr);
+        if (m_playlistFilterEdit) {
+            SendMessageW(m_playlistFilterEdit, WM_SETFONT,
+                reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+            SendMessageW(m_playlistFilterEdit, EM_SETCUEBANNER, TRUE,
+                reinterpret_cast<LPARAM>(L"Filter playlists"));
+            SetWindowSubclass(m_playlistFilterEdit, playlistFilterSubclass, 1,
+                reinterpret_cast<DWORD_PTR>(this));
+        }
+        if (m_playlistFilterClear) {
+            SendMessageW(m_playlistFilterClear, WM_SETFONT,
+                reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+        }
+        syncPlaylistFilterControls(wnd);
+    }
+
+    void syncPlaylistFilterControls(HWND wnd) const {
+        if (!m_playlistFilterEdit || !m_playlistFilterClear) return;
+        const auto visible = m_workspace == Workspace::playlist;
+        if (!visible) {
+            ShowWindow(m_playlistFilterEdit, SW_HIDE);
+            ShowWindow(m_playlistFilterClear, SW_HIDE);
+            return;
+        }
+        const auto layout = calculateLayout(wnd);
+        const auto scale = dpiScale();
+        const auto place = [&](HWND child, const D2D1_RECT_F& rect) {
+            SetWindowPos(child, nullptr,
+                static_cast<int>(std::lround(rect.left * scale)),
+                static_cast<int>(std::lround(rect.top * scale)),
+                std::max(0, static_cast<int>(std::lround((rect.right - rect.left) * scale))),
+                std::max(0, static_cast<int>(std::lround((rect.bottom - rect.top) * scale))),
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        };
+        place(m_playlistFilterEdit, layout.playlistBrowserFilter);
+        place(m_playlistFilterClear, layout.playlistBrowserFilterClear);
+        EnableWindow(m_playlistFilterClear, !m_playlistFilterText.empty());
+    }
+
+    void rebuildFilteredPlaylistBrowserRows() {
+        GUID focusGuid{};
+        if (m_playlistBrowserFocus < m_playlistBrowserRows.size()) {
+            focusGuid = m_playlistBrowserRows[m_playlistBrowserFocus].guid;
+        }
+        m_playlistBrowserRows = filterPlaylistBrowserRows(m_playlistBrowserAllRows, m_playlistFilterText);
+        const auto active = playlist_manager_v5::get()->get_active_playlist();
+        const auto activeGuid = active != SIZE_MAX && active < playlist_manager_v5::get()->get_playlist_count()
+            ? playlist_manager_v5::get()->playlist_get_guid(active) : GUID{};
+        m_playlistBrowserSelection = reconcilePlaylistSelection(
+            m_playlistBrowserRows, m_playlistBrowserSelection, activeGuid);
+        m_playlistBrowserFocus = findPlaylistRowByGuid(m_playlistBrowserRows, focusGuid);
+        if (m_playlistBrowserFocus == static_cast<std::size_t>(-1)) {
+            m_playlistBrowserFocus = findPlaylistRowByGuid(m_playlistBrowserRows, activeGuid);
+        }
+        m_playlistBrowserAnchor = m_playlistBrowserFocus;
+        clampPlaylistBrowserScroll();
+        invalidate();
+    }
+
+    void updatePlaylistFilterFromEditor() {
+        if (!m_playlistFilterEdit) return;
+        const auto length = GetWindowTextLengthW(m_playlistFilterEdit);
+        std::wstring value(static_cast<std::size_t>(length) + 1, L'\0');
+        GetWindowTextW(m_playlistFilterEdit, value.data(), length + 1);
+        value.resize(static_cast<std::size_t>(length));
+        if (value == m_playlistFilterText) return;
+        if (m_playlistRenameEdit && IsWindow(m_playlistRenameEdit)) {
+            cancelPlaylistBrowserRename();
+        }
+        m_playlistFilterText = std::move(value);
+        m_playlistBrowserTopRow = 0;
+        rebuildFilteredPlaylistBrowserRows();
+        if (const auto wnd = get_wnd()) syncPlaylistFilterControls(wnd);
+    }
+
+    void clearPlaylistFilter(bool focusEditor) {
+        if (m_playlistFilterEdit && GetWindowTextLengthW(m_playlistFilterEdit) > 0) {
+            SetWindowTextW(m_playlistFilterEdit, L"");
+        } else if (!m_playlistFilterText.empty()) {
+            m_playlistFilterText.clear();
+            rebuildFilteredPlaylistBrowserRows();
+        }
+        if (focusEditor && m_playlistFilterEdit) SetFocus(m_playlistFilterEdit);
+    }
+
+    void openAlbumList() {
+        GUID command{};
+        const auto found = mainmenu_commands::g_find_by_name("Album List", command)
+            || mainmenu_commands::g_find_by_name("Library/Album List", command);
+        if (!found || !mainmenu_commands::g_execute(command)) {
+            MessageBoxW(get_wnd(),
+                L"foobar2000's Album List command is unavailable. Check that the Album List component is installed.",
+                L"Refrain", MB_OK | MB_ICONINFORMATION);
+        }
+    }
+
     void refreshPlaylistBrowserSnapshot() {
         auto api = playlist_manager_v5::get();
         refreshPlayingLocation();
@@ -1844,22 +1985,14 @@ private:
                 automatic ? PlaylistBrowserKind::automatic : PlaylistBrowserKind::manual,
                 lockMask, index == active, index == m_playingPlaylist});
         }
-        m_playlistBrowserRows = std::move(rows);
-        const auto activeGuid = active != SIZE_MAX && active < api->get_playlist_count()
-            ? api->playlist_get_guid(active) : GUID{};
-        m_playlistBrowserSelection = reconcilePlaylistSelection(
-            m_playlistBrowserRows, m_playlistBrowserSelection, activeGuid);
-        if (m_playlistBrowserFocus >= m_playlistBrowserRows.size()) {
-            m_playlistBrowserFocus = findPlaylistRowByGuid(m_playlistBrowserRows, activeGuid);
-        }
-        clampPlaylistBrowserScroll();
-        invalidate();
+        m_playlistBrowserAllRows = std::move(rows);
+        rebuildFilteredPlaylistBrowserRows();
     }
 
     [[nodiscard]] std::wstring uniqueBrowserName(const std::wstring& base) const {
         std::vector<std::wstring> names;
-        names.reserve(m_playlistBrowserRows.size());
-        for (const auto& row : m_playlistBrowserRows) names.push_back(row.name);
+        names.reserve(m_playlistBrowserAllRows.size());
+        for (const auto& row : m_playlistBrowserAllRows) names.push_back(row.name);
         return uniquePlaylistName(names, base);
     }
 
@@ -1876,16 +2009,16 @@ private:
 
     [[nodiscard]] t_size ensureDefaultPlaylist(bool persistRepair) {
         auto settings = readPlaylistBrowserSettings();
-        auto row = chooseDefaultPlaylistRow(m_playlistBrowserRows, settings.defaultPlaylistGuid);
+        auto row = chooseDefaultPlaylistRow(m_playlistBrowserAllRows, settings.defaultPlaylistGuid);
         if (row == static_cast<std::size_t>(-1)) {
             const auto created = createManualPlaylist(L"Default Playlist", false);
             if (created == SIZE_MAX) return SIZE_MAX;
             refreshPlaylistBrowserSnapshot();
-            row = findPlaylistRowByGuid(m_playlistBrowserRows,
+            row = findPlaylistRowByGuid(m_playlistBrowserAllRows,
                 playlist_manager_v5::get()->playlist_get_guid(created));
         }
         if (row == static_cast<std::size_t>(-1)) return SIZE_MAX;
-        const auto& chosen = m_playlistBrowserRows[row];
+        const auto& chosen = m_playlistBrowserAllRows[row];
         if (persistRepair && !sameGuid(settings.defaultPlaylistGuid, chosen.guid)) {
             settings.defaultPlaylistGuid = chosen.guid;
             writePlaylistBrowserSettings(settings);
@@ -1909,7 +2042,7 @@ private:
 
     void repairDefaultPlaylist() {
         const auto settings = readPlaylistBrowserSettings();
-        if (findPlaylistRowByGuid(m_playlistBrowserRows, settings.defaultPlaylistGuid)
+        if (findPlaylistRowByGuid(m_playlistBrowserAllRows, settings.defaultPlaylistGuid)
             == static_cast<std::size_t>(-1)) {
             (void)ensureDefaultPlaylist(true);
         }
@@ -1969,7 +2102,7 @@ private:
     }
 
     void updatePlaylistBrowserDrag(HWND wnd, D2D1_POINT_2F point) {
-        if (!m_playlistBrowserDragCandidate) return;
+        if (!m_playlistBrowserDragCandidate || !m_playlistFilterText.empty()) return;
         const auto dx = point.x - m_playlistBrowserDragStart.x;
         const auto dy = point.y - m_playlistBrowserDragStart.y;
         if (!m_playlistBrowserDragging && std::hypot(dx, dy) < 4.0F) return;
@@ -2486,8 +2619,8 @@ private:
                     && !autoplaylist_manager::get()->is_client_present(playlist);
                 if (browserTarget) m_externalDropBrowserGuid = m_playlistBrowserRows[*row].guid;
             } else {
-                browserTarget = true;
-                m_externalDropBrowserBlank = true;
+                browserTarget = m_playlistFilterText.empty();
+                m_externalDropBrowserBlank = browserTarget;
             }
         }
         if (!m_externalDropAccepts || (!queueTarget && !playlistTarget && !browserTarget)) {
@@ -3349,7 +3482,8 @@ private:
             layout.mute.left - 6.0F, buttonY + 36.0F);
         layout.playlistWorkspace = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
         layout.albumWorkspace = D2D1::RectF(58.0F, buttonY, 94.0F, buttonY + 36.0F);
-        if (readSettings().showSettingsButton) layout.settings = D2D1::RectF(100.0F, buttonY, 136.0F, buttonY + 36.0F);
+        layout.albumList = D2D1::RectF(100.0F, buttonY, 136.0F, buttonY + 36.0F);
+        if (readSettings().showSettingsButton) layout.settings = D2D1::RectF(142.0F, buttonY, 178.0F, buttonY + 36.0F);
 
         if (m_workspace == Workspace::album && top > 100.0F && width > 420.0F) {
             const auto split = std::clamp(width * static_cast<float>(m_albumSplitPermille) / 1000.0F,
@@ -3444,6 +3578,7 @@ private:
             ? layout.rightColumn.left : width;
         if (playlistRight > 120.0F && top > 60.0F) {
             constexpr float headerHeight = 30.0F;
+            constexpr float filterHeight = 38.0F;
             constexpr float scrollbarWidth = 12.0F;
             constexpr float browserDividerWidth = 8.0F;
             const auto maxBrowser = std::max(0.0F,
@@ -3453,7 +3588,11 @@ private:
             const auto browserWidth = std::clamp(storedBrowser, minBrowser, maxBrowser);
             layout.playlistBrowser = D2D1::RectF(0.0F, 0.0F, browserWidth, top);
             layout.playlistBrowserHeader = D2D1::RectF(0.0F, 0.0F, browserWidth, headerHeight);
-            layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight, browserWidth, top);
+            layout.playlistBrowserFilter = D2D1::RectF(8.0F, headerHeight + 5.0F,
+                std::max(9.0F, browserWidth - 38.0F), headerHeight + filterHeight - 5.0F);
+            layout.playlistBrowserFilterClear = D2D1::RectF(std::max(9.0F, browserWidth - 34.0F),
+                headerHeight + 5.0F, std::max(10.0F, browserWidth - 8.0F), headerHeight + filterHeight - 5.0F);
+            layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight + filterHeight, browserWidth, top);
             layout.playlistBrowserDivider = D2D1::RectF(browserWidth, 0.0F,
                 browserWidth + browserDividerWidth, top);
             const auto playlistLeft = browserWidth + browserDividerWidth;
@@ -3527,6 +3666,7 @@ private:
         if (contains(layout.settings, point)) return ControlId::settings;
         if (contains(layout.playlistWorkspace, point)) return ControlId::playlistWorkspace;
         if (contains(layout.albumWorkspace, point)) return ControlId::albumWorkspace;
+        if (contains(layout.albumList, point)) return ControlId::albumList;
         if (contains(layout.queueToggle, point)) return ControlId::queueToggle;
         return ControlId::none;
     }
@@ -3543,6 +3683,7 @@ private:
         case ControlId::settings: return readSettings().showSettingsButton;
         case ControlId::playlistWorkspace:
         case ControlId::albumWorkspace:
+        case ControlId::albumList:
         case ControlId::albumSource:
         case ControlId::albumGrid:
         case ControlId::albumTrackList:
@@ -3634,6 +3775,7 @@ private:
         }
         drawButton(layout.playlistWorkspace, ControlId::playlistWorkspace);
         drawButton(layout.albumWorkspace, ControlId::albumWorkspace);
+        drawButton(layout.albumList, ControlId::albumList);
         drawButton(layout.queueToggle, ControlId::queueToggle);
         drawVolume(layout);
 
@@ -3907,6 +4049,10 @@ private:
             drawTextWith(std::to_wstring(row.itemCount), D2D1::RectF(rect.right - 44.0F, y,
                 rect.right - 8.0F, y + rowHeight), m_secondaryFormat.Get(),
                 DWRITE_TEXT_ALIGNMENT_TRAILING, isDefault ? m_defaultPlaylist.Get() : m_disabled.Get());
+        }
+        if (m_playlistBrowserRows.empty() && !m_playlistFilterText.empty()) {
+            drawTextWith(L"No matching playlists", layout.playlistBrowserBody,
+                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
         }
         if (m_playlistBrowserDragging && m_playlistBrowserInsertion >= m_playlistBrowserTopRow) {
             const auto y = layout.playlistBrowserBody.top
@@ -4963,6 +5109,15 @@ private:
             m_renderTarget->DrawRectangle(D2D1::RectF(cx - 10.0F, cy + 3.0F, cx - 1.0F, cy + 12.0F), brush, 1.5F);
             m_renderTarget->DrawRectangle(D2D1::RectF(cx + 2.0F, cy + 3.0F, cx + 11.0F, cy + 12.0F), brush, 1.5F);
             break;
+        case ControlId::albumList:
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx - 10.0F, cy - 10.0F, cx + 10.0F, cy + 10.0F), brush, 1.4F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 6.0F, cy - 5.0F),
+                D2D1::Point2F(cx + 6.0F, cy - 5.0F), brush, 1.5F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 6.0F, cy),
+                D2D1::Point2F(cx + 6.0F, cy), brush, 1.5F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 6.0F, cy + 5.0F),
+                D2D1::Point2F(cx + 6.0F, cy + 5.0F), brush, 1.5F);
+            break;
         case ControlId::queueToggle: {
             const auto iconBrush = m_queueMode ? m_accent.Get() : brush;
             for (int row = -1; row <= 1; ++row) {
@@ -5287,12 +5442,14 @@ private:
                 const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                 const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
                 selectPlaylistBrowserRow(*row, ctrl, shift, !ctrl && !shift);
-                m_playlistBrowserDragCandidate = *row;
-                m_playlistBrowserDragStart = point;
-                m_playlistBrowserDragSnapshot.clear();
-                for (const auto& value : m_playlistBrowserRows) m_playlistBrowserDragSnapshot.push_back(value.guid);
-                m_active = ControlId::playlistBrowser;
-                SetCapture(wnd);
+                if (m_playlistFilterText.empty()) {
+                    m_playlistBrowserDragCandidate = *row;
+                    m_playlistBrowserDragStart = point;
+                    m_playlistBrowserDragSnapshot.clear();
+                    for (const auto& value : m_playlistBrowserRows) m_playlistBrowserDragSnapshot.push_back(value.guid);
+                    m_active = ControlId::playlistBrowser;
+                    SetCapture(wnd);
+                }
             } else if ((GetKeyState(VK_CONTROL) & 0x8000) == 0
                 && (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
                 m_playlistBrowserSelection.clear();
@@ -5700,11 +5857,11 @@ private:
                 }
             }
         }
-        const std::array<ControlId, 9> allButtons{
-            ControlId::playlistWorkspace, ControlId::albumWorkspace, ControlId::settings,
+        const std::array<ControlId, 10> allButtons{
+            ControlId::playlistWorkspace, ControlId::albumWorkspace, ControlId::albumList, ControlId::settings,
             ControlId::previous, ControlId::playPause, ControlId::next,
             ControlId::stop, ControlId::queueToggle, ControlId::mute};
-        std::array<ControlId, 9> buttons{};
+        std::array<ControlId, 10> buttons{};
         const auto settingsVisible = readSettings().showSettingsButton;
         auto buttonCount = std::size_t{};
         for (const auto button : allButtons) {
@@ -5777,6 +5934,7 @@ private:
         case ControlId::settings: showRefrainPreferences(); break;
         case ControlId::playlistWorkspace: setWorkspace(Workspace::playlist); break;
         case ControlId::albumWorkspace: setWorkspace(Workspace::album); break;
+        case ControlId::albumList: openAlbumList(); break;
         case ControlId::albumSource: showAlbumSourceMenu(); break;
         case ControlId::albumLibraryPreferences: library_manager::get()->show_preferences(); break;
         case ControlId::queueToggle: toggleQueueMode(); break;
@@ -5811,6 +5969,7 @@ private:
         m_playlistBrowserSplitPermille = normalizePlaylistBrowserSplitPermille(
             static_cast<int>(std::lround(requested / width * 1000.0F)));
         clampPlaylistScroll();
+        syncPlaylistFilterControls(wnd);
         invalidate();
     }
 
@@ -5892,6 +6051,7 @@ private:
             switch (id) {
             case ControlId::playlistWorkspace: m_tooltipText = L"Playlist Workspace"; break;
             case ControlId::albumWorkspace: m_tooltipText = L"Album Workspace"; break;
+            case ControlId::albumList: m_tooltipText = L"Open foobar2000 Album List"; break;
             case ControlId::albumSource: m_tooltipText = L"Choose album source"; break;
             case ControlId::albumLibraryPreferences: m_tooltipText = L"Open Media Library Preferences"; break;
             case ControlId::albumGrid:
@@ -6036,7 +6196,11 @@ private:
     std::size_t m_playlistTopRow{};
     float m_playlistScrollbarGrabOffset{};
     std::unordered_map<std::size_t, PlaylistRowText> m_playlistTextCache;
+    std::vector<PlaylistBrowserRow> m_playlistBrowserAllRows;
     std::vector<PlaylistBrowserRow> m_playlistBrowserRows;
+    std::wstring m_playlistFilterText;
+    HWND m_playlistFilterEdit{};
+    HWND m_playlistFilterClear{};
     std::vector<GUID> m_playlistBrowserSelection;
     std::size_t m_playlistBrowserFocus{SIZE_MAX};
     std::size_t m_playlistBrowserAnchor{SIZE_MAX};
