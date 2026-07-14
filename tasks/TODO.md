@@ -1,9 +1,9 @@
 # Refrain 项目 TODO 与提交路线
 
-- 最后更新：2026-07-14
-- 当前步骤：`14 还原顶部摘要与底部功能按钮`
-- 当前状态：已验收，等待用户提交步骤 14
-- 前置提交：`c6c86a7 实现搜索筛选与 Album List 入口`；`3be8e82` 只调整截图协作规则
+- 最后更新：2026-07-15
+- 当前步骤：`15 实现 Foobox Basic 默认视觉`
+- 当前状态：已验收，等待用户提交
+- 前置提交：`356f9f3 还原顶部摘要与底部功能按钮`
 - 使用方式：两位数字是路线编号；用户可用“编号 + 标题”指挥 Codex，Fork 提交标题使用编号后的文字
 
 ## 1. 如何使用这份 TODO
@@ -46,7 +46,7 @@
 | B. 建立工程与第一条功能 | 03–05 | 可安装组件、原生根面板、完整播放控制、可迁移设置 |
 | C. 完成右侧播放信息区 | 06–07 | 封面、两行信息、评分、ESLyric、歌曲信息切换 |
 | D. 完成播放列表与专辑浏览器 | 08–11 | 分组播放列表、列、队列、拖放，以及专辑封面网格与曲目列表 |
-| E. 完成左侧管理与媒体入口 | 12–13 | 播放列表管理、搜索筛选和 Foobox 同款 Album List 入口 |
+| E. 完成左侧管理与媒体入口 | 12–13 | 播放列表管理、foobar2000 搜索边界和 Foobox 同款 Album List 入口 |
 | F. 还原完整外观与交互 | 14–16 | 截图按钮布局、默认视觉、深浅主题和强调色 |
 | G. 系统级质量与发布 | 17–20 | DPI/无障碍、稳定性/性能、安装升级、Refrain 1.0.0 |
 
@@ -182,14 +182,14 @@
 - 当前规格：[`../specs/modules/PLAYLIST_BROWSER.md`](../specs/modules/PLAYLIST_BROWSER.md) 0.2，已验收。智能列表直接使用 foobar2000 查询/标题格式语法与 Foobox 同义模板；背景菜单包含 Add/Load/Save，单行可 Save This；Refrain 拖放操作禁止同一精确曲目引用重复，空白拖放创建并激活冲突安全命名的 `Dragged Items`。Default Playlist 使用独立临时语义色。Debug/Release 与各 9 项测试通过，Release 已部署到隔离 `foobar-dev`；用户完成逻辑与颜色人工检查并确认通过。
 - 提交记录：已由用户提交为 `b8fd427 实现播放列表管理侧栏`；其后的 `c4edb56` 仅补充 AGENTS.md 中 Visual Studio CMake/CTest 固定路径，不改变任务 12 功能。
 
-### [x] 13 实现搜索筛选与 Album List 入口
+### [x] 13 实现搜索筛选与 Album List 入口（Filter 后续移除）
 
-- 前置：步骤 12 已提交；搜索范围和筛选行为已由本模块规格确认。
-- 目标：完成左栏顶部入口并坚持用户熟悉的 Foobox 媒体库方案。
-- Codex 工作：不实现 Refrain 歌曲搜索，保留 foobar2000 的 `Ctrl+F`；在 Playlist Browser 顶部实现只匹配播放列表名称的 Filter、中文输入法、清除、无结果和实时外部变化；在左下角增加按钮调用 foobar2000 正式 Album List 命令，缺失时给出反馈。
-- 用户手动检查：中文/英文/特殊字符播放列表名称筛选、空查询、无结果、输入法组合及外部改名/新建；确认 `Ctrl+F` 仍交给 foobar2000；从左下按钮打开 Album List 并使用已有视图；确认没有 ReFacets、JS Smooth Browser 或 Refrain 自建媒体库。
-- 通过标准：Filter 不修改播放列表或曲目，不吞全局 `Ctrl+F`；Album List 配置由 foobar2000 原样保存，Refrain 升级不覆盖。
-- 当前规格：[`../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md`](../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md) 0.1，已验收。Debug/Release 与各 9 项测试通过，组件包已生成并只部署到隔离 `foobar-dev`；用户确认 Filter 与四个左下按钮布局没有遮挡，并复测通过任意输入法连续输入不丢焦点、Esc 不清空、仅 `×` 清空以及其余任务 13 行为。
+- 前置：步骤 12 已提交；任务 13 当时的搜索范围和 Filter 行为已验收。
+- 目标：保留 foobar2000 `Ctrl+F` 搜索边界和用户熟悉的原生 Album List 入口。
+- Codex 工作：任务 13 曾实现 Playlist Filter；任务 15 的最新产品决定已删除该控件、状态、筛选模型和专用交互分支。左下 Album List 仍调用 foobar2000 正式命令，缺失时给出反馈。
+- 用户手动检查：确认 Playlist Browser 标题下直接显示完整列表且没有 Filter/空白占位；确认 `Ctrl+F` 仍交给 foobar2000；从左下按钮打开 Album List，并确认没有 ReFacets、JS Smooth Browser 或 Refrain 自建媒体库。
+- 通过标准：Refrain 中不存在隐藏或残留的 Playlist Filter；Album List 配置由 foobar2000 原样保存，Refrain 升级不覆盖。
+- 当前规格：[`../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md`](../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md) 0.3。任务 13 的 Filter 验收记录作为历史保留，但当前产品边界以任务 15 的完整移除决定为准。
 
 ## 8. F 环节：还原完整外观与交互
 
@@ -202,13 +202,14 @@
 - 通过标准：每个按钮都连接真实命令，没有装饰性假按钮；系统窗口行为和 foobar2000 菜单未被自绘层破坏。
 - 验收记录：用户在隔离开发实例中完成 Columns UI 外层整理，确认只保留 Windows 标题栏、单行 `Main Menu | Refrain Now Playing Summary`、Refrain 根面板及底部三组控制，并明确宣布任务 14 验收通过；等待用户以 `还原顶部摘要与底部功能按钮` 提交。
 
-### [ ] 15 实现 Foobox Basic 默认视觉
+### [x] 15 实现 Foobox Basic 默认视觉
 
 - 前置：步骤 14 已提交；参考截图原图或可靠取样证据已归档。
 - 目标：完成第一套可正式使用的 Foobox Basic 默认比例、配色、字体、图标、间距和状态层级。
 - Codex 工作：按截图和实际取样实现默认分隔比例、背景、文字、分隔、强调、选择、当前播放、焦点、悬停、禁用、评分、进度与音量状态；建立合法授权或原创的矢量/代码图标；处理长文本和缺图占位。
 - 用户手动检查：与参考截图并排比较正常播放、暂停、停止、空列表、选中/焦点/当前播放、无封面；检查常用窗口尺寸和 100%/125%/150% 缩放。
 - 通过标准：默认视觉本身完整可用，不是等待主题模块补救的占位色；所有状态可辨，文字不因背景或封面取色不可读。
+- 验收记录：2026-07-15 用户确认最初需求与测试均已完成，批准任务 15 整体验收。任务期间追加的 Playlist Filter 完整移除、Album Cover Wall、ESLyric 背景同步和双语歌词默认规则一并作为最终结果保留。
 
 ### [ ] 16 实现深浅主题与强调色系统
 

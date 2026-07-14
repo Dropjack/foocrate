@@ -1,8 +1,8 @@
 # Lyrics and Track Details 模块规格
 
-- 状态：已验收
-- 版本：0.2
-- 最后更新：2026-07-13
+- 状态：0.4 已验收
+- 版本：0.4
+- 最后更新：2026-07-15
 - 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
 - 对应路线：`07 集成 ESLyric 与歌曲信息切换`
 - 对应任务：[`../../tasks/007-集成ESLyric与歌曲信息切换/README.md`](../../tasks/007-集成ESLyric与歌曲信息切换/README.md)
@@ -48,6 +48,21 @@ Refrain 只负责稳定托管、切换和失败隔离，不复制 ESLyric 的搜
 4. Refrain 调整尺寸时只把核准的右下客户区传给 ESLyric；把系统颜色、时间和设置变化等 Columns UI 要求的宿主消息转发给可用子窗口。
 5. Refrain 销毁或 ESLyric 转移所有权时，先断开宿主回调，再按 Columns UI 生命周期销毁/释放；任何失败都回到明确占位状态。
 6. 找不到 GUID、`is_available()` 为假、创建返回空窗口或子窗口意外失效时显示 `ESLyric unavailable`、检测到的依赖状态和恢复指引；不按 DLL 路径、窗口类名或标题猜测。
+
+### 4.1 背景色同步
+
+- ESLyric 播放时会主动绘制自己的客户区；只给 Refrain 父窗口提供同色背景不能改变歌词面板，因此“父背景伪透明即可解决”不是完整方案。
+- Refrain 按 Foobox 已验证的路径使用 ESLyric 自带 Automation 类型库：取得当前 foobar2000 进程内的 ESLyric 面板集合，并调用 `SetBackgroundColor` 同步 Refrain 当前主题背景色。
+- Automation 仅在 ESLyric Advanced 中 `pref.script.expose = True` 时可用。Refrain 不直接改写 ESLyric 私有配置；接口关闭、缺失或版本不兼容时安全跳过，不影响歌词托管、搜索、全屏或 Track Details。
+- 本同步只设置背景颜色，不强制改变 ESLyric 的背景类型、背景图片、字体、普通歌词颜色、高亮颜色、间距或其他私有设置。当前实现与 Foobox 一样作用于同一 foobar2000 进程内全部 ESLyric 面板。
+- Refrain 不按安装路径加载 ESLyric；从已托管子窗口定位它当前实际加载的模块，再查询该模块导出的类工厂和内嵌类型接口，避免触碰其他 foobar2000 实例或磁盘配置。
+
+### 4.2 双语歌词默认规则
+
+- 当歌词源返回原文与译文时，Lyrics View 默认保留两者；具有相同时间戳的原文和译文由 ESLyric 按双行显示。
+- 当前 ESLyric 1.0.6.7 随带的 NetEase 搜索脚本已将 `tlyric` 译文并入原歌词；KRC 解析器也已将内嵌译文写为同时间戳的下一行。这是已安装歌词源的默认行为，不需要 Refrain 再添加一个“双行”开关。
+- 双语可用性依赖歌词源是否拥有对应译文；没有译文时，Refrain 不重复原文、不机器翻译，也不伪造第二行。
+- ESLyric Automation 1.0.6.7 没有公开设置翻译语言或强制双语的方法。Refrain 不改写 ESLyric 私有配置，不在组件包内覆盖用户的歌词源顺序和搜索设置。
 
 ## 5. Track Details View
 
@@ -117,3 +132,4 @@ Refrain 只负责稳定托管、切换和失败隔离，不复制 ESLyric 的搜
 - 2026-07-13：用户批准方案 F、推荐字段分区，并要求本步骤立即实现可保存的右侧上下边界；规格升至 0.2 并进入实现。
 - 2026-07-13：按批准规格完成首轮实现；自动构建与模型测试通过，ESLyric 实际窗口行为、复制/Properties 和缺失降级仍等待用户在可见隔离实例中验收。
 - 2026-07-13：用户完成可见隔离实例验收；分隔线松手比例问题修复并复验后，步骤 07 正式通过。
+- 2026-07-14：任务 15 检查发现有歌曲时 ESLyric 主动绘制白色背景，无歌曲时的同色区域只是 Refrain 占位。只读 Foobox 证据确认其通过 ESLyric Automation `GetAll()` / `SetBackgroundColor()` 同步颜色；用户在开发实例将 `pref.script.expose` 设为 `True`，批准采用同一路径。规格升至 0.3。

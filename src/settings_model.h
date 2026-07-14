@@ -22,6 +22,7 @@ struct SettingsValues {
     LowerRightView lowerRightView{LowerRightView::lyrics};
     bool showReplayGain{};
     std::int64_t rightHeaderPermille{500};
+    std::int64_t rightColumnPermille{230};
 
     bool operator==(const SettingsValues&) const = default;
 };
@@ -35,6 +36,7 @@ struct StoredSettings {
     std::int64_t lowerRightView{};
     bool showReplayGain{};
     std::int64_t rightHeaderPermille{500};
+    std::int64_t rightColumnPermille{230};
 };
 
 struct SettingsMigration {
@@ -43,7 +45,7 @@ struct SettingsMigration {
     bool rewriteKnownValues{};
 };
 
-inline constexpr std::int64_t kCurrentSettingsVersion = 2;
+inline constexpr std::int64_t kCurrentSettingsVersion = 3;
 
 [[nodiscard]] constexpr SettingsValues defaultSettings() noexcept {
     return {};
@@ -63,6 +65,10 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 2;
     return value >= 250 && value <= 800;
 }
 
+[[nodiscard]] constexpr bool isValidRightColumnPermille(std::int64_t value) noexcept {
+    return value >= 100 && value <= 800;
+}
+
 [[nodiscard]] constexpr SettingsMigration migrateSettings(StoredSettings stored) noexcept {
     SettingsMigration result;
     result.values.timeDisplay = isValidTimeDisplay(stored.timeDisplay)
@@ -77,13 +83,16 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 2;
     result.values.showReplayGain = stored.showReplayGain;
     result.values.rightHeaderPermille = isValidRightHeaderPermille(stored.rightHeaderPermille)
         ? stored.rightHeaderPermille : 500;
+    result.values.rightColumnPermille = isValidRightColumnPermille(stored.rightColumnPermille)
+        ? stored.rightColumnPermille : 230;
 
     if (stored.version <= kCurrentSettingsVersion) {
         result.versionToKeep = kCurrentSettingsVersion;
         result.rewriteKnownValues = stored.version != kCurrentSettingsVersion
             || !isValidTimeDisplay(stored.timeDisplay)
             || !isValidLowerRightView(stored.lowerRightView)
-            || !isValidRightHeaderPermille(stored.rightHeaderPermille);
+            || !isValidRightHeaderPermille(stored.rightHeaderPermille)
+            || !isValidRightColumnPermille(stored.rightColumnPermille);
     } else {
         result.versionToKeep = stored.version;
         result.rewriteKnownValues = false;

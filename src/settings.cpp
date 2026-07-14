@@ -30,6 +30,8 @@ constexpr GUID kShowReplayGainGuid{
     0x26b186af, 0x9781, 0x45c0, {0x93, 0x91, 0x95, 0x32, 0xa4, 0x0c, 0x86, 0x1d}};
 constexpr GUID kRightHeaderPermilleGuid{
     0x6434bf69, 0x3e63, 0x4f17, {0x86, 0x44, 0xa1, 0xd1, 0xe3, 0x20, 0xf1, 0x4c}};
+constexpr GUID kRightColumnPermilleGuid{
+    0x522cd19f, 0x70dc, 0x4b8b, {0x9b, 0x65, 0x28, 0xe2, 0xd2, 0x3d, 0xf7, 0xa1}};
 constexpr GUID kPlaylistViewSettingsGuid{
     0xd8a6f36a, 0x474c, 0x4fd6, {0x89, 0x3f, 0x08, 0x8e, 0xcc, 0x83, 0xa4, 0xa2}};
 constexpr GUID kAlbumSourceKindGuid{
@@ -55,6 +57,7 @@ cfg_bool g_lyricsAutoSwitch(kLyricsAutoSwitchGuid, true);
 cfg_int g_lowerRightView(kLowerRightViewGuid, static_cast<std::int64_t>(LowerRightView::lyrics));
 cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
 cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
+cfg_int g_rightColumnPermille(kRightColumnPermilleGuid, 230);
 cfg_string g_playlistViewSettings(kPlaylistViewSettingsGuid, "");
 cfg_bool g_albumSourceLibrary(kAlbumSourceKindGuid, false);
 cfg_guid g_albumSourcePlaylist(kAlbumSourcePlaylistGuid, GUID{});
@@ -100,7 +103,7 @@ void notifySettingsWindows() {
 SettingsValues readSettings() {
     const StoredSettings stored{g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(),
         g_showSettingsButton.get(), g_lyricsAutoSwitch.get(), g_lowerRightView.get(),
-        g_showReplayGain.get(), g_rightHeaderPermille.get()};
+        g_showReplayGain.get(), g_rightHeaderPermille.get(), g_rightColumnPermille.get()};
     const auto migration = migrateSettings(stored);
     if (migration.rewriteKnownValues) {
         g_timeDisplay = static_cast<t_int32>(migration.values.timeDisplay);
@@ -110,6 +113,7 @@ SettingsValues readSettings() {
         g_lowerRightView = static_cast<t_int32>(migration.values.lowerRightView);
         g_showReplayGain = migration.values.showReplayGain;
         g_rightHeaderPermille = static_cast<t_int32>(migration.values.rightHeaderPermille);
+        g_rightColumnPermille = static_cast<t_int32>(migration.values.rightColumnPermille);
         g_configVersion = static_cast<t_int32>(migration.versionToKeep);
     }
     return migration.values;
@@ -119,7 +123,7 @@ void writeSettings(const SettingsValues& values) {
     const auto normalized = migrateSettings({kCurrentSettingsVersion,
         static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
         values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView),
-        values.showReplayGain, values.rightHeaderPermille});
+        values.showReplayGain, values.rightHeaderPermille, values.rightColumnPermille});
     g_timeDisplay = static_cast<t_int32>(normalized.values.timeDisplay);
     g_showTooltips = normalized.values.showTooltips;
     g_showSettingsButton = normalized.values.showSettingsButton;
@@ -127,6 +131,7 @@ void writeSettings(const SettingsValues& values) {
     g_lowerRightView = static_cast<t_int32>(normalized.values.lowerRightView);
     g_showReplayGain = normalized.values.showReplayGain;
     g_rightHeaderPermille = static_cast<t_int32>(normalized.values.rightHeaderPermille);
+    g_rightColumnPermille = static_cast<t_int32>(normalized.values.rightColumnPermille);
     g_configVersion = static_cast<t_int32>(std::max<std::int64_t>(g_configVersion.get(), kCurrentSettingsVersion));
     notifySettingsWindows();
 }

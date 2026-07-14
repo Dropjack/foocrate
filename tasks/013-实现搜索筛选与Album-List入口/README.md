@@ -1,6 +1,6 @@
 # 013-实现搜索筛选与 Album List 入口
 
-- 状态：已验收
+- 状态：已验收（Playlist Filter 已在任务 15 按最新决定移除）
 - 对应规格：[`../../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md`](../../specs/modules/PLAYLIST_FILTER_AND_ALBUM_LIST.md)
 - 前置任务：[`../012-实现播放列表管理侧栏/README.md`](../012-实现播放列表管理侧栏/README.md)（已验收并提交为 `b8fd427 实现播放列表管理侧栏`）
 - Fork 提交标题：`实现搜索筛选与 Album List 入口`
@@ -9,6 +9,8 @@
 ## 任务目标
 
 让用户在播放列表较多时按名称快速收窄左栏，同时从底部左侧打开熟悉的 foobar2000 原生 Album List。歌曲搜索继续使用 foobar2000 的 `Ctrl+F`，Refrain 不重复实现或改变它。
+
+> 最新产品边界（2026-07-14）：本任务当时实现并验收的 Playlist Filter 已在任务 15 完整删除，不是隐藏。下面关于 Filter 的内容只保留为历史实施与验收记录；当前有效规则见模块规格 0.3。`Ctrl+F` 与原生 Album List 入口继续保留。
 
 ## 明确不做
 

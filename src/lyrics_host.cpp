@@ -6,9 +6,63 @@
 #include <commctrl.h>
 #include <cwctype>
 #include <utility>
+#include <wrl/client.h>
 
 namespace refrain {
 namespace {
+
+using Microsoft::WRL::ComPtr;
+
+constexpr GUID kEsLyricControlClassId{
+    0x9e089429, 0x58b3, 0x4f58, {0xbf, 0x47, 0xa7, 0x65, 0xec, 0x05, 0x38, 0xe6}};
+
+using DllGetClassObjectProc = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*);
+
+[[nodiscard]] HRESULT dispatchId(IDispatch* dispatch, const wchar_t* name, DISPID& result) noexcept {
+    if (!dispatch || !name) return E_POINTER;
+    auto mutableName = const_cast<LPOLESTR>(name);
+    return dispatch->GetIDsOfNames(IID_NULL, &mutableName, 1, LOCALE_USER_DEFAULT, &result);
+}
+
+[[nodiscard]] HRESULT esLyricPanelCollection(IDispatch* control, ComPtr<IDispatch>& panels) noexcept {
+    DISPID method{};
+    auto result = dispatchId(control, L"GetAll", method);
+    if (FAILED(result)) return result;
+
+    DISPPARAMS parameters{};
+    VARIANT value;
+    VariantInit(&value);
+    result = control->Invoke(method, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+        &parameters, &value, nullptr, nullptr);
+    if (SUCCEEDED(result)) {
+        if (value.vt == VT_DISPATCH && value.pdispVal) {
+            panels.Attach(value.pdispVal);
+            value.vt = VT_EMPTY;
+        } else if (value.vt == VT_UNKNOWN && value.punkVal) {
+            result = value.punkVal->QueryInterface(IID_PPV_ARGS(panels.ReleaseAndGetAddressOf()));
+        } else {
+            result = E_NOINTERFACE;
+        }
+    }
+    VariantClear(&value);
+    return result;
+}
+
+[[nodiscard]] HRESULT setEsLyricBackground(IDispatch* panels, std::uint32_t argb) noexcept {
+    DISPID method{};
+    auto result = dispatchId(panels, L"SetBackgroundColor", method);
+    if (FAILED(result)) return result;
+
+    VARIANTARG argument;
+    VariantInit(&argument);
+    argument.vt = VT_I4;
+    argument.lVal = static_cast<LONG>(argb);
+    DISPPARAMS parameters{&argument, nullptr, 1, 0};
+    result = panels->Invoke(method, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+        &parameters, nullptr, nullptr, nullptr);
+    VariantClear(&argument);
+    return result;
+}
 
 [[nodiscard]] std::wstring utf8ToWide(const char* text) {
     if (!text || *text == '\0') return {};
@@ -134,6 +188,10 @@ bool LyricsHost::create(HWND parent, const uie::window_host_ptr& upstream, const
         m_statusText.clear();
         resize(bounds);
         setVisible(m_visible);
+        if (!applyBackgroundColor()) {
+            FB2K_console_formatter() << "Refrain: ESLyric background synchronization is unavailable; "
+                                        "enable pref.script.expose or check ESLyric compatibility.";
+        }
         return true;
     } catch (...) {
         m_statusText = L"ESLyric panel creation failed";
@@ -171,6 +229,33 @@ void LyricsHost::resize(const RECT& bounds) noexcept {
 void LyricsHost::setVisible(bool visible) noexcept {
     m_visible = visible;
     if (m_child && IsWindow(m_child)) ShowWindow(m_child, visible ? SW_SHOWNA : SW_HIDE);
+}
+
+void LyricsHost::setBackgroundColor(std::uint32_t argb) noexcept {
+    m_backgroundArgb = argb;
+    if (available()) (void)applyBackgroundColor();
+}
+
+bool LyricsHost::applyBackgroundColor() const noexcept {
+    if (!m_child || !IsWindow(m_child)) return false;
+    const auto module = reinterpret_cast<HMODULE>(GetWindowLongPtrW(m_child, GWLP_HINSTANCE));
+    if (!module) return false;
+    const auto entry = reinterpret_cast<DllGetClassObjectProc>(
+        GetProcAddress(module, "DllGetClassObject"));
+    if (!entry) return false;
+
+    ComPtr<IClassFactory> factory;
+    auto result = entry(kEsLyricControlClassId, IID_PPV_ARGS(factory.ReleaseAndGetAddressOf()));
+    if (FAILED(result)) return false;
+
+    ComPtr<IDispatch> control;
+    result = factory->CreateInstance(nullptr, IID_PPV_ARGS(control.ReleaseAndGetAddressOf()));
+    if (FAILED(result)) return false;
+
+    ComPtr<IDispatch> panels;
+    result = esLyricPanelCollection(control.Get(), panels);
+    if (FAILED(result) || !panels) return false;
+    return SUCCEEDED(setEsLyricBackground(panels.Get(), m_backgroundArgb));
 }
 
 void LyricsHost::forwardMessage(UINT message, WPARAM wp, LPARAM lp) const noexcept {

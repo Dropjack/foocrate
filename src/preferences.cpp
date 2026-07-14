@@ -252,6 +252,7 @@ private:
             ? LowerRightView::trackDetails : LowerRightView::lyrics;
         values.showReplayGain = SendMessageW(m_showReplayGain, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.rightHeaderPermille = m_draft.rightHeaderPermille;
+        values.rightColumnPermille = m_draft.rightColumnPermille;
         return values;
     }
 

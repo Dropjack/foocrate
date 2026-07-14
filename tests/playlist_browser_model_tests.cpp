@@ -47,22 +47,6 @@ int main() {
     expect(fallback.size() == 1 && sameGuid(fallback.front(), guid(1)),
         "empty management selection must fall back to active row");
 
-    const std::vector<PlaylistBrowserRow> filterRows{
-        {guid(10), L"FavPop", 4, PlaylistBrowserKind::automatic},
-        {guid(11), L"Classical Library", 8, PlaylistBrowserKind::manual},
-        {guid(12), L"中文收藏", 2, PlaylistBrowserKind::manual},
-    };
-    const auto asciiFilter = filterPlaylistBrowserRows(filterRows, L"LIBRARY");
-    expect(asciiFilter.size() == 1 && sameGuid(asciiFilter.front().guid, guid(11)),
-        "playlist filter must use case-insensitive name containment");
-    const auto chineseFilter = filterPlaylistBrowserRows(filterRows, L"收藏");
-    expect(chineseFilter.size() == 1 && sameGuid(chineseFilter.front().guid, guid(12)),
-        "playlist filter must preserve Unicode name matching");
-    expect(filterPlaylistBrowserRows(filterRows, L"missing").empty(),
-        "playlist filter must represent no-match results explicitly");
-    expect(filterPlaylistBrowserRows(filterRows, L"").size() == filterRows.size(),
-        "empty playlist filter must reveal every row");
-
     expect(normalizePlaylistBrowserSplitPermille(20) == 100, "split must have safe lower storage bound");
     expect(normalizePlaylistBrowserSplitPermille(500) == 350, "split must have 35 percent upper bound");
     expect(normalizePlaylistBrowserSplitPermille(150) == 150, "valid split must survive");

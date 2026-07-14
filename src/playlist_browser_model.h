@@ -85,27 +85,6 @@ struct PlaylistBrowserRow {
     return result;
 }
 
-[[nodiscard]] inline std::wstring foldPlaylistFilterText(std::wstring value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t character) {
-        return static_cast<wchar_t>(std::towlower(character));
-    });
-    return value;
-}
-
-[[nodiscard]] inline std::vector<PlaylistBrowserRow> filterPlaylistBrowserRows(
-    const std::vector<PlaylistBrowserRow>& rows, const std::wstring& query) {
-    const auto foldedQuery = foldPlaylistFilterText(query);
-    if (foldedQuery.empty()) return rows;
-    std::vector<PlaylistBrowserRow> result;
-    result.reserve(rows.size());
-    for (const auto& row : rows) {
-        if (foldPlaylistFilterText(row.name).find(foldedQuery) != std::wstring::npos) {
-            result.push_back(row);
-        }
-    }
-    return result;
-}
-
 [[nodiscard]] inline int normalizePlaylistBrowserSplitPermille(int value) noexcept {
     return std::clamp(value, 100, 350);
 }
