@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "playlist_browser_model.h"
 
 #include <mmsystem.h>
 #include <objbase.h>
@@ -41,6 +42,10 @@ constexpr GUID kAlbumBridgePlaylistGuid{
     0xed20fbc8, 0xbce0, 0x49d8, {0xa6, 0xd4, 0xe6, 0xf6, 0xe1, 0x3a, 0x4e, 0xfb}};
 constexpr GUID kAlbumSelectionKeyGuid{
     0x69b9b165, 0xc9e9, 0x42aa, {0x80, 0xc8, 0xb9, 0x77, 0xbe, 0x2e, 0x02, 0x14}};
+constexpr GUID kDefaultPlaylistGuid{
+    0x09a54027, 0x3884, 0x45c1, {0x89, 0x8c, 0xd5, 0xa9, 0x84, 0x94, 0x43, 0xb2}};
+constexpr GUID kPlaylistBrowserSplitGuid{
+    0x83f11fdb, 0xc4d9, 0x46b8, {0x95, 0x20, 0x30, 0x99, 0xf4, 0x3d, 0x0e, 0x1a}};
 
 cfg_int g_configVersion(kConfigVersionGuid, 0);
 cfg_int g_timeDisplay(kTimeDisplayGuid, static_cast<std::int64_t>(TimeDisplayMode::total));
@@ -56,6 +61,8 @@ cfg_guid g_albumSourcePlaylist(kAlbumSourcePlaylistGuid, GUID{});
 cfg_int g_albumSplitPermille(kAlbumSplitPermilleGuid, 780);
 cfg_guid g_albumBridgePlaylist(kAlbumBridgePlaylistGuid, GUID{});
 cfg_string g_albumSelectionKey(kAlbumSelectionKeyGuid, "");
+cfg_guid g_defaultPlaylist(kDefaultPlaylistGuid, GUID{});
+cfg_int g_playlistBrowserSplit(kPlaylistBrowserSplitGuid, 150);
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
@@ -171,6 +178,17 @@ void writeAlbumBrowserSettings(const AlbumBrowserSettings& values) {
     g_albumBridgePlaylist = values.bridgeGuid;
     g_albumSplitPermille = std::clamp(values.splitPermille, 350, 800);
     g_albumSelectionKey.set(values.albumKey.c_str());
+}
+
+PlaylistBrowserSettings readPlaylistBrowserSettings() {
+    return {g_defaultPlaylist.get(),
+        normalizePlaylistBrowserSplitPermille(static_cast<int>(g_playlistBrowserSplit.get()))};
+}
+
+void writePlaylistBrowserSettings(const PlaylistBrowserSettings& values) {
+    g_defaultPlaylist = values.defaultPlaylistGuid;
+    g_playlistBrowserSplit = normalizePlaylistBrowserSplitPermille(values.splitPermille);
+    notifySettingsWindows();
 }
 
 void notifySettingsChanged() {

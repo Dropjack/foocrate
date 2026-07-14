@@ -9,6 +9,7 @@
 #include "playlist_config_model.h"
 #include "playlist_grouping_model.h"
 #include "playlist_interaction_model.h"
+#include "playlist_browser_model.h"
 #include "settings.h"
 
 #include <windows.h>
@@ -58,10 +59,13 @@ constexpr UINT kGroupArtworkReadyMessage = WM_APP + 0x425;
 constexpr UINT kQueueChangedMessage = WM_APP + 0x426;
 constexpr UINT kDropReadyMessage = WM_APP + 0x427;
 constexpr UINT kRestoreAlbumSourceMessage = WM_APP + 0x428;
+constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
+constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kStatusTimer = 0x5272;
 
 std::vector<HWND> g_queueWindows;
+std::atomic_bool g_defaultPlaylistApplied{};
 
 class QueueChangeCallback : public playback_queue_callback {
 public:
@@ -119,6 +123,8 @@ enum class ControlId {
     playlistHeader,
     playlistBody,
     playlistScrollbar,
+    playlistBrowser,
+    playlistBrowserDivider,
     playlistRating,
     queueHeader,
     queueBody,
@@ -139,6 +145,7 @@ enum class DropDestination {
     none,
     playlist,
     queue,
+    playlistBrowser,
 };
 
 struct Layout {
@@ -164,6 +171,10 @@ struct Layout {
     D2D1_RECT_F playlistBody{};
     D2D1_RECT_F playlistScrollTrack{};
     D2D1_RECT_F playlistScrollThumb{};
+    D2D1_RECT_F playlistBrowser{};
+    D2D1_RECT_F playlistBrowserHeader{};
+    D2D1_RECT_F playlistBrowserBody{};
+    D2D1_RECT_F playlistBrowserDivider{};
     D2D1_RECT_F artwork{};
     std::array<D2D1_RECT_F, 5> ratings{};
     D2D1_RECT_F trackTitle{};
@@ -253,6 +264,7 @@ struct DropCompletion {
     std::size_t insertion{};
     metadb_handle_list targetSnapshot;
     metadb_handle_list items;
+    bool createPlaylist{};
 };
 
 [[nodiscard]] bool contains(const D2D1_RECT_F& rect, D2D1_POINT_2F point) noexcept {
@@ -277,6 +289,17 @@ struct DropCompletion {
     std::wstring result(static_cast<std::size_t>(count), L'\0');
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, result.data(), count) <= 0) return {};
     result.pop_back();
+    return result;
+}
+
+[[nodiscard]] std::string wideToUtf8(const std::wstring& text) {
+    if (text.empty()) return {};
+    const auto count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+        static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (count <= 0) return {};
+    std::string result(static_cast<std::size_t>(count), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+            static_cast<int>(text.size()), result.data(), count, nullptr, nullptr) <= 0) return {};
     return result;
 }
 
@@ -329,7 +352,10 @@ public:
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
             m_albumSplitPermille = readAlbumBrowserSettings().splitPermille;
+            m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
             restoreAlbumBridgeLock();
+            refreshPlaylistBrowserSnapshot();
+            applyDefaultPlaylistOnce();
             reloadPlaylistViewSettings();
             startGroupArtworkWorker();
             startAlbumArtworkWorker();
@@ -350,6 +376,7 @@ public:
             }
             return 0;
         case WM_DESTROY: {
+            cancelPlaylistBrowserRename();
             std::erase(g_queueWindows, wnd);
             KillTimer(wnd, kPlaylistDragTimer);
             KillTimer(wnd, kStatusTimer);
@@ -482,6 +509,10 @@ public:
                 SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                 return TRUE;
             }
+            if (LOWORD(lp) == HTCLIENT && m_hover == ControlId::playlistBrowserDivider) {
+                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
             if (LOWORD(lp) == HTCLIENT && (m_hover == ControlId::seek || m_hover == ControlId::volume
                     || isRatingControl(m_hover))) {
                 SetCursor(LoadCursor(nullptr, IDC_HAND));
@@ -511,6 +542,12 @@ public:
             return 0;
         case kRestoreAlbumSourceMessage:
             restoreAlbumSourceAfterPlaybackStart();
+            return 0;
+        case kCommitPlaylistRenameMessage:
+            commitPlaylistBrowserRename();
+            return 0;
+        case kCancelPlaylistRenameMessage:
+            cancelPlaylistBrowserRename();
             return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
@@ -573,6 +610,7 @@ public:
 
     void on_items_added(t_size playlist, t_size, metadb_handle_list_cref, const bit_array&) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshPlaylistBrowserSnapshot();
         refreshAlbumSourceIfPlaylist(playlist);
         refreshQueueSnapshot();
     }
@@ -583,6 +621,7 @@ public:
     }
     void on_items_removed(t_size playlist, const bit_array&, t_size, t_size) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshPlaylistBrowserSnapshot();
         refreshAlbumSourceIfPlaylist(playlist);
         refreshQueueSnapshot();
     }
@@ -600,6 +639,7 @@ public:
         if (!playback_control::get()->is_playing()) requestRefresh();
     }
     void on_playlist_activate(t_size, t_size) override {
+        refreshPlaylistBrowserSnapshot();
         rebuildPlaylistSnapshot(true);
         if (!playback_control::get()->is_playing()) requestRefresh();
     }
@@ -627,6 +667,7 @@ public:
         if (playlist == m_activePlaylist) ensurePlaylistRowVisible(item);
     }
     void on_playlist_locked(t_size playlist, bool) override {
+        refreshPlaylistBrowserSnapshot();
         if (playlist == m_activePlaylist) invalidate();
     }
     void on_playback_order_changed(t_size order) override {
@@ -639,13 +680,18 @@ public:
         }
     }
     void on_playlist_renamed(t_size playlist, const char*, t_size) override {
+        refreshPlaylistBrowserSnapshot();
         refreshAlbumSourceIfPlaylist(playlist);
     }
     void on_playlists_removed(const bit_array&, t_size, t_size) override {
+        refreshPlaylistBrowserSnapshot();
+        repairDefaultPlaylist();
         if (m_workspace == Workspace::album && m_albumSourceKind == AlbumSourceKind::playlist) {
             loadAlbumSourcePlaylist(m_albumSourcePlaylistGuid);
         }
     }
+    void on_playlist_created(t_size, const char*, t_size) override { refreshPlaylistBrowserSnapshot(); }
+    void on_playlists_reorder(const t_size*, t_size) override { refreshPlaylistBrowserSnapshot(); }
     void on_default_format_changed() override {
         clearPlaylistTextCache();
     }
@@ -1301,7 +1347,13 @@ private:
             auto api = playlist_manager_v5::get();
             m_playlistQueueModeBeforeAlbum = m_queueMode;
             const auto active = api->get_active_playlist();
-            if (active != SIZE_MAX) {
+            const auto initialAlbumSource = !m_albumWorkspaceEntered
+                ? api->find_playlist_by_guid(m_initialAlbumSourceGuid) : SIZE_MAX;
+            if (initialAlbumSource != SIZE_MAX) {
+                m_albumReturnPlaylistGuid = active != SIZE_MAX
+                    ? api->playlist_get_guid(active) : m_initialAlbumSourceGuid;
+                loadAlbumSourcePlaylist(m_initialAlbumSourceGuid);
+            } else if (active != SIZE_MAX) {
                 m_albumReturnPlaylistGuid = api->playlist_get_guid(active);
                 loadAlbumSourcePlaylist(m_albumReturnPlaylistGuid);
             }
@@ -1311,6 +1363,7 @@ private:
                     loadAlbumSourcePlaylist(saved.playlistGuid);
                 } else loadAlbumSourceLibrary();
             }
+            m_albumWorkspaceEntered = true;
             m_queueMode = false;
         } else {
             m_queueMode = m_playlistQueueModeBeforeAlbum;
@@ -1768,6 +1821,619 @@ private:
         return playlist_manager_v5::get()->find_playlist_by_guid(guid);
     }
 
+    [[nodiscard]] bool isAlbumBridgeGuid(const GUID& guid) const {
+        const auto bridge = readAlbumBrowserSettings().bridgeGuid;
+        return !nullGuid(bridge) && sameGuid(bridge, guid);
+    }
+
+    void refreshPlaylistBrowserSnapshot() {
+        auto api = playlist_manager_v5::get();
+        refreshPlayingLocation();
+        const auto active = api->get_active_playlist();
+        std::vector<PlaylistBrowserRow> rows;
+        rows.reserve(api->get_playlist_count());
+        for (t_size index = 0; index < api->get_playlist_count(); ++index) {
+            const auto guid = api->playlist_get_guid(index);
+            if (isAlbumBridgeGuid(guid)) continue;
+            pfc::string8 name;
+            api->playlist_get_name(index, name);
+            const auto automatic = autoplaylist_manager::get()->is_client_present(index);
+            const auto lockMask = api->playlist_lock_is_present(index)
+                ? api->playlist_lock_get_filter_mask(index) : 0U;
+            rows.push_back({guid, utf8ToWide(name.c_str()), api->playlist_get_item_count(index),
+                automatic ? PlaylistBrowserKind::automatic : PlaylistBrowserKind::manual,
+                lockMask, index == active, index == m_playingPlaylist});
+        }
+        m_playlistBrowserRows = std::move(rows);
+        const auto activeGuid = active != SIZE_MAX && active < api->get_playlist_count()
+            ? api->playlist_get_guid(active) : GUID{};
+        m_playlistBrowserSelection = reconcilePlaylistSelection(
+            m_playlistBrowserRows, m_playlistBrowserSelection, activeGuid);
+        if (m_playlistBrowserFocus >= m_playlistBrowserRows.size()) {
+            m_playlistBrowserFocus = findPlaylistRowByGuid(m_playlistBrowserRows, activeGuid);
+        }
+        clampPlaylistBrowserScroll();
+        invalidate();
+    }
+
+    [[nodiscard]] std::wstring uniqueBrowserName(const std::wstring& base) const {
+        std::vector<std::wstring> names;
+        names.reserve(m_playlistBrowserRows.size());
+        for (const auto& row : m_playlistBrowserRows) names.push_back(row.name);
+        return uniquePlaylistName(names, base);
+    }
+
+    [[nodiscard]] t_size createManualPlaylist(const std::wstring& requested, bool activate) {
+        const auto name = uniqueBrowserName(requested);
+        const auto utf8 = wideToUtf8(name);
+        if (utf8.empty()) return SIZE_MAX;
+        auto api = playlist_manager_v5::get();
+        const auto index = api->create_playlist(utf8.c_str(), utf8.size(), SIZE_MAX);
+        if (index != SIZE_MAX && activate) api->set_active_playlist(index);
+        refreshPlaylistBrowserSnapshot();
+        return index;
+    }
+
+    [[nodiscard]] t_size ensureDefaultPlaylist(bool persistRepair) {
+        auto settings = readPlaylistBrowserSettings();
+        auto row = chooseDefaultPlaylistRow(m_playlistBrowserRows, settings.defaultPlaylistGuid);
+        if (row == static_cast<std::size_t>(-1)) {
+            const auto created = createManualPlaylist(L"Default Playlist", false);
+            if (created == SIZE_MAX) return SIZE_MAX;
+            refreshPlaylistBrowserSnapshot();
+            row = findPlaylistRowByGuid(m_playlistBrowserRows,
+                playlist_manager_v5::get()->playlist_get_guid(created));
+        }
+        if (row == static_cast<std::size_t>(-1)) return SIZE_MAX;
+        const auto& chosen = m_playlistBrowserRows[row];
+        if (persistRepair && !sameGuid(settings.defaultPlaylistGuid, chosen.guid)) {
+            settings.defaultPlaylistGuid = chosen.guid;
+            writePlaylistBrowserSettings(settings);
+        }
+        return playlistByGuid(chosen.guid);
+    }
+
+    void applyDefaultPlaylistOnce() {
+        if (g_defaultPlaylistApplied.exchange(true)) {
+            const auto configured = readPlaylistBrowserSettings().defaultPlaylistGuid;
+            if (playlistByGuid(configured) != SIZE_MAX) m_initialAlbumSourceGuid = configured;
+            return;
+        }
+        const auto playlist = ensureDefaultPlaylist(true);
+        if (playlist == SIZE_MAX) return;
+        auto api = playlist_manager_v5::get();
+        api->set_active_playlist(playlist);
+        m_initialAlbumSourceGuid = api->playlist_get_guid(playlist);
+        refreshPlaylistBrowserSnapshot();
+    }
+
+    void repairDefaultPlaylist() {
+        const auto settings = readPlaylistBrowserSettings();
+        if (findPlaylistRowByGuid(m_playlistBrowserRows, settings.defaultPlaylistGuid)
+            == static_cast<std::size_t>(-1)) {
+            (void)ensureDefaultPlaylist(true);
+        }
+    }
+
+    [[nodiscard]] std::optional<std::size_t> playlistBrowserRowAt(
+        const Layout& layout, D2D1_POINT_2F point) const {
+        if (!contains(layout.playlistBrowserBody, point)) return std::nullopt;
+        constexpr float rowHeight = 30.0F;
+        const auto row = m_playlistBrowserTopRow + static_cast<std::size_t>(
+            (point.y - layout.playlistBrowserBody.top) / rowHeight);
+        return row < m_playlistBrowserRows.size() ? std::optional<std::size_t>{row} : std::nullopt;
+    }
+
+    void clampPlaylistBrowserScroll() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        const auto layout = calculateLayout(wnd);
+        const auto capacity = visibleRowCapacity(layout.playlistBrowserBody.bottom
+            - layout.playlistBrowserBody.top, 30.0F);
+        m_playlistBrowserTopRow = clampTopRow(
+            m_playlistBrowserTopRow, m_playlistBrowserRows.size(), capacity);
+    }
+
+    void selectPlaylistBrowserRow(std::size_t row, bool ctrl, bool shift, bool activate) {
+        if (row >= m_playlistBrowserRows.size()) return;
+        if (!ctrl && !shift) {
+            m_playlistBrowserSelection.assign(1, m_playlistBrowserRows[row].guid);
+            m_playlistBrowserAnchor = row;
+        } else if (shift) {
+            const auto anchor = m_playlistBrowserAnchor < m_playlistBrowserRows.size()
+                ? m_playlistBrowserAnchor : row;
+            if (!ctrl) m_playlistBrowserSelection.clear();
+            const auto first = std::min(anchor, row);
+            const auto last = std::max(anchor, row);
+            for (auto index = first; index <= last; ++index) {
+                const auto guid = m_playlistBrowserRows[index].guid;
+                if (std::none_of(m_playlistBrowserSelection.begin(), m_playlistBrowserSelection.end(),
+                        [&](const GUID& value) { return sameGuid(value, guid); })) {
+                    m_playlistBrowserSelection.push_back(guid);
+                }
+            }
+        } else {
+            const auto guid = m_playlistBrowserRows[row].guid;
+            const auto found = std::find_if(m_playlistBrowserSelection.begin(), m_playlistBrowserSelection.end(),
+                [&](const GUID& value) { return sameGuid(value, guid); });
+            if (found == m_playlistBrowserSelection.end()) m_playlistBrowserSelection.push_back(guid);
+            else m_playlistBrowserSelection.erase(found);
+            m_playlistBrowserAnchor = row;
+        }
+        m_playlistBrowserFocus = row;
+        if (activate) {
+            const auto playlist = playlistByGuid(m_playlistBrowserRows[row].guid);
+            if (playlist != SIZE_MAX) playlist_manager::get()->set_active_playlist(playlist);
+        }
+        invalidate();
+    }
+
+    void updatePlaylistBrowserDrag(HWND wnd, D2D1_POINT_2F point) {
+        if (!m_playlistBrowserDragCandidate) return;
+        const auto dx = point.x - m_playlistBrowserDragStart.x;
+        const auto dy = point.y - m_playlistBrowserDragStart.y;
+        if (!m_playlistBrowserDragging && std::hypot(dx, dy) < 4.0F) return;
+        m_playlistBrowserDragging = true;
+        const auto layout = calculateLayout(wnd);
+        constexpr float rowHeight = 30.0F;
+        if (point.y < layout.playlistBrowserBody.top + 18.0F && m_playlistBrowserTopRow > 0) {
+            --m_playlistBrowserTopRow;
+        } else {
+            const auto capacity = visibleRowCapacity(layout.playlistBrowserBody.bottom
+                - layout.playlistBrowserBody.top, rowHeight);
+            const auto maximum = maximumTopRow(m_playlistBrowserRows.size(), capacity);
+            if (point.y > layout.playlistBrowserBody.bottom - 18.0F
+                && m_playlistBrowserTopRow < maximum) ++m_playlistBrowserTopRow;
+        }
+        const auto relative = std::clamp(point.y - layout.playlistBrowserBody.top, 0.0F,
+            std::max(0.0F, layout.playlistBrowserBody.bottom - layout.playlistBrowserBody.top));
+        const auto row = m_playlistBrowserTopRow + static_cast<std::size_t>(relative / rowHeight);
+        const auto lower = std::fmod(relative, rowHeight) >= rowHeight * 0.5F;
+        m_playlistBrowserInsertion = std::min(m_playlistBrowserRows.size(), row + (lower ? 1U : 0U));
+        invalidate();
+    }
+
+    void commitPlaylistBrowserDrag() {
+        if (m_playlistBrowserDragSnapshot.size() != m_playlistBrowserRows.size()) return;
+        for (std::size_t index = 0; index < m_playlistBrowserRows.size(); ++index) {
+            if (!sameGuid(m_playlistBrowserRows[index].guid, m_playlistBrowserDragSnapshot[index])) return;
+        }
+        std::vector<std::size_t> selected;
+        for (std::size_t index = 0; index < m_playlistBrowserDragSnapshot.size(); ++index) {
+            if (std::any_of(m_playlistBrowserSelection.begin(), m_playlistBrowserSelection.end(),
+                    [&](const GUID& guid) { return sameGuid(guid, m_playlistBrowserDragSnapshot[index]); })) {
+                selected.push_back(index);
+            }
+        }
+        const auto plan = planPlaylistMove(m_playlistBrowserDragSnapshot.size(), selected,
+            m_playlistBrowserInsertion);
+        if (!plan.changed) return;
+        std::vector<GUID> desiredVisible;
+        desiredVisible.reserve(plan.order.size());
+        for (const auto index : plan.order) desiredVisible.push_back(m_playlistBrowserDragSnapshot[index]);
+
+        auto api = playlist_manager_v5::get();
+        std::vector<t_size> order(api->get_playlist_count());
+        std::size_t visible{};
+        for (t_size destination = 0; destination < api->get_playlist_count(); ++destination) {
+            const auto currentGuid = api->playlist_get_guid(destination);
+            if (isAlbumBridgeGuid(currentGuid)) {
+                order[destination] = destination;
+                continue;
+            }
+            if (visible >= desiredVisible.size()) return;
+            const auto source = api->find_playlist_by_guid(desiredVisible[visible++]);
+            if (source == SIZE_MAX) return;
+            order[destination] = source;
+        }
+        if (!api->reorder(order.data(), order.size())) {
+            MessageBoxW(get_wnd(), L"foobar2000 could not reorder these playlists.",
+                L"Refrain", MB_OK | MB_ICONWARNING);
+        }
+        refreshPlaylistBrowserSnapshot();
+    }
+
+    static LRESULT CALLBACK playlistRenameSubclass(HWND window, UINT message, WPARAM wp, LPARAM lp,
+        UINT_PTR, DWORD_PTR reference) {
+        auto* self = reinterpret_cast<PlaybackPanel*>(reference);
+        if (message == WM_GETDLGCODE) return DLGC_WANTALLKEYS;
+        if (message == WM_KEYDOWN && wp == VK_RETURN) {
+            PostMessageW(GetParent(window), kCommitPlaylistRenameMessage, 0, 0);
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wp == VK_ESCAPE) {
+            if (self) self->m_playlistRenameCancelPending = true;
+            PostMessageW(GetParent(window), kCancelPlaylistRenameMessage, 0, 0);
+            return 0;
+        }
+        if (message == WM_KILLFOCUS && self && !self->m_playlistRenameCommitting
+            && !self->m_playlistRenameCancelPending) {
+            PostMessageW(GetParent(window), kCommitPlaylistRenameMessage, 0, 0);
+        }
+        if (message == WM_NCDESTROY) RemoveWindowSubclass(window, playlistRenameSubclass, 1);
+        return DefSubclassProc(window, message, wp, lp);
+    }
+
+    void beginPlaylistBrowserRename() {
+        if (m_playlistBrowserFocus >= m_playlistBrowserRows.size()) return;
+        const auto& row = m_playlistBrowserRows[m_playlistBrowserFocus];
+        const auto playlist = playlistByGuid(row.guid);
+        auto api = playlist_manager::get();
+        if (playlist == SIZE_MAX || (api->playlist_lock_is_present(playlist)
+                && (api->playlist_lock_get_filter_mask(playlist) & playlist_lock::filter_rename) != 0)) {
+            showStatus(L"This playlist does not allow renaming.");
+            return;
+        }
+        cancelPlaylistBrowserRename();
+        const auto layout = calculateLayout(get_wnd());
+        const auto y = layout.playlistBrowserBody.top
+            + static_cast<float>(m_playlistBrowserFocus - m_playlistBrowserTopRow) * 30.0F;
+        if (y < layout.playlistBrowserBody.top || y + 30.0F > layout.playlistBrowserBody.bottom) return;
+        const auto scale = dpiScale();
+        m_playlistRenameEdit = CreateWindowExW(0, L"EDIT", row.name.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            static_cast<int>(std::lround((layout.playlistBrowserBody.left + 18.0F) * scale)),
+            static_cast<int>(std::lround((y + 2.0F) * scale)),
+            static_cast<int>(std::lround((layout.playlistBrowserBody.right
+                - layout.playlistBrowserBody.left - 64.0F) * scale)),
+            static_cast<int>(std::lround(26.0F * scale)), get_wnd(), nullptr,
+            core_api::get_my_instance(), nullptr);
+        if (!m_playlistRenameEdit) return;
+        m_playlistRenameGuid = row.guid;
+        m_playlistRenameOriginal = row.name;
+        m_playlistRenameCancelPending = false;
+        m_playlistRenameCommitting = false;
+        SendMessageW(m_playlistRenameEdit, WM_SETFONT,
+            reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+        SetWindowSubclass(m_playlistRenameEdit, playlistRenameSubclass, 1,
+            reinterpret_cast<DWORD_PTR>(this));
+        SendMessageW(m_playlistRenameEdit, EM_SETSEL, 0, -1);
+        SetFocus(m_playlistRenameEdit);
+    }
+
+    void destroyPlaylistBrowserRenameEdit() {
+        const auto edit = std::exchange(m_playlistRenameEdit, nullptr);
+        if (edit && IsWindow(edit)) DestroyWindow(edit);
+        m_playlistRenameGuid = GUID{};
+        m_playlistRenameOriginal.clear();
+        m_playlistRenameCommitting = false;
+        m_playlistRenameCancelPending = false;
+    }
+
+    void cancelPlaylistBrowserRename() {
+        m_playlistRenameCancelPending = true;
+        destroyPlaylistBrowserRenameEdit();
+        if (const auto wnd = get_wnd(); wnd && IsWindow(wnd)) SetFocus(wnd);
+    }
+
+    void commitPlaylistBrowserRename() {
+        if (!m_playlistRenameEdit || !IsWindow(m_playlistRenameEdit) || m_playlistRenameCommitting) return;
+        m_playlistRenameCommitting = true;
+        const auto length = GetWindowTextLengthW(m_playlistRenameEdit);
+        std::wstring name(static_cast<std::size_t>(length) + 1, L'\0');
+        GetWindowTextW(m_playlistRenameEdit, name.data(), length + 1);
+        name.resize(static_cast<std::size_t>(length));
+        const auto first = name.find_first_not_of(L" \t\r\n");
+        const auto last = name.find_last_not_of(L" \t\r\n");
+        name = first == std::wstring::npos ? std::wstring{} : name.substr(first, last - first + 1);
+        const auto target = playlistByGuid(m_playlistRenameGuid);
+        auto api = playlist_manager::get();
+        const auto utf8 = wideToUtf8(name);
+        const auto duplicate = utf8.empty() ? SIZE_MAX : api->find_playlist(utf8.c_str(), utf8.size());
+        if (name.empty() || (duplicate != SIZE_MAX && duplicate != target)) {
+            MessageBoxW(get_wnd(), name.empty() ? L"Playlist name cannot be empty."
+                : L"A playlist with this name already exists.", L"Refrain", MB_OK | MB_ICONWARNING);
+            m_playlistRenameCommitting = false;
+            SetFocus(m_playlistRenameEdit);
+            SendMessageW(m_playlistRenameEdit, EM_SETSEL, 0, -1);
+            return;
+        }
+        if (target == SIZE_MAX || (api->playlist_lock_is_present(target)
+                && (api->playlist_lock_get_filter_mask(target) & playlist_lock::filter_rename) != 0)
+            || !api->playlist_rename(target, utf8.c_str(), utf8.size())) {
+            MessageBoxW(get_wnd(), L"The playlist changed or rejected this name.",
+                L"Refrain", MB_OK | MB_ICONWARNING);
+            m_playlistRenameCommitting = false;
+            SetFocus(m_playlistRenameEdit);
+            return;
+        }
+        destroyPlaylistBrowserRenameEdit();
+        SetFocus(get_wnd());
+        refreshPlaylistBrowserSnapshot();
+    }
+
+    void deleteSelectedPlaylists() {
+        std::vector<GUID> targets = m_playlistBrowserSelection;
+        if (targets.empty() && m_playlistBrowserFocus < m_playlistBrowserRows.size()) {
+            targets.push_back(m_playlistBrowserRows[m_playlistBrowserFocus].guid);
+        }
+        if (targets.empty()) return;
+        const auto settings = readPlaylistBrowserSettings();
+        std::wstring message = L"Delete " + std::to_wstring(targets.size()) + L" playlist";
+        if (targets.size() != 1) message += L"s";
+        message += L"?\r\n\r\n";
+        bool warning{};
+        for (const auto& guid : targets) {
+            const auto row = findPlaylistRowByGuid(m_playlistBrowserRows, guid);
+            if (row == static_cast<std::size_t>(-1)) continue;
+            const auto& value = m_playlistBrowserRows[row];
+            message += L"• " + value.name + (value.kind == PlaylistBrowserKind::automatic
+                ? L"  [Autoplaylist]" : L"  [Manual]") + L"  ("
+                + std::to_wstring(value.itemCount) + L" tracks)\r\n";
+            warning = warning || value.active || value.playing || sameGuid(value.guid, settings.defaultPlaylistGuid);
+        }
+        if (warning) message += L"\r\nThis includes the active, playing, or default playlist.";
+        message += L"\r\nAudio files will not be deleted.";
+        if (MessageBoxW(get_wnd(), message.c_str(), L"Refrain", MB_YESNO | MB_ICONWARNING
+                | MB_DEFBUTTON2) != IDYES) return;
+        auto api = playlist_manager_v5::get();
+        pfc::bit_array_bittable mask;
+        mask.resize(api->get_playlist_count());
+        bool any{};
+        for (const auto& guid : targets) {
+            const auto playlist = api->find_playlist_by_guid(guid);
+            if (playlist == SIZE_MAX) continue;
+            if (api->playlist_lock_is_present(playlist)
+                && (api->playlist_lock_get_filter_mask(playlist) & playlist_lock::filter_remove_playlist) != 0) {
+                continue;
+            }
+            mask.set(playlist, true);
+            any = true;
+        }
+        if (!any || !api->remove_playlists(mask)) {
+            MessageBoxW(get_wnd(), L"No selected playlist could be deleted. A lock or external change may prevent it.",
+                L"Refrain", MB_OK | MB_ICONINFORMATION);
+        }
+        refreshPlaylistBrowserSnapshot();
+        repairDefaultPlaylist();
+    }
+
+    void setDefaultPlaylist(const GUID& guid) {
+        if (playlistByGuid(guid) == SIZE_MAX || isAlbumBridgeGuid(guid)) return;
+        auto settings = readPlaylistBrowserSettings();
+        settings.defaultPlaylistGuid = guid;
+        writePlaylistBrowserSettings(settings);
+        showStatus(L"Default playlist saved. It will be applied on the next foobar2000 start.");
+    }
+
+    [[nodiscard]] t_size duplicateManualPlaylist(const GUID& guid, const std::wstring& suffix) {
+        const auto source = playlistByGuid(guid);
+        if (source == SIZE_MAX) return SIZE_MAX;
+        auto api = playlist_manager::get();
+        pfc::string8 sourceName;
+        metadb_handle_list content;
+        if (!api->playlist_get_name(source, sourceName)) return SIZE_MAX;
+        api->playlist_get_all_items(source, content);
+        const auto created = createManualPlaylist(utf8ToWide(sourceName.c_str()) + suffix, false);
+        if (created == SIZE_MAX) return SIZE_MAX;
+        if (content.get_count() > 0 && !api->playlist_add_items(created, content, pfc::bit_array_false())) {
+            api->remove_playlist(created);
+            return SIZE_MAX;
+        }
+        api->set_active_playlist(created);
+        refreshPlaylistBrowserSnapshot();
+        return created;
+    }
+
+    bool duplicateAutoplaylist(const GUID& guid) {
+        const auto source = playlistByGuid(guid);
+        if (source == SIZE_MAX || !autoplaylist_manager::get()->is_client_present(source)) return false;
+        try {
+            const auto client = autoplaylist_manager::get()->query_client(source);
+            autoplaylist_client_factory::ptr factory;
+            for (auto candidate : autoplaylist_client_factory::enumerate()) {
+                if (sameGuid(candidate->get_guid(), client->get_guid())) {
+                    factory = candidate;
+                    break;
+                }
+            }
+            if (factory.is_empty()) {
+                MessageBoxW(get_wnd(), L"This autoplaylist provider cannot recreate its rules, so Duplicate Rules is unavailable.",
+                    L"Refrain", MB_OK | MB_ICONINFORMATION);
+                return false;
+            }
+            pfc::array_t<t_uint8> configuration;
+            client->get_configuration(configuration);
+            stream_reader_memblock_ref reader(configuration);
+            const auto clone = factory->instantiate(&reader, configuration.get_size(), fb2k::noAbort);
+            pfc::string8 name;
+            playlist_manager::get()->playlist_get_name(source, name);
+            const auto created = createManualPlaylist(utf8ToWide(name.c_str()) + L" (Rules Copy)", false);
+            if (created == SIZE_MAX) return false;
+            try {
+                const auto flags = autoplaylist_manager_v2::get()->get_client_flags(source);
+                autoplaylist_manager::get()->add_client(clone, created, flags);
+            } catch (...) {
+                playlist_manager::get()->remove_playlist(created);
+                throw;
+            }
+            playlist_manager::get()->set_active_playlist(created);
+            refreshPlaylistBrowserSnapshot();
+            return true;
+        } catch (const std::exception& error) {
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Duplicate Rules",
+                MB_OK | MB_ICONWARNING);
+            return false;
+        }
+    }
+
+    bool freezeAutoplaylist(const GUID& guid) {
+        const auto source = playlistByGuid(guid);
+        if (source == SIZE_MAX || !autoplaylist_manager::get()->is_client_present(source)) return false;
+        pfc::string8 name;
+        playlist_manager::get()->playlist_get_name(source, name);
+        const auto created = duplicateManualPlaylist(guid, L" (Manual)");
+        if (created == SIZE_MAX) return false;
+        const auto currentSource = playlistByGuid(guid);
+        if (currentSource == SIZE_MAX) return true;
+        try {
+            autoplaylist_manager::get()->remove_client(currentSource);
+            if (!playlist_manager::get()->remove_playlist(currentSource)) {
+                MessageBoxW(get_wnd(), L"The manual snapshot was created, but the original autoplaylist could not be removed.",
+                    L"Refrain", MB_OK | MB_ICONINFORMATION);
+            }
+        } catch (const std::exception& error) {
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Freeze as Manual Playlist",
+                MB_OK | MB_ICONWARNING);
+        }
+        playlist_manager::get()->set_active_playlist(created);
+        refreshPlaylistBrowserSnapshot();
+        repairDefaultPlaylist();
+        return true;
+    }
+
+    bool createAutoplaylist(const std::wstring& requestedName, const char* query) {
+        constexpr const char* sort = "%album% | %discnumber% | %tracknumber% | %title%";
+        try {
+            (void)search_filter_manager::get()->create(query);
+            const auto name = uniqueBrowserName(requestedName);
+            const auto utf8 = wideToUtf8(name);
+            auto api = playlist_manager::get();
+            const auto created = api->create_playlist(utf8.c_str(), utf8.size(), SIZE_MAX);
+            if (created == SIZE_MAX) return false;
+            try {
+                autoplaylist_manager::get()->add_client_simple(query, sort, created, autoplaylist_flag_sort);
+            } catch (...) {
+                api->remove_playlist(created);
+                throw;
+            }
+            api->set_active_playlist(created);
+            refreshPlaylistBrowserSnapshot();
+            return true;
+        } catch (const std::exception& error) {
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Autoplaylist",
+                MB_OK | MB_ICONWARNING);
+            return false;
+        }
+    }
+
+    void savePlaylistByGuid(const GUID& guid) {
+        auto api = playlist_manager::get();
+        const auto target = playlistByGuid(guid);
+        if (target == SIZE_MAX) return;
+        const auto prior = api->get_active_playlist();
+        const auto priorGuid = prior != SIZE_MAX ? playlist_manager_v5::get()->playlist_get_guid(prior) : GUID{};
+        api->set_active_playlist(target);
+        standard_commands::main_save_playlist();
+        const auto restore = playlistByGuid(priorGuid);
+        if (restore != SIZE_MAX) api->set_active_playlist(restore);
+    }
+
+    void showPlaylistBrowserMenu(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
+        const auto layout = calculateLayout(wnd);
+        const auto rowAtPoint = playlistBrowserRowAt(layout, point);
+        if (rowAtPoint) {
+            const auto row = *rowAtPoint;
+            const auto guid = m_playlistBrowserRows[row].guid;
+            const auto selected = std::any_of(m_playlistBrowserSelection.begin(),
+                m_playlistBrowserSelection.end(), [&](const GUID& value) { return sameGuid(value, guid); });
+            if (!selected) selectPlaylistBrowserRow(row, false, false, false);
+            else m_playlistBrowserFocus = row;
+            const auto playlist = playlistByGuid(guid);
+            if (playlist == SIZE_MAX) return;
+            const auto automatic = autoplaylist_manager::get()->is_client_present(playlist);
+            const auto lockMask = playlist_manager::get()->playlist_lock_is_present(playlist)
+                ? playlist_manager::get()->playlist_lock_get_filter_mask(playlist) : 0U;
+            const auto menu = CreatePopupMenu();
+            if (!menu) return;
+            AppendMenuW(menu, MF_STRING, 1, L"Activate");
+            AppendMenuW(menu, MF_STRING, 2, L"Set as Default Playlist");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            if (automatic) {
+                autoplaylist_client_v2::ptr clientV2;
+                const auto client = autoplaylist_manager::get()->query_client(playlist);
+                const auto canEdit = client->service_query_t(clientV2) && clientV2->show_ui_available();
+                bool canDuplicate{};
+                for (auto factory : autoplaylist_client_factory::enumerate()) {
+                    if (sameGuid(factory->get_guid(), client->get_guid())) { canDuplicate = true; break; }
+                }
+                AppendMenuW(menu, MF_STRING | (canEdit ? 0 : MF_GRAYED), 7, L"Edit Rules...");
+                AppendMenuW(menu, MF_STRING | (canDuplicate ? 0 : MF_GRAYED), 8, L"Duplicate Rules");
+                AppendMenuW(menu, MF_STRING, 9, L"Freeze as Manual Playlist");
+            } else {
+                AppendMenuW(menu, MF_STRING, 4, L"Duplicate");
+            }
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING | ((lockMask & playlist_lock::filter_rename) ? MF_GRAYED : 0), 3, L"Rename");
+            AppendMenuW(menu, MF_STRING, 5, L"Save This Playlist...");
+            AppendMenuW(menu, MF_STRING | ((lockMask & playlist_lock::filter_remove_playlist) ? MF_GRAYED : 0), 6, L"Delete");
+            ClientToScreen(wnd, &clientPoint);
+            const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                clientPoint.x, clientPoint.y, 0, wnd, nullptr);
+            DestroyMenu(menu);
+            if (command == 1) playlist_manager::get()->set_active_playlist(playlistByGuid(guid));
+            else if (command == 2) setDefaultPlaylist(guid);
+            else if (command == 3) beginPlaylistBrowserRename();
+            else if (command == 4) (void)duplicateManualPlaylist(guid, L" (Copy)");
+            else if (command == 5) savePlaylistByGuid(guid);
+            else if (command == 6) deleteSelectedPlaylists();
+            else if (command == 7) {
+                const auto current = playlistByGuid(guid);
+                if (current != SIZE_MAX) autoplaylist_manager::get()->query_client(current)->show_ui(current);
+            } else if (command == 8) (void)duplicateAutoplaylist(guid);
+            else if (command == 9) (void)freezeAutoplaylist(guid);
+            return;
+        }
+
+        const auto menu = CreatePopupMenu();
+        const auto add = CreatePopupMenu();
+        const auto presets = CreatePopupMenu();
+        if (!menu || !add || !presets) {
+            if (presets) DestroyMenu(presets); if (add) DestroyMenu(add); if (menu) DestroyMenu(menu);
+            return;
+        }
+        AppendMenuW(add, MF_STRING, 100, L"New Playlist");
+        AppendMenuW(add, MF_STRING, 101, L"New Autoplaylist...");
+        constexpr std::array<const wchar_t*, 11> presetNames{
+            L"Library (full)", L"Never played", L"History - last week", L"Played often",
+            L"Recently added - 12 weeks", L"Unrated", L"Rated 1", L"Rated 2", L"Rated 3", L"Rated 4", L"Rated 5"};
+        for (std::size_t index = 0; index < presetNames.size(); ++index) {
+            AppendMenuW(presets, MF_STRING, 200 + static_cast<UINT>(index), presetNames[index]);
+        }
+        AppendMenuW(add, MF_POPUP, reinterpret_cast<UINT_PTR>(presets), L"Preset Autoplaylists");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(add), L"Add Playlist...");
+        AppendMenuW(menu, MF_STRING, 102, L"Load Playlist...");
+        AppendMenuW(menu, MF_STRING, 103, L"Save All Playlists...");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 104, L"Playlist Browser preferences...");
+        ClientToScreen(wnd, &clientPoint);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            clientPoint.x, clientPoint.y, 0, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command == 100) {
+            const auto created = createManualPlaylist(L"New Playlist", true);
+            if (created != SIZE_MAX) {
+                refreshPlaylistBrowserSnapshot();
+                m_playlistBrowserFocus = findPlaylistRowByGuid(m_playlistBrowserRows,
+                    playlist_manager_v5::get()->playlist_get_guid(created));
+                beginPlaylistBrowserRename();
+            }
+        } else if (command == 101) {
+            if (createAutoplaylist(L"New Autoplaylist", "ALL")) {
+                const auto created = playlist_manager::get()->get_active_playlist();
+                if (created != SIZE_MAX && autoplaylist_manager::get()->is_client_present(created)) {
+                    const auto client = autoplaylist_manager::get()->query_client(created);
+                    autoplaylist_client_v2::ptr clientV2;
+                    if (client->service_query_t(clientV2) && clientV2->show_ui_available()) {
+                        client->show_ui(created);
+                    }
+                }
+            }
+        } else if (command == 102) standard_commands::main_load_playlist();
+        else if (command == 103) standard_commands::main_save_all_playlists();
+        else if (command == 104) ui_control::get()->show_preferences(kPlaylistBrowserPreferencesPageGuid);
+        else if (command >= 200 && command < 211) {
+            constexpr std::array<const char*, 11> queries{
+                "ALL", "%play_count% IS 0",
+                "%last_played% DURING LAST 1 WEEK SORT DESCENDING BY %last_played%",
+                "%play_count% GREATER 0 SORT DESCENDING BY %play_count%",
+                "%added% DURING LAST 12 WEEKS SORT DESCENDING BY %added%", "%rating% MISSING",
+                "%rating% IS 1", "%rating% IS 2", "%rating% IS 3", "%rating% IS 4", "%rating% IS 5"};
+            const auto index = static_cast<std::size_t>(command - 200);
+            (void)createAutoplaylist(presetNames[index], queries[index]);
+        }
+    }
+
     [[nodiscard]] bool playlistSnapshotMatchesAt(
         std::size_t playlist, const metadb_handle_list& snapshot) const {
         const auto api = playlist_manager::get();
@@ -1810,7 +2476,21 @@ private:
         const auto layout = calculateLayout(get_wnd());
         const auto queueTarget = m_queueMode && contains(layout.queuePanel, client) && m_externalDropNative;
         const auto playlistTarget = contains(layout.playlistArea, client) && playlistCanAdd(m_activePlaylist);
-        if (!m_externalDropAccepts || (!queueTarget && !playlistTarget)) {
+        bool browserTarget{};
+        m_externalDropBrowserBlank = false;
+        m_externalDropBrowserGuid = GUID{};
+        if (m_workspace == Workspace::playlist && contains(layout.playlistBrowserBody, client)) {
+            if (const auto row = playlistBrowserRowAt(layout, client)) {
+                const auto playlist = playlistByGuid(m_playlistBrowserRows[*row].guid);
+                browserTarget = playlist != SIZE_MAX && playlistCanAdd(playlist)
+                    && !autoplaylist_manager::get()->is_client_present(playlist);
+                if (browserTarget) m_externalDropBrowserGuid = m_playlistBrowserRows[*row].guid;
+            } else {
+                browserTarget = true;
+                m_externalDropBrowserBlank = true;
+            }
+        }
+        if (!m_externalDropAccepts || (!queueTarget && !playlistTarget && !browserTarget)) {
             *effect = DROPEFFECT_NONE;
             m_externalDropActive = false;
             m_externalDropDestination = DropDestination::none;
@@ -1818,8 +2498,14 @@ private:
             return S_OK;
         }
         m_externalDropActive = true;
-        m_externalDropDestination = queueTarget ? DropDestination::queue : DropDestination::playlist;
+        m_externalDropDestination = queueTarget ? DropDestination::queue
+            : (browserTarget ? DropDestination::playlistBrowser : DropDestination::playlist);
         if (queueTarget) {
+            *effect = (allowed & DROPEFFECT_COPY) != 0 ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+            invalidate();
+            return S_OK;
+        }
+        if (browserTarget) {
             *effect = (allowed & DROPEFFECT_COPY) != 0 ? DROPEFFECT_COPY : DROPEFFECT_NONE;
             invalidate();
             return S_OK;
@@ -1838,6 +2524,8 @@ private:
         m_externalDropActive = false;
         m_externalDropAccepts = false;
         m_externalDropDestination = DropDestination::none;
+        m_externalDropBrowserGuid = GUID{};
+        m_externalDropBrowserBlank = false;
         invalidate();
     }
 
@@ -1868,20 +2556,20 @@ private:
         return inserted != SIZE_MAX;
     }
 
-    void beginAsyncDrop(IDataObject* data, std::size_t insertion) {
-        if (!data || m_activePlaylist == SIZE_MAX) return;
+    void beginAsyncDrop(IDataObject* data, const GUID& guid, const metadb_handle_list& snapshot,
+        std::size_t insertion, bool createPlaylist = false) {
+        if (!data || (!createPlaylist && nullGuid(guid))) return;
         const auto state = m_dropAsync;
         const auto generation = state->generation.fetch_add(1) + 1;
-        const auto guid = activePlaylistGuid();
-        const auto snapshot = m_playlistItems;
         const auto notify = process_locations_notify::create(
-            [state, generation, guid, insertion, snapshot](metadb_handle_list_cref items) mutable {
+            [state, generation, guid, insertion, snapshot, createPlaylist](metadb_handle_list_cref items) mutable {
                 auto* completion = new DropCompletion();
                 completion->generation = generation;
                 completion->playlistGuid = guid;
                 completion->insertion = insertion;
                 completion->targetSnapshot = snapshot;
                 completion->items = items;
+                completion->createPlaylist = createPlaylist;
                 fb2k::inMainThread([state, completion] {
                     if (!state->alive.load() || state->generation.load() != completion->generation
                         || !IsWindow(state->window)) {
@@ -1899,11 +2587,19 @@ private:
     void applyDropCompletion(DropCompletion* raw) {
         const std::unique_ptr<DropCompletion> completion(raw);
         if (!completion || completion->generation != m_dropAsync->generation.load()) return;
-        if (!insertDroppedItems(completion->playlistGuid, completion->targetSnapshot,
+        auto guid = completion->playlistGuid;
+        auto snapshot = completion->targetSnapshot;
+        if (completion->createPlaylist && completion->items.get_count() > 0) {
+            const auto created = createManualPlaylist(L"Dragged Items", true);
+            if (created != SIZE_MAX) guid = playlist_manager_v5::get()->playlist_get_guid(created);
+            snapshot.remove_all();
+        }
+        if (nullGuid(guid) || !insertDroppedItems(guid, snapshot,
                 completion->insertion, completion->items)) {
             showStatus(L"The target playlist changed or rejected these items.");
         }
         rebuildPlaylistSnapshot(false);
+        refreshPlaylistBrowserSnapshot();
     }
 
     HRESULT dropData(IDataObject* data, DWORD keys, POINTL point, DWORD* effect) {
@@ -1930,6 +2626,38 @@ private:
             }
             *effect = added ? DROPEFFECT_COPY : DROPEFFECT_NONE;
             dragLeave();
+            return S_OK;
+        }
+        if (destination == DropDestination::playlistBrowser) {
+            const auto targetGuid = m_externalDropBrowserGuid;
+            const auto createOnBlank = m_externalDropBrowserBlank;
+            metadb_handle_list targetSnapshot;
+            if (!createOnBlank) {
+                const auto target = playlistByGuid(targetGuid);
+                if (target != SIZE_MAX) playlist_manager::get()->playlist_get_all_items(target, targetSnapshot);
+            }
+            bool inserted{};
+            if (m_externalDropNative) {
+                metadb_handle_list items;
+                const pfc::com_ptr_t<IDataObject> object(data);
+                if (SUCCEEDED(ole_interaction::get()->parse_dataobject_immediate(object, items))
+                    && items.get_count() > 0) {
+                    auto guid = targetGuid;
+                    if (createOnBlank) {
+                        const auto created = createManualPlaylist(L"Dragged Items", true);
+                        if (created != SIZE_MAX) guid = playlist_manager_v5::get()->playlist_get_guid(created);
+                    }
+                    inserted = !nullGuid(guid) && insertDroppedItems(guid, targetSnapshot,
+                        targetSnapshot.get_count(), items);
+                }
+            } else {
+                beginAsyncDrop(data, targetGuid, targetSnapshot, targetSnapshot.get_count(), createOnBlank);
+                inserted = true;
+            }
+            if (m_oleDragFromThisPanel) m_oleDropHandledByThisPanel = true;
+            *effect = inserted ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+            dragLeave();
+            refreshPlaylistBrowserSnapshot();
             return S_OK;
         }
         const auto insertion = m_externalDropInsertion;
@@ -1967,7 +2695,7 @@ private:
                 *effect = DROPEFFECT_NONE;
             }
         } else {
-            beginAsyncDrop(data, insertion);
+            beginAsyncDrop(data, guid, snapshot, insertion);
             *effect = (allowed & DROPEFFECT_COPY) != 0 ? DROPEFFECT_COPY : DROPEFFECT_NONE;
         }
         dragLeave();
@@ -2318,6 +3046,10 @@ private:
             showQueueMenu(wnd, point, clientPoint);
             return;
         }
+        if (contains(layout.playlistBrowser, point)) {
+            showPlaylistBrowserMenu(wnd, point, clientPoint);
+            return;
+        }
         if (contains(layout.playlistHeader, point)) {
             showPlaylistHeaderMenu(wnd, clientPoint);
             return;
@@ -2432,6 +3164,48 @@ private:
         return true;
     }
 
+    bool onPlaylistBrowserKeyDown(HWND wnd, WPARAM key) {
+        const auto count = m_playlistBrowserRows.size();
+        const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (ctrl && key == 'A') {
+            m_playlistBrowserSelection.clear();
+            for (const auto& row : m_playlistBrowserRows) m_playlistBrowserSelection.push_back(row.guid);
+            invalidate();
+            return true;
+        }
+        if (key == VK_DELETE) {
+            deleteSelectedPlaylists();
+            return true;
+        }
+        if (key == VK_F2) {
+            beginPlaylistBrowserRename();
+            return true;
+        }
+        if (count == 0) return false;
+        auto focus = m_playlistBrowserFocus < count ? m_playlistBrowserFocus : 0;
+        const auto layout = calculateLayout(wnd);
+        const auto page = std::max<std::size_t>(1, visibleRowCapacity(
+            layout.playlistBrowserBody.bottom - layout.playlistBrowserBody.top, 30.0F) - 1);
+        auto target = focus;
+        if (key == VK_UP) target = focus > 0 ? focus - 1 : 0;
+        else if (key == VK_DOWN) target = std::min(count - 1, focus + 1);
+        else if (key == VK_PRIOR) target = focus > page ? focus - page : 0;
+        else if (key == VK_NEXT) target = std::min(count - 1, focus + page);
+        else if (key == VK_HOME) target = 0;
+        else if (key == VK_END) target = count - 1;
+        else if (key == VK_RETURN || key == VK_SPACE) {
+            const auto playlist = playlistByGuid(m_playlistBrowserRows[focus].guid);
+            if (playlist != SIZE_MAX) playlist_manager::get()->set_active_playlist(playlist);
+            return true;
+        } else return false;
+        selectPlaylistBrowserRow(target, ctrl, shift, !ctrl && !shift);
+        m_playlistBrowserTopRow = ensureRowVisible(m_playlistBrowserTopRow, target, count,
+            visibleRowCapacity(layout.playlistBrowserBody.bottom
+                - layout.playlistBrowserBody.top, 30.0F));
+        return true;
+    }
+
     void refreshFromCore() {
         auto api = playback_control::get();
         m_state.playing = api->is_playing();
@@ -2443,6 +3217,7 @@ private:
         auto apiV3 = playback_control_v3::get();
         m_state.customVolume = apiV3->custom_volume_is_active();
         refreshPlayingLocation();
+        refreshPlaylistBrowserSnapshot();
         refreshNowPlayingTarget();
         invalidate();
     }
@@ -2512,9 +3287,11 @@ private:
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x252A2E), m_foreground.ReleaseAndGetAddressOf());
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xA5A099), m_disabled.ReleaseAndGetAddressOf());
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xE7A43B), m_accent.ReleaseAndGetAddressOf());
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x5F7495), m_defaultPlaylist.ReleaseAndGetAddressOf());
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xFFFFFF), m_light.ReleaseAndGetAddressOf());
         createArtworkBitmap();
-        return m_background && m_surface && m_foreground && m_disabled && m_accent && m_light;
+        return m_background && m_surface && m_foreground && m_disabled && m_accent
+            && m_defaultPlaylist && m_light;
     }
 
     void releaseTextResources() noexcept {
@@ -2534,6 +3311,7 @@ private:
         }
         m_light.Reset();
         m_artworkBitmap.Reset();
+        m_defaultPlaylist.Reset();
         m_accent.Reset();
         m_disabled.Reset();
         m_foreground.Reset();
@@ -2667,9 +3445,21 @@ private:
         if (playlistRight > 120.0F && top > 60.0F) {
             constexpr float headerHeight = 30.0F;
             constexpr float scrollbarWidth = 12.0F;
-            layout.playlistArea = D2D1::RectF(0.0F, 0.0F, playlistRight, top);
-            layout.playlistHeader = D2D1::RectF(0.0F, 0.0F, playlistRight, headerHeight);
-            layout.playlistBody = D2D1::RectF(0.0F, headerHeight,
+            constexpr float browserDividerWidth = 8.0F;
+            const auto maxBrowser = std::max(0.0F,
+                std::min(width * 0.35F, playlistRight - 120.0F - browserDividerWidth));
+            const auto minBrowser = std::min(180.0F, maxBrowser);
+            const auto storedBrowser = width * static_cast<float>(m_playlistBrowserSplitPermille) / 1000.0F;
+            const auto browserWidth = std::clamp(storedBrowser, minBrowser, maxBrowser);
+            layout.playlistBrowser = D2D1::RectF(0.0F, 0.0F, browserWidth, top);
+            layout.playlistBrowserHeader = D2D1::RectF(0.0F, 0.0F, browserWidth, headerHeight);
+            layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight, browserWidth, top);
+            layout.playlistBrowserDivider = D2D1::RectF(browserWidth, 0.0F,
+                browserWidth + browserDividerWidth, top);
+            const auto playlistLeft = browserWidth + browserDividerWidth;
+            layout.playlistArea = D2D1::RectF(playlistLeft, 0.0F, playlistRight, top);
+            layout.playlistHeader = D2D1::RectF(playlistLeft, 0.0F, playlistRight, headerHeight);
+            layout.playlistBody = D2D1::RectF(playlistLeft, headerHeight,
                 playlistRight - scrollbarWidth, top);
             layout.playlistScrollTrack = D2D1::RectF(playlistRight - scrollbarWidth,
                 headerHeight, playlistRight, top);
@@ -2718,6 +3508,12 @@ private:
                 return ControlId::trackDetails;
             }
         }
+        if (m_workspace == Workspace::playlist && contains(layout.playlistBrowserDivider, point)) {
+            return ControlId::playlistBrowserDivider;
+        }
+        if (m_workspace == Workspace::playlist && contains(layout.playlistBrowser, point)) {
+            return ControlId::playlistBrowser;
+        }
         if (contains(layout.playlistScrollTrack, point)) return ControlId::playlistScrollbar;
         if (contains(layout.playlistHeader, point)) return ControlId::playlistHeader;
         if (contains(layout.playlistBody, point)) return ControlId::playlistBody;
@@ -2764,6 +3560,8 @@ private:
         case ControlId::trackDetails: return true;
         case ControlId::playlistBody:
         case ControlId::playlistScrollbar: return true;
+        case ControlId::playlistBrowser:
+        case ControlId::playlistBrowserDivider: return true;
         case ControlId::queueBody:
         case ControlId::queueScrollbar: return true;
         default: return false;
@@ -2794,7 +3592,10 @@ private:
             m_disabled.Get(), 1.0F);
 
         if (m_workspace == Workspace::album) drawAlbumWorkspace(layout);
-        else drawPlaylist(layout);
+        else {
+            drawPlaylistBrowser(layout);
+            drawPlaylist(layout);
+        }
         if (!m_statusText.empty() && (layout.playlistArea.right > layout.playlistArea.left
                 || layout.albumGrid.right > layout.albumGrid.left)) {
             const auto area = m_workspace == Workspace::album ? layout.albumGrid : layout.playlistArea;
@@ -3054,6 +3855,81 @@ private:
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(layout.albumTrackScrollThumb, 4.0F, 4.0F),
                 m_disabled.Get());
         }
+    }
+
+    void drawPlaylistBrowser(const Layout& layout) {
+        if (layout.playlistBrowser.right <= layout.playlistBrowser.left) return;
+        const auto defaultGuid = readPlaylistBrowserSettings().defaultPlaylistGuid;
+        m_renderTarget->FillRectangle(layout.playlistBrowser, m_background.Get());
+        m_renderTarget->FillRectangle(layout.playlistBrowserHeader, m_surface.Get());
+        m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistBrowserHeader.left,
+            layout.playlistBrowserHeader.bottom), D2D1::Point2F(layout.playlistBrowserHeader.right,
+            layout.playlistBrowserHeader.bottom), m_disabled.Get(), 1.0F);
+        drawTextWith(L"Playlists", D2D1::RectF(layout.playlistBrowserHeader.left + 12.0F,
+            layout.playlistBrowserHeader.top, layout.playlistBrowserHeader.right - 12.0F,
+            layout.playlistBrowserHeader.bottom), m_titleFormat.Get(),
+            DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+
+        constexpr float rowHeight = 30.0F;
+        const auto visible = visibleRows(m_playlistBrowserTopRow, m_playlistBrowserRows.size(),
+            layout.playlistBrowserBody.bottom - layout.playlistBrowserBody.top, rowHeight, 0);
+        m_renderTarget->PushAxisAlignedClip(layout.playlistBrowserBody, D2D1_ANTIALIAS_MODE_ALIASED);
+        for (auto index = visible.first; index < visible.end; ++index) {
+            const auto& row = m_playlistBrowserRows[index];
+            const auto y = layout.playlistBrowserBody.top
+                + static_cast<float>(index - m_playlistBrowserTopRow) * rowHeight;
+            const auto rect = D2D1::RectF(layout.playlistBrowserBody.left, y,
+                layout.playlistBrowserBody.right, y + rowHeight);
+            const auto selected = std::any_of(m_playlistBrowserSelection.begin(),
+                m_playlistBrowserSelection.end(), [&](const GUID& value) { return sameGuid(value, row.guid); });
+            const auto isDefault = sameGuid(row.guid, defaultGuid);
+            if (row.active) m_renderTarget->FillRectangle(rect, m_surface.Get());
+            if (selected) m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
+                rect.right - 1.0F, rect.bottom - 1.0F), m_foreground.Get(), 1.0F);
+            if (m_externalDropActive && m_externalDropDestination == DropDestination::playlistBrowser
+                && !m_externalDropBrowserBlank && sameGuid(row.guid, m_externalDropBrowserGuid)) {
+                m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
+                    rect.right - 1.0F, rect.bottom - 1.0F), m_accent.Get(), 2.0F);
+            }
+            if (row.playing) {
+                drawTriangle(D2D1::Point2F(rect.left + 8.0F, y + 10.0F),
+                    D2D1::Point2F(rect.left + 8.0F, y + 20.0F),
+                    D2D1::Point2F(rect.left + 15.0F, y + 15.0F), m_accent.Get());
+            }
+            const auto type = row.kind == PlaylistBrowserKind::automatic
+                ? (row.lockMask != 0 ? L"A·L" : L"A") : (row.lockMask != 0 ? L"L" : L"");
+            if (*type) drawTextWith(type, D2D1::RectF(rect.left + 18.0F, y, rect.left + 36.0F,
+                y + rowHeight), m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+            const auto textLeft = *type ? rect.left + 42.0F : rect.left + 20.0F;
+            drawTextWith(row.name, D2D1::RectF(textLeft, y, rect.right - 48.0F, y + rowHeight),
+                m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
+                isDefault ? m_defaultPlaylist.Get() : (row.active ? m_accent.Get() : m_foreground.Get()));
+            drawTextWith(std::to_wstring(row.itemCount), D2D1::RectF(rect.right - 44.0F, y,
+                rect.right - 8.0F, y + rowHeight), m_secondaryFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_TRAILING, isDefault ? m_defaultPlaylist.Get() : m_disabled.Get());
+        }
+        if (m_playlistBrowserDragging && m_playlistBrowserInsertion >= m_playlistBrowserTopRow) {
+            const auto y = layout.playlistBrowserBody.top
+                + static_cast<float>(m_playlistBrowserInsertion - m_playlistBrowserTopRow) * rowHeight;
+            if (y >= layout.playlistBrowserBody.top && y <= layout.playlistBrowserBody.bottom) {
+                m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistBrowserBody.left, y),
+                    D2D1::Point2F(layout.playlistBrowserBody.right, y), m_accent.Get(), 2.0F);
+            }
+        }
+        m_renderTarget->PopAxisAlignedClip();
+        if (m_externalDropActive && m_externalDropDestination == DropDestination::playlistBrowser
+            && m_externalDropBrowserBlank) {
+            m_renderTarget->DrawRectangle(D2D1::RectF(layout.playlistBrowserBody.left + 1.0F,
+                layout.playlistBrowserBody.top + 1.0F, layout.playlistBrowserBody.right - 1.0F,
+                layout.playlistBrowserBody.bottom - 1.0F), m_accent.Get(), 2.0F);
+        }
+        m_renderTarget->FillRectangle(layout.playlistBrowserDivider,
+            m_active == ControlId::playlistBrowserDivider || m_hover == ControlId::playlistBrowserDivider
+                ? m_accent.Get() : m_surface.Get());
+        m_renderTarget->DrawLine(D2D1::Point2F((layout.playlistBrowserDivider.left
+                + layout.playlistBrowserDivider.right) * 0.5F, layout.playlistBrowserDivider.top),
+            D2D1::Point2F((layout.playlistBrowserDivider.left + layout.playlistBrowserDivider.right) * 0.5F,
+                layout.playlistBrowserDivider.bottom), m_disabled.Get(), 1.0F);
     }
 
     void drawPlaylist(const Layout& layout) {
@@ -4362,6 +5238,10 @@ private:
             m_albumSplitPermille = std::clamp(static_cast<int>(std::lround(point.x / width * 1000.0F)), 350, 800);
             clampAlbumScroll();
             invalidate();
+        } else if (m_active == ControlId::playlistBrowserDivider) {
+            updatePlaylistBrowserDivider(wnd, point.x);
+        } else if (m_active == ControlId::playlistBrowser) {
+            updatePlaylistBrowserDrag(wnd, point);
         } else if (m_active == ControlId::albumGridScrollbar) {
             updateAlbumGridScrollbar(wnd, point.y);
         } else if (m_active == ControlId::albumTrackScrollbar) {
@@ -4400,6 +5280,25 @@ private:
                 m_focus = ControlId::albumTrackList;
                 invalidate();
             }
+            return;
+        }
+        if (m_workspace == Workspace::playlist && hit == ControlId::playlistBrowser) {
+            if (const auto row = playlistBrowserRowAt(calculateLayout(wnd), point)) {
+                const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                selectPlaylistBrowserRow(*row, ctrl, shift, !ctrl && !shift);
+                m_playlistBrowserDragCandidate = *row;
+                m_playlistBrowserDragStart = point;
+                m_playlistBrowserDragSnapshot.clear();
+                for (const auto& value : m_playlistBrowserRows) m_playlistBrowserDragSnapshot.push_back(value.guid);
+                m_active = ControlId::playlistBrowser;
+                SetCapture(wnd);
+            } else if ((GetKeyState(VK_CONTROL) & 0x8000) == 0
+                && (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
+                m_playlistBrowserSelection.clear();
+                invalidate();
+            }
+            m_focus = ControlId::playlistBrowser;
             return;
         }
         if (const auto rating = playlistRatingAt(wnd, point)) {
@@ -4462,6 +5361,8 @@ private:
         } else if (hit == ControlId::rightDivider) {
             m_dragHeaderPermille = static_cast<int>(readSettings().rightHeaderPermille);
             updateRightDivider(wnd, point.y);
+        } else if (hit == ControlId::playlistBrowserDivider) {
+            updatePlaylistBrowserDivider(wnd, point.x);
         } else if (hit == ControlId::albumGridScrollbar) {
             const auto layout = calculateLayout(wnd);
             if (contains(layout.albumGridScrollThumb, point)) {
@@ -4517,6 +5418,7 @@ private:
             : -1;
         const auto commitQueue = active == ControlId::queueBody && m_queueDragging;
         const auto commitPlaylist = active == ControlId::playlistBody && m_playlistDragging;
+        const auto commitBrowser = active == ControlId::playlistBrowser && m_playlistBrowserDragging;
         const auto ratingRelease = active == ControlId::playlistRating ? playlistRatingAt(wnd, point) : std::nullopt;
         m_active = ControlId::none;
         if (active == ControlId::seek) {
@@ -4540,6 +5442,15 @@ private:
             syncLyricsHost(wnd);
         } else if (active == ControlId::albumDivider) {
             persistAlbumBrowserState();
+        } else if (active == ControlId::playlistBrowserDivider) {
+            auto settings = readPlaylistBrowserSettings();
+            settings.splitPermille = m_playlistBrowserSplitPermille;
+            writePlaylistBrowserSettings(settings);
+        } else if (active == ControlId::playlistBrowser) {
+            if (commitBrowser) commitPlaylistBrowserDrag();
+            m_playlistBrowserDragCandidate.reset();
+            m_playlistBrowserDragging = false;
+            m_playlistBrowserDragSnapshot.clear();
         } else if (active == ControlId::playlistHeader) {
             if (m_headerResizeColumns) {
                 writePlaylistViewSettings(m_playlistSettings);
@@ -4625,6 +5536,16 @@ private:
             const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
             const auto candidate = static_cast<long long>(m_queueTopRow) - static_cast<long long>(notches) * 3LL;
             m_queueTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL, static_cast<long long>(maximum)));
+            invalidate();
+        } else if (m_workspace == Workspace::playlist && contains(layout.playlistBrowser, point)) {
+            const auto capacity = visibleRowCapacity(layout.playlistBrowserBody.bottom
+                - layout.playlistBrowserBody.top, 30.0F);
+            const auto maximum = maximumTopRow(m_playlistBrowserRows.size(), capacity);
+            const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            const auto candidate = static_cast<long long>(m_playlistBrowserTopRow)
+                - static_cast<long long>(notches) * 3LL;
+            m_playlistBrowserTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL,
+                static_cast<long long>(maximum)));
             invalidate();
         } else if (contains(layout.playlistArea, point)) {
             const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
@@ -4796,6 +5717,7 @@ private:
             return true;
         }
         if (m_focus == ControlId::playlistBody && onPlaylistKeyDown(wnd, key)) return true;
+        if (m_focus == ControlId::playlistBrowser && onPlaylistBrowserKeyDown(wnd, key)) return true;
         if (m_focus == ControlId::queueBody && onQueueKeyDown(wnd, key)) return true;
         if (m_focus == ControlId::trackDetails) {
             if (key == 'C' && (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
@@ -4880,6 +5802,18 @@ private:
         syncLyricsHost(wnd);
     }
 
+    void updatePlaylistBrowserDivider(HWND wnd, float x) {
+        RECT client{};
+        GetClientRect(wnd, &client);
+        const auto width = std::max(1.0F, static_cast<float>(client.right - client.left) / dpiScale());
+        const auto maxWidth = width * 0.35F;
+        const auto requested = std::clamp(x, std::min(180.0F, maxWidth), maxWidth);
+        m_playlistBrowserSplitPermille = normalizePlaylistBrowserSplitPermille(
+            static_cast<int>(std::lround(requested / width * 1000.0F)));
+        clampPlaylistScroll();
+        invalidate();
+    }
+
     void cancelInteraction() {
         if (m_active == ControlId::playlistHeader && m_headerResizeColumns) {
             m_playlistSettings = m_headerStartSettings;
@@ -4888,6 +5822,9 @@ private:
         m_previewing = false;
         m_dragHeaderPermille = -1;
         m_playlistScrollbarGrabOffset = 0.0F;
+        m_playlistBrowserDragCandidate.reset();
+        m_playlistBrowserDragging = false;
+        m_playlistBrowserDragSnapshot.clear();
         m_albumGridScrollbarGrabOffset = 0.0F;
         m_albumTrackScrollbarGrabOffset = 0.0F;
         m_headerPressedColumn.reset();
@@ -5006,9 +5943,11 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
+        m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
         reloadPlaylistViewSettings();
         rebuildPlaylistGroups();
         clampPlaylistScroll();
+        clampPlaylistBrowserScroll();
         if (settings.lyricsAutoSwitch != m_autoSwitchEnabled) {
             m_autoSwitchEnabled = settings.lyricsAutoSwitch;
             m_lowerRightView = settings.lyricsAutoSwitch
@@ -5048,6 +5987,8 @@ private:
     GUID m_albumSourcePlaylistGuid{};
     GUID m_albumReturnPlaylistGuid{};
     GUID m_albumPendingReturnPlaylistGuid{};
+    GUID m_initialAlbumSourceGuid{};
+    bool m_albumWorkspaceEntered{};
     std::wstring m_albumSourceName{L"Current playlist"};
     metadb_handle_list m_albumSourceItems;
     std::vector<AlbumSourceTrack> m_albumInput;
@@ -5095,6 +6036,22 @@ private:
     std::size_t m_playlistTopRow{};
     float m_playlistScrollbarGrabOffset{};
     std::unordered_map<std::size_t, PlaylistRowText> m_playlistTextCache;
+    std::vector<PlaylistBrowserRow> m_playlistBrowserRows;
+    std::vector<GUID> m_playlistBrowserSelection;
+    std::size_t m_playlistBrowserFocus{SIZE_MAX};
+    std::size_t m_playlistBrowserAnchor{SIZE_MAX};
+    std::size_t m_playlistBrowserTopRow{};
+    int m_playlistBrowserSplitPermille{150};
+    HWND m_playlistRenameEdit{};
+    GUID m_playlistRenameGuid{};
+    std::wstring m_playlistRenameOriginal;
+    bool m_playlistRenameCommitting{};
+    bool m_playlistRenameCancelPending{};
+    std::optional<std::size_t> m_playlistBrowserDragCandidate;
+    bool m_playlistBrowserDragging{};
+    std::size_t m_playlistBrowserInsertion{};
+    D2D1_POINT_2F m_playlistBrowserDragStart{};
+    std::vector<GUID> m_playlistBrowserDragSnapshot;
     std::vector<t_playback_queue_item> m_queueItems;
     std::vector<bool> m_queueSelected;
     std::size_t m_queueFocus{SIZE_MAX};
@@ -5126,6 +6083,8 @@ private:
     bool m_externalDropNative{};
     bool m_externalDropActive{};
     DropDestination m_externalDropDestination{DropDestination::none};
+    GUID m_externalDropBrowserGuid{};
+    bool m_externalDropBrowserBlank{};
     std::size_t m_externalDropInsertion{};
     std::size_t m_externalDropDisplayBoundary{};
     std::shared_ptr<DropAsyncState> m_dropAsync{std::make_shared<DropAsyncState>()};
@@ -5186,6 +6145,7 @@ private:
     ComPtr<ID2D1SolidColorBrush> m_foreground;
     ComPtr<ID2D1SolidColorBrush> m_disabled;
     ComPtr<ID2D1SolidColorBrush> m_accent;
+    ComPtr<ID2D1SolidColorBrush> m_defaultPlaylist;
     ComPtr<ID2D1SolidColorBrush> m_light;
 };
 
