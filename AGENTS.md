@@ -34,4 +34,16 @@ $CTest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 
 Invoke them with `& $CMake` and `& $CTest`. If either recorded path does not exist, report the environment mismatch and inspect `docs/DEVELOPMENT_SETUP.md`; do not fall back to a bare `cmake` or `ctest` command.
 
+# Screenshot checkpoint protocol
+
+At any visual or UX checkpoint, make at most one screenshot attempt and inspect that result before doing more work.
+
+If the requested Refrain or foobar2000 target is obscured, absent, incomplete, or replaced by unrelated foreground content:
+
+1. Discard that screenshot as invalid evidence.
+2. Stop the current work immediately. Do not retry with another capture method and do not continue reasoning about the hidden UI.
+3. Do not activate, minimize, move, resize, or otherwise disturb the foreground application in order to obtain another screenshot.
+4. Tell the user exactly which window, state, menu, hover, or interaction screenshot is needed.
+5. Resume only after the user supplies the requested screenshot or explicitly gives new instructions.
+
 `docs/PROJECT_RULES.md` is the sole detailed project charter. This file is only the automatically discovered, encoding-safe entry point.
