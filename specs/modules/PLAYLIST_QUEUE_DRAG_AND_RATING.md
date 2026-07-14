@@ -21,7 +21,7 @@
 4. 队列管理区不使用独立浮动窗口。推荐让播放列表工作区的整个固定右栏在 `Now Playing Panel` 与 `Playback Queue Panel` 之间切换：前者仍包含完整 `Now Playing Header` 和 Lyrics/Track Details，后者使用整列高度显示队列标题、曲目列表、拖动重排、移除所选和清空。切换只替换右栏内容，不改变右栏宽度或三栏拓扑。
 5. 队列项目双击或按 Enter 会立即播放该项并消费它；其他队列项保持原有相对顺序。右键菜单提供 `Play now`、`Remove selected`、`Clear playback queue`，并保留适用的正式曲目菜单；主面板不暴露 Remove/Clear 按钮，Delete 删除所选项。
 6. 项目右键继续使用 foobar2000 正式上下文菜单，其中已有的 `Add to playback queue`、`Remove from playback queue` 等组件命令不被 Refrain 替换。
-7. 不采用 Foobox 的 `Queue Content` 临时播放列表方案，避免创建、占用或删除用户播放列表；不复制当前列表来模拟未来顺序，也不增加 Refrain Playback Order 控件，顺序/随机规则继续由 foobar2000 自身持有。
+7. 不采用 Foobox 的 `Queue Content` 临时播放列表方案，避免创建、占用或删除用户播放列表；不复制当前列表来模拟未来顺序。步骤 10 不实现 Playback Order 控件；步骤 14 按最新决定把 foobar2000 自身持有的正式播放顺序入口迁入 Refrain 右下角，但仍不建立第二套规则。
 
 ## 3. 队列修改安全
 
@@ -116,7 +116,7 @@
 2. **跨列表阶段边界（已核准）**：步骤 10 完成标准 OLE 拖入/拖出和跨兼容面板 Copy/Move；Refrain 窗口内拖到另一个播放列表名称的最终落点在步骤 12 左侧 `Playlist Browser` 出现时接入，不制作临时目标选择器。
 3. **评分点击规则（已核准）**：采用 Foobox 行为——只修改点击行，再点当前星级清除；无论多选都不批量写入，并且只写 Playback Statistics。
 4. **验收修正规则（已核准）**：手动列表内部拖动遵循 Foobox 的 Move；自动/锁定列表遵循 foobar2000 正式锁定过滤。Playlist View 自身不因同源 OLE 失败复制曲目，外部拖入手动列表跳过已有精确项目；重复播放只在 Playback Queue 中允许。队列双击/Enter 立即播放并消费该项，Remove/Clear 移入右键菜单，Playlist View 可直接拖入队列。
-5. **阶段边界（已核准）**：步骤 12 才显示 Playlist Browser，并在那里人工验收拖到播放列表名称、手动/智能列表管理与类型提示。步骤 10 不制作临时侧栏。Refrain 不增加 Playback Order UI，继续使用 foobar2000 自带规则。
+5. **阶段边界（已核准）**：步骤 12 才显示 Playlist Browser，并在那里人工验收拖到播放列表名称、手动/智能列表管理与类型提示。步骤 10 不制作临时侧栏，也不实现 Playback Order UI；步骤 14 的最新决定只为 foobar2000 自带规则增加 Refrain 风格入口，不改变本任务的队列语义。
 
 ## 12. 决策记录
 

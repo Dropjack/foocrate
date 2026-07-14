@@ -29,5 +29,13 @@ int main() {
     assert(menuPathMatches("Playback Statistics\\Rating\\<not set>",
         "Playback Statistics/Rating/<not set>"));
     assert(!menuPathMatches("Other Component/Rating/5", "Playback Statistics/Rating/5"));
+
+    const std::vector<std::wstring> technical{L"FLAC", L"lossless", L"Stereo", L"24 bits", L"96000 Hz"};
+    assert(buildTopBarSummary(TopBarPlaybackState::playing, L"Song", L"Artist", L"Album", technical)
+        == L"▶ Song - Artist | Album | FLAC | lossless | Stereo | 24 bits | 96000 Hz");
+    assert(buildTopBarSummary(TopBarPlaybackState::paused, L"Song", L"", L"", {}) == L"Ⅱ Song");
+    assert(buildTopBarSummary(TopBarPlaybackState::playing, L"", L"Artist", L"", {})
+        == L"▶ Unknown title - Artist");
+    assert(buildTopBarSummary(TopBarPlaybackState::stopped, L"Song", L"Artist", L"Album", technical).empty());
     return 0;
 }

@@ -5,8 +5,31 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace refrain {
+
+enum class TopBarPlaybackState { stopped, playing, paused };
+
+[[nodiscard]] inline std::wstring buildTopBarSummary(TopBarPlaybackState state,
+    std::wstring_view title, std::wstring_view artist, std::wstring_view album,
+    const std::vector<std::wstring>& technicalFields) {
+    if (state == TopBarPlaybackState::stopped) return {};
+    std::wstring result = state == TopBarPlaybackState::paused ? L"Ⅱ " : L"▶ ";
+    result += title.empty() ? L"Unknown title" : title;
+    if (!artist.empty()) {
+        result += L" - ";
+        result += artist;
+    }
+    const auto appendField = [&](std::wstring_view value) {
+        if (value.empty()) return;
+        result += L" | ";
+        result += value;
+    };
+    appendField(album);
+    for (const auto& value : technicalFields) appendField(value);
+    return result;
+}
 
 [[nodiscard]] inline int normalizeRating(double value) noexcept {
     if (!std::isfinite(value)) {

@@ -43,6 +43,7 @@ add_library(foo_refrain MODULE
   src/playlist_browser_preferences.cpp
   src/playlist_view_model.h
   src/now_playing_state.h
+  src/now_playing_toolbar.cpp
   src/preferences.cpp
   src/settings.cpp
   src/settings.h

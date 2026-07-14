@@ -101,6 +101,7 @@ public:
 enum class ControlId {
     none,
     seek,
+    open,
     previous,
     playPause,
     next,
@@ -112,6 +113,8 @@ enum class ControlId {
     albumWorkspace,
     albumList,
     queueToggle,
+    playbackOrder,
+    outputDevice,
     artwork,
     trackTitle,
     artistAlbum,
@@ -153,6 +156,7 @@ enum class DropDestination {
 
 struct Layout {
     D2D1_RECT_F seek{};
+    D2D1_RECT_F open{};
     D2D1_RECT_F previous{};
     D2D1_RECT_F playPause{};
     D2D1_RECT_F next{};
@@ -164,6 +168,8 @@ struct Layout {
     D2D1_RECT_F albumWorkspace{};
     D2D1_RECT_F albumList{};
     D2D1_RECT_F queueToggle{};
+    D2D1_RECT_F playbackOrder{};
+    D2D1_RECT_F outputDevice{};
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
     D2D1_RECT_F header{};
@@ -313,7 +319,8 @@ class PlaybackPanel : public uie::container_uie_window_v3,
                       public play_callback,
                       private playlist_callback_impl_base,
                       private metadb_io_callback_dynamic_impl_base,
-                      private library_callback_v2_dynamic_impl_base {
+                      private library_callback_v2_dynamic_impl_base,
+                      private output_config_change_callback {
 public:
     PlaybackPanel()
         : playlist_callback_impl_base(playlist_callback::flag_item_ops
@@ -321,6 +328,10 @@ public:
               | playlist_callback::flag_on_default_format_changed
               | playlist_callback::flag_on_playback_order_changed) {}
     ~PlaybackPanel() {
+        if (m_outputCallbackRegistered) {
+            output_manager_v2::get()->removeCallback(this);
+            m_outputCallbackRegistered = false;
+        }
         endAlbumPlaybackSession();
         releaseAlbumBridgeLock();
         stopAlbumArtworkWorker();
@@ -366,6 +377,8 @@ public:
             startGroupArtworkWorker();
             startAlbumArtworkWorker();
             registerPlaybackCallback();
+            output_manager_v2::get()->addCallback(this);
+            m_outputCallbackRegistered = true;
             rebuildPlaylistSnapshot(true);
             refreshQueueSnapshot();
             refreshFromCore();
@@ -402,6 +415,10 @@ public:
             stopGroupArtworkWorker();
             stopArtworkWork();
             unregisterSettingsWindow(wnd);
+            if (m_outputCallbackRegistered) {
+                output_manager_v2::get()->removeCallback(this);
+                m_outputCallbackRegistered = false;
+            }
             unregisterPlaybackCallback();
             m_playlistFilterEdit = nullptr;
             m_playlistFilterClear = nullptr;
@@ -629,6 +646,8 @@ public:
         invalidate();
     }
 
+    void outputConfigChanged() override { requestRefresh(); }
+
     void on_items_added(t_size playlist, t_size, metadb_handle_list_cref, const bit_array&) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
         refreshPlaylistBrowserSnapshot();
@@ -692,13 +711,15 @@ public:
         if (playlist == m_activePlaylist) invalidate();
     }
     void on_playback_order_changed(t_size order) override {
-        if (!m_albumSessionActive || m_restoringAlbumPlaybackOrder) return;
-        m_albumPriorPlaybackOrder = order;
-        if (playlist_manager::get()->playback_order_get_count() > 0 && order != 0) {
-            m_restoringAlbumPlaybackOrder = true;
-            playlist_manager::get()->playback_order_set_active(0);
-            m_restoringAlbumPlaybackOrder = false;
+        if (m_albumSessionActive && !m_restoringAlbumPlaybackOrder) {
+            m_albumPriorPlaybackOrder = order;
+            if (playlist_manager::get()->playback_order_get_count() > 0 && order != 0) {
+                m_restoringAlbumPlaybackOrder = true;
+                playlist_manager::get()->playback_order_set_active(0);
+                m_restoringAlbumPlaybackOrder = false;
+            }
         }
+        invalidate();
     }
     void on_playlist_renamed(t_size playlist, const char*, t_size) override {
         refreshPlaylistBrowserSnapshot();
@@ -1964,6 +1985,113 @@ private:
             MessageBoxW(get_wnd(),
                 L"foobar2000's Album List command is unavailable. Check that the Album List component is installed.",
                 L"Refrain", MB_OK | MB_ICONINFORMATION);
+        }
+    }
+
+    [[nodiscard]] POINT popupOrigin(const D2D1_RECT_F& rect) const noexcept {
+        POINT point{static_cast<LONG>(std::lround(rect.left * dpiScale())),
+            static_cast<LONG>(std::lround(rect.bottom * dpiScale()))};
+        if (const auto wnd = get_wnd()) ClientToScreen(wnd, &point);
+        return point;
+    }
+
+    [[nodiscard]] std::wstring playbackOrderName() const {
+        auto api = playlist_manager::get();
+        const auto count = api->playback_order_get_count();
+        const auto active = api->playback_order_get_active();
+        return active < count ? utf8ToWide(api->playback_order_get_name(active)) : L"Unavailable";
+    }
+
+    void showPlaybackOrderMenu() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        auto api = playlist_manager::get();
+        const auto count = api->playback_order_get_count();
+        if (count == 0) {
+            showStatus(L"Playback Order is unavailable.");
+            return;
+        }
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        const auto active = api->playback_order_get_active();
+        const auto maximum = std::min<t_size>(count, 0xEFFF);
+        for (t_size index = 0; index < maximum; ++index) {
+            const auto flags = MF_STRING | (index == active ? MF_CHECKED : MF_UNCHECKED);
+            AppendMenuW(menu, flags, static_cast<UINT_PTR>(index + 1),
+                utf8ToWide(api->playback_order_get_name(index)).c_str());
+        }
+        const auto origin = popupOrigin(calculateLayout(wnd).playbackOrder);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+            origin.x, origin.y, 0, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command > 0 && static_cast<t_size>(command) <= maximum) {
+            api->playback_order_set_active(static_cast<t_size>(command - 1));
+            invalidate();
+        }
+    }
+
+    struct OutputDeviceItem {
+        std::wstring name;
+        GUID output{};
+        GUID device{};
+    };
+
+    [[nodiscard]] std::vector<OutputDeviceItem> outputDevices() const {
+        std::vector<OutputDeviceItem> result;
+        output_manager_v2::get()->listDevices([&](const char* name, const GUID& output, const GUID& device) {
+            result.push_back(OutputDeviceItem{utf8ToWide(name), output, device});
+        });
+        return result;
+    }
+
+    [[nodiscard]] std::wstring outputDeviceName() const {
+        try {
+            const auto config = output_manager::get()->getCoreConfig();
+            for (const auto& item : outputDevices()) {
+                if (IsEqualGUID(item.output, config.m_output) && IsEqualGUID(item.device, config.m_device)) {
+                    return item.name;
+                }
+            }
+        } catch (...) {
+        }
+        return L"Unavailable";
+    }
+
+    void showOutputDeviceMenu() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        try {
+            const auto devices = outputDevices();
+            if (devices.empty()) {
+                showStatus(L"No output devices are available.");
+                return;
+            }
+            const auto config = output_manager::get()->getCoreConfig();
+            const auto menu = CreatePopupMenu();
+            if (!menu) return;
+            const auto maximum = std::min<std::size_t>(devices.size(), 0xEFFF);
+            for (std::size_t index = 0; index < maximum; ++index) {
+                const auto selected = IsEqualGUID(devices[index].output, config.m_output)
+                    && IsEqualGUID(devices[index].device, config.m_device);
+                AppendMenuW(menu, MF_STRING | (selected ? MF_CHECKED : MF_UNCHECKED),
+                    static_cast<UINT_PTR>(index + 1), devices[index].name.c_str());
+            }
+            const auto origin = popupOrigin(calculateLayout(wnd).outputDevice);
+            const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+                origin.x, origin.y, 0, wnd, nullptr);
+            DestroyMenu(menu);
+            if (command > 0 && static_cast<std::size_t>(command) <= maximum) {
+                const auto& selected = devices[static_cast<std::size_t>(command - 1)];
+                output_manager_v2::get()->setCoreConfigDevice(selected.output, selected.device);
+                invalidate();
+            }
+        } catch (const std::exception& error) {
+            const auto message = L"foobar2000 could not switch the output device.\r\n\r\n"
+                + utf8ToWide(error.what());
+            MessageBoxW(wnd, message.c_str(), L"Refrain - Output Device", MB_OK | MB_ICONERROR);
+        } catch (...) {
+            MessageBoxW(wnd, L"foobar2000 could not switch the output device.",
+                L"Refrain - Output Device", MB_OK | MB_ICONERROR);
         }
     }
 
@@ -3471,6 +3599,7 @@ private:
         layout.elapsed = D2D1::RectF(10.0F, top + 7.0F, 58.0F, top + 31.0F);
         layout.total = D2D1::RectF(width - 58.0F, top + 7.0F, width - 10.0F, top + 31.0F);
         layout.seek = D2D1::RectF(64.0F, seekY - 7.0F, std::max(65.0F, width - 64.0F), seekY + 7.0F);
+        layout.open = D2D1::RectF(center - 138.0F, buttonY, center - 102.0F, buttonY + 36.0F);
         layout.previous = D2D1::RectF(center - 92.0F, buttonY, center - 56.0F, buttonY + 36.0F);
         layout.playPause = D2D1::RectF(center - 46.0F, buttonY - 3.0F, center - 4.0F, buttonY + 39.0F);
         layout.next = D2D1::RectF(center + 6.0F, buttonY, center + 42.0F, buttonY + 36.0F);
@@ -3478,8 +3607,12 @@ private:
         layout.mute = D2D1::RectF(std::max(center + 100.0F, width - 190.0F), buttonY, std::max(center + 136.0F, width - 154.0F), buttonY + 36.0F);
         layout.volume = D2D1::RectF(std::max(center + 142.0F, width - 146.0F), buttonY + 8.0F,
             width - 16.0F, buttonY + 28.0F);
-        layout.queueToggle = D2D1::RectF(layout.mute.left - 42.0F, buttonY,
+        layout.outputDevice = D2D1::RectF(layout.mute.left - 42.0F, buttonY,
             layout.mute.left - 6.0F, buttonY + 36.0F);
+        layout.playbackOrder = D2D1::RectF(layout.mute.left - 84.0F, buttonY,
+            layout.mute.left - 48.0F, buttonY + 36.0F);
+        layout.queueToggle = D2D1::RectF(layout.mute.left - 126.0F, buttonY,
+            layout.mute.left - 90.0F, buttonY + 36.0F);
         layout.playlistWorkspace = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
         layout.albumWorkspace = D2D1::RectF(58.0F, buttonY, 94.0F, buttonY + 36.0F);
         layout.albumList = D2D1::RectF(100.0F, buttonY, 136.0F, buttonY + 36.0F);
@@ -3657,6 +3790,7 @@ private:
         if (contains(layout.playlistHeader, point)) return ControlId::playlistHeader;
         if (contains(layout.playlistBody, point)) return ControlId::playlistBody;
         if (contains(layout.seek, point)) return m_state.canSeek() ? ControlId::seek : ControlId::none;
+        if (contains(layout.open, point)) return ControlId::open;
         if (contains(layout.previous, point)) return ControlId::previous;
         if (contains(layout.playPause, point)) return ControlId::playPause;
         if (contains(layout.next, point)) return ControlId::next;
@@ -3668,6 +3802,8 @@ private:
         if (contains(layout.albumWorkspace, point)) return ControlId::albumWorkspace;
         if (contains(layout.albumList, point)) return ControlId::albumList;
         if (contains(layout.queueToggle, point)) return ControlId::queueToggle;
+        if (contains(layout.playbackOrder, point)) return ControlId::playbackOrder;
+        if (contains(layout.outputDevice, point)) return ControlId::outputDevice;
         return ControlId::none;
     }
 
@@ -3676,6 +3812,7 @@ private:
         case ControlId::seek: return m_state.canSeek();
         case ControlId::stop: return m_state.playing;
         case ControlId::volume: return !m_state.customVolume;
+        case ControlId::open: return true;
         case ControlId::previous:
         case ControlId::playPause:
         case ControlId::next:
@@ -3692,6 +3829,8 @@ private:
         case ControlId::albumGridScrollbar:
         case ControlId::albumTrackScrollbar: return true;
         case ControlId::queueToggle: return true;
+        case ControlId::playbackOrder: return playlist_manager::get()->playback_order_get_count() > 0;
+        case ControlId::outputDevice: return true;
         case ControlId::rating1:
         case ControlId::rating2:
         case ControlId::rating3:
@@ -3765,6 +3904,7 @@ private:
             }
         }
         drawSeek(layout);
+        drawButton(layout.open, ControlId::open);
         drawButton(layout.previous, ControlId::previous);
         drawButton(layout.playPause, ControlId::playPause);
         drawButton(layout.next, ControlId::next);
@@ -3777,6 +3917,8 @@ private:
         drawButton(layout.albumWorkspace, ControlId::albumWorkspace);
         drawButton(layout.albumList, ControlId::albumList);
         drawButton(layout.queueToggle, ControlId::queueToggle);
+        drawButton(layout.playbackOrder, ControlId::playbackOrder);
+        drawButton(layout.outputDevice, ControlId::outputDevice);
         drawVolume(layout);
 
         const auto displayPosition = m_previewing ? m_previewPosition : m_state.position;
@@ -5018,13 +5160,14 @@ private:
         const auto primary = id == ControlId::playPause;
         const auto selectedWorkspace = (id == ControlId::playlistWorkspace && m_workspace == Workspace::playlist)
             || (id == ControlId::albumWorkspace && m_workspace == Workspace::album);
+        const auto selectedToggle = id == ControlId::queueToggle && m_queueMode;
         auto fill = primary ? m_accent.Get() : m_surface.Get();
         if (pressed) {
             fill = m_disabled.Get();
         } else if (hot && !primary) {
             fill = m_light.Get();
         }
-        if (selectedWorkspace) {
+        if (selectedWorkspace || selectedToggle) {
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rect, 4.0F, 4.0F), m_disabled.Get());
         } else if (primary || hot || pressed) {
             m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F((rect.left + rect.right) * 0.5F,
@@ -5048,6 +5191,18 @@ private:
         const auto cx = (rect.left + rect.right) * 0.5F;
         const auto cy = (rect.top + rect.bottom) * 0.5F;
         switch (id) {
+        case ControlId::open:
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 9.0F, cy + 8.0F),
+                D2D1::Point2F(cx + 9.0F, cy + 8.0F), brush, 1.8F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 9.0F, cy + 8.0F),
+                D2D1::Point2F(cx - 9.0F, cy + 3.0F), brush, 1.8F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx + 9.0F, cy + 8.0F),
+                D2D1::Point2F(cx + 9.0F, cy + 3.0F), brush, 1.8F);
+            drawTriangle(D2D1::Point2F(cx, cy - 10.0F), D2D1::Point2F(cx - 6.0F, cy - 2.0F),
+                D2D1::Point2F(cx + 6.0F, cy - 2.0F), brush);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx, cy - 2.0F),
+                D2D1::Point2F(cx, cy + 4.0F), brush, 1.8F);
+            break;
         case ControlId::previous:
             m_renderTarget->DrawLine(D2D1::Point2F(cx - 7.0F, cy - 7.0F), D2D1::Point2F(cx - 7.0F, cy + 7.0F), brush, 2.0F);
             drawTriangle(D2D1::Point2F(cx + 6.0F, cy - 8.0F), D2D1::Point2F(cx - 5.0F, cy),
@@ -5127,6 +5282,24 @@ private:
             }
             break;
         }
+        case ControlId::playbackOrder:
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 8.0F, cy - 6.0F),
+                D2D1::Point2F(cx + 7.0F, cy - 6.0F), brush, 1.8F);
+            drawTriangle(D2D1::Point2F(cx + 10.0F, cy - 6.0F),
+                D2D1::Point2F(cx + 5.0F, cy - 10.0F), D2D1::Point2F(cx + 5.0F, cy - 2.0F), brush);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx + 8.0F, cy + 6.0F),
+                D2D1::Point2F(cx - 7.0F, cy + 6.0F), brush, 1.8F);
+            drawTriangle(D2D1::Point2F(cx - 10.0F, cy + 6.0F),
+                D2D1::Point2F(cx - 5.0F, cy + 2.0F), D2D1::Point2F(cx - 5.0F, cy + 10.0F), brush);
+            break;
+        case ControlId::outputDevice:
+            m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(
+                D2D1::RectF(cx - 10.0F, cy - 8.0F, cx + 10.0F, cy + 6.0F), 2.0F, 2.0F), brush, 1.7F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx, cy + 6.0F),
+                D2D1::Point2F(cx, cy + 10.0F), brush, 1.7F);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 5.0F, cy + 10.0F),
+                D2D1::Point2F(cx + 5.0F, cy + 10.0F), brush, 1.7F);
+            break;
         default:
             break;
         }
@@ -5857,11 +6030,12 @@ private:
                 }
             }
         }
-        const std::array<ControlId, 10> allButtons{
+        const std::array<ControlId, 13> allButtons{
             ControlId::playlistWorkspace, ControlId::albumWorkspace, ControlId::albumList, ControlId::settings,
-            ControlId::previous, ControlId::playPause, ControlId::next,
-            ControlId::stop, ControlId::queueToggle, ControlId::mute};
-        std::array<ControlId, 10> buttons{};
+            ControlId::open, ControlId::previous, ControlId::playPause, ControlId::next,
+            ControlId::stop, ControlId::queueToggle, ControlId::playbackOrder,
+            ControlId::outputDevice, ControlId::mute};
+        std::array<ControlId, 13> buttons{};
         const auto settingsVisible = readSettings().showSettingsButton;
         auto buttonCount = std::size_t{};
         for (const auto button : allButtons) {
@@ -5926,6 +6100,9 @@ private:
         }
         auto api = playback_control::get();
         switch (id) {
+        case ControlId::open:
+            if (!standard_commands::main_open()) showStatus(L"foobar2000's Open command is unavailable.");
+            break;
         case ControlId::previous: api->userPrev(); break;
         case ControlId::playPause: api->play_or_pause(); break;
         case ControlId::next: api->userNext(); break;
@@ -5938,6 +6115,8 @@ private:
         case ControlId::albumSource: showAlbumSourceMenu(); break;
         case ControlId::albumLibraryPreferences: library_manager::get()->show_preferences(); break;
         case ControlId::queueToggle: toggleQueueMode(); break;
+        case ControlId::playbackOrder: showPlaybackOrderMenu(); break;
+        case ControlId::outputDevice: showOutputDeviceMenu(); break;
         default: break;
         }
     }
@@ -6064,6 +6243,7 @@ private:
                 }
                 break;
             case ControlId::seek: m_tooltipText = L"Seek"; break;
+            case ControlId::open: m_tooltipText = L"Open audio files"; break;
             case ControlId::previous: m_tooltipText = L"Previous"; break;
             case ControlId::playPause: m_tooltipText = m_state.playing && !m_state.paused ? L"Pause" : L"Play"; break;
             case ControlId::next: m_tooltipText = L"Next"; break;
@@ -6072,6 +6252,8 @@ private:
             case ControlId::volume: m_tooltipText = L"Volume (mouse wheel supported)"; break;
             case ControlId::settings: m_tooltipText = L"Refrain settings"; break;
             case ControlId::queueToggle: m_tooltipText = m_queueMode ? L"Show now playing" : L"Show playback queue"; break;
+            case ControlId::playbackOrder: m_tooltipText = L"Playback Order: " + playbackOrderName(); break;
+            case ControlId::outputDevice: m_tooltipText = L"Output Device: " + outputDeviceName(); break;
             case ControlId::artwork:
                 if (m_artworkLoading) m_tooltipText = L"Loading artwork...";
                 else if (m_artworkPixels.status == ArtworkStatus::ready) m_tooltipText = L"Front cover";
@@ -6284,6 +6466,7 @@ private:
     HWND m_tooltip{};
     std::wstring m_tooltipText;
     std::wstring m_statusText;
+    bool m_outputCallbackRegistered{};
 
     ComPtr<ID2D1Factory> m_d2dFactory;
     ComPtr<IDWriteFactory> m_dwriteFactory;
