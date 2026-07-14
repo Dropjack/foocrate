@@ -1,0 +1,125 @@
+# Playlist Grouping and Columns 模块规格
+
+- 状态：已批准；实现完成待验收
+- 版本：0.2
+- 最后更新：2026-07-14
+- 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
+- 对应路线：`09 实现播放列表分组封面与列配置`
+- 对应任务：[`../../tasks/009-实现播放列表分组封面与列配置/README.md`](../../tasks/009-实现播放列表分组封面与列配置/README.md)
+
+## 1. 目标与继承边界
+
+本模块扩展已验收的 `Playlist View`，加入可长期使用的分组、组封面、折叠、完整列和配置保存。步骤 08 的活动列表数据源、真实索引、选择、焦点、播放、键盘和正式菜单继续有效；本模块不能建立第二份可编辑播放列表。
+
+步骤 10 才实现队列状态、拖放和在列表内写入评分。本步骤可以只读显示 `%rating%`，但点击星级不写数据。
+
+## 2. 分组预置
+
+Refrain 提供以下六个与 Foobox 参考语义对应的内置预置，并允许在 Preferences 中复制为自定义预置后编辑名称、分组表达式、排序表达式和标题四个区域：
+
+| 预置 | 分组键 | 标题摘要 | 组图来源 |
+| --- | --- | --- | --- |
+| `Album (simple)` | Album | Album、Album Artist、Genre、Year | Front Cover |
+| `Album Artist / Album / Disc` | Album Artist + Album + Disc | Album、Album Artist、Genre、Year/Disc | Front Cover |
+| `Album Artist` | Album Artist | Album Artist、Genre | Artist artwork |
+| `Artist` | Artist | Artist、Genre | Artist artwork |
+| `Genre` | Genre | Genre | 待核准来源 |
+| `Directory` | Directory Path | 当前目录、父目录、Genre、Year | 待核准来源 |
+
+推荐默认值为截图对应的 `Album (simple)`。空专辑回退为 `Single`，没有长度的流媒体回退为 `Radio`；空艺术家、流派和年份使用明确但不过度伪造的回退文案。
+
+## 3. 分组模型与真实顺序
+
+1. 分组只合并当前真实播放列表中相邻且分组键相同的项目，不按路径猜测同一专辑。
+2. 视图为每组保存稳定起止索引；组标题和封面是显示行，不占用 foobar2000 曲目索引。
+3. 切换分组预置若要得到连续分组，推荐遵循 Foobox：先对普通活动播放列表建立 Undo，再用预置排序表达式重排真实列表；排序失败则保留原顺序和原分组模式。
+4. 自动/锁定列表拒绝重排时，不伪装排序成功；具体采用“拒绝切换”还是“按当前相邻顺序切换显示”由第 12 节核准。
+5. 当前播放曲目所在组若折叠，组标题必须有正在播放的非颜色标记；F2 会展开该组并定位真实播放行。
+
+## 4. 组标题、选择与折叠
+
+- 默认显示组标题、显示组封面、全部展开，自动折叠关闭。
+- 单击组标题推荐选择该组全部真实曲目并把第一项设为焦点；Ctrl 追加/切换整组，Shift 从锚点扩展到目标组末尾。
+- 双击组标题在展开/折叠之间切换，不开始播放。
+- 表头右键菜单提供 `Group by`、`Collapse all`、`Expand all`、`Auto-collapse` 和 `Collapse groups by default`。
+- Foobox 用 `Tab` 切换全部折叠，但这与 Refrain 已有的 Columns UI 焦点导航冲突；推荐不复制该快捷键，`Tab` 继续交给 Columns UI/foobar2000，全局折叠只从表头右键菜单执行。
+- 自动折叠开启时只展开焦点所在组；焦点移动到另一组后折叠旧组、展开新组。
+- 单个组的临时折叠状态只属于当前面板会话；保存的是默认折叠和自动折叠选项，避免升级后保存大量易失效的分组键。
+
+## 5. 组封面
+
+1. 封面列属于组，不为每条曲目重复加载；列宽可调整并保存，组高度至少容纳封面但不因图片晚到而改变。
+2. 只请求视口内及相邻少量组；请求完成前显示稳定占位，不阻塞绘制和滚动。
+3. Front Cover 与 Artist artwork 使用 foobar2000 正式 album-art 服务；缺图、损坏、权限失败和组件关闭都回退占位。
+4. Genre/Directory 是否使用外部图片文件夹由第 12 节核准。若使用，必须在 Preferences 明确配置路径/文件名，并在后台读取；不扫描 C 盘、不复用 Foobox 私有目录。
+5. F5 和表头菜单的 `Refresh group artwork` 只失效 Refrain 组图缓存并重新请求可见组，不删除用户图片或 foobar2000 缓存。
+6. 缓存有条目数与像素内存上限；活动列表、分组规则、DPI 或封面来源变化时只失效必要条目。
+
+## 6. 内置列与默认布局
+
+列库计划包含：Cover、Track Number、Index、Title、Artist、Album Artist、Album、Date、Genre、Mood、Rating、Plays、Bitrate、Codec、Sample Rate、Length。`State/Queue` 在步骤 10 能真实显示队列后加入，不能在本步骤留下假列。
+
+推荐默认可见顺序与用户主界面截图一致：
+
+`Cover | Track Number | Title | Artist | Album | Genre | Rating | Bitrate | Codec | Length`
+
+- Cover 是组封面列，不显示逐行文字。
+- Track Number 默认显示 `Disc.Track`，缺失时回退稳定的列表序号。
+- Rating 只读显示现有 `%rating%`；步骤 10 再加入鼠标写入。
+- Bitrate 支持正在播放项目的动态码率；其他项目显示缓存码率。
+- Length 播放时可以显示剩余时间的参考行为是否保留，进入第 12 节核准；推荐始终显示总时长，避免列内容跳变。
+
+## 7. 表头交互
+
+- 拖动列边界调整相邻列宽；设置最小宽度，不能把所有普通文字列隐藏。
+- 拖动表头改变列顺序；Cover 固定为最左特殊列，其他列可重排。
+- 单击可排序列在升序/降序之间切换并显示方向；排序普通列表前创建 Undo，锁定列表失败时保持真实状态。
+- 右键表头打开 Refrain 菜单：列显隐、`Group by`、折叠命令、刷新组图、恢复默认和打开对应 Preferences。
+- 项目行右键仍是步骤 08 的 foobar2000 正式项目菜单，不能被列配置菜单替换。
+
+## 8. Preferences 与自定义规则
+
+在 foobar2000 Preferences 的 Refrain 下增加 `Playlist View` 配置区域，并按内容容量拆成 `Columns` 与 `Grouping` 子页面或等价标签页：
+
+- Columns：稳定 ID、标签、主标题格式、可选辅助格式、排序格式、对齐、显隐、顺序和宽度；支持复制内置列成为自定义列。
+- Grouping：当前预置、分组表达式、排序表达式、标题左/右主/次表达式、默认折叠、自动折叠和组图来源；支持复制内置预置成为自定义预置。
+- 内置定义不可被永久删除；自定义定义可新增、复制、重命名和删除，删除当前定义时回退内置默认。
+- Apply 才写入，Cancel 不改变运行状态；Reset Page 恢复本页默认，Refrain 总 Reset 恢复全部模块默认。
+
+## 9. 标题格式安全
+
+1. 保存前编译每个 title-format 表达式；空表达式只在字段允许为空时有效。
+2. 编译失败时在对应输入旁显示错误并拒绝 Apply，不用损坏表达式替换当前有效配置。
+3. 旧配置在启动时编译失败则只回退该字段，并保留其他合法列、顺序和宽度。
+4. 绘制时不得执行文件读取或用户脚本；title-format 只读取 foobar2000 提供的元数据和播放信息。
+
+## 10. 持久化与迁移
+
+- 配置使用新的稳定 GUID 和显式版本，保存全局样式或每列表布局的最终选择由第 12 节核准。
+- 列以稳定 ID 而不是数组下标保存；未来新增内置列不会改变旧列含义。
+- 宽度保存为逻辑比例与最低 DIP 约束，DPI 和窗口宽度变化后重新分配，不保存设备像素。
+- 升级合并新默认时不覆盖用户已改的显隐、顺序、宽度、表达式和分组模式。
+- 提供一键恢复 Foobox Basic 默认布局，并在执行前由 Preferences 的 Apply/Cancel 语义保护。
+
+## 11. 外部变化与性能
+
+- 增删、替换、重排、元数据变化和活动列表切换后重建受影响分组；不能让旧组封面或折叠状态绑定到新列表相同索引。
+- 大列表只构建必要的轻量分组键/边界；可见文本和封面仍按视口生成，目标是滚动期间不做同步磁盘 I/O。
+- 折叠、调整列宽和重排列不修改曲目选择；排序后通过 foobar2000 回调恢复真实选择、焦点和播放标记。
+- 面板销毁会取消封面请求代次并释放位图；晚到结果只释放自身，不投递到已销毁窗口。
+
+## 12. 已核准决定
+
+1. 使用六个内置分组并默认 `Album (simple)`；切换分组先建立 Undo，再排序真实普通播放列表；自动/锁定列表无法排序时拒绝切换。
+2. 组标题单击选择整组、双击折叠/展开，默认全部展开且关闭自动折叠；Collapse all / Expand all 位于表头右键菜单，`Tab` 保留 Columns UI 焦点导航。Album 使用 Front Cover，Artist 使用 Artist artwork，Genre 使用稳定占位，Directory 使用第一首 Front Cover，不增加外部图片文件夹。
+3. 所有播放列表共用一套跨升级保存的全局样式，不实现按播放列表命名布局；默认列按截图顺序，Length 始终显示总时长，并提供完整 Columns/Grouping 编辑与安全回退。
+
+## 13. 证据与决定记录
+
+- 截图：[`../../tasks/001-Foobox-Basic交互取证/screenshots/主界面.jpg`](../../tasks/001-Foobox-Basic交互取证/screenshots/主界面.jpg) 直接证明默认可见列、专辑标题摘要、年份和组封面结构。
+- 只读参考配置：`D:\Dev\foobar2000\profile\foobox\config\groups`、`columns`、`layoutsv2`。
+- 只读参考脚本：`jsplaylist.js`、`WSHplaylist.js`、`WSHheaderbar.js`、`WSHsettings.js`。
+- 正式本地 SDK：`playlist.h` 提供 Undo、排序和重排锁定过滤；`titleformat_compiler::compile()` 可拒绝非法表达式；`album_art_manager_v2` 可按一组曲目请求 Front/Artist 图片，阻塞打开必须放到工作线程。
+- 2026-07-13：用户验收并提交步骤 08，要求开始 09。
+- 2026-07-13：确认 Foobox 参考切换分组和点击表头会排序真实播放列表，因此列为显式待核准决定，不自动提升为 Refrain 行为。
+- 2026-07-14：用户逐项回复 1、2、3 均接受；规格 0.2 获准进入实现。

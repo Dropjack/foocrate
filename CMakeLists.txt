@@ -33,6 +33,9 @@ add_library(foo_refrain MODULE
   src/playback_panel.cpp
   src/playback_panel.h
   src/playback_state.h
+  src/playlist_config_model.h
+  src/playlist_grouping_model.h
+  src/playlist_preferences.cpp
   src/playlist_view_model.h
   src/now_playing_state.h
   src/preferences.cpp
@@ -109,6 +112,11 @@ if(BUILD_TESTING)
   target_include_directories(refrain_playlist_view_model_tests PRIVATE src)
   target_compile_options(refrain_playlist_view_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME playlist_view_model COMMAND refrain_playlist_view_model_tests)
+
+  add_executable(refrain_playlist_grouping_model_tests tests/playlist_grouping_model_tests.cpp)
+  target_include_directories(refrain_playlist_grouping_model_tests PRIVATE src)
+  target_compile_options(refrain_playlist_grouping_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playlist_grouping_model COMMAND refrain_playlist_grouping_model_tests)
 endif()
 
 find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)

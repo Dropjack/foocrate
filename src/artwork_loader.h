@@ -27,5 +27,7 @@ struct ArtworkPixels {
 };
 
 [[nodiscard]] ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept;
+[[nodiscard]] ArtworkPixels loadGroupArtwork(
+    metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter) noexcept;
 
 } // namespace refrain

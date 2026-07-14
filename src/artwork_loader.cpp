@@ -140,4 +140,21 @@ ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& 
     }
 }
 
+ArtworkPixels loadGroupArtwork(
+    metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter) noexcept {
+    try {
+        if (targets.get_count() == 0) return {ArtworkStatus::missing};
+        pfc::list_t<GUID> ids;
+        ids.add_item(artworkId);
+        const auto extractor = album_art_manager_v2::get()->open(targets, ids, aborter);
+        return decodeArtwork(extractor->query(artworkId, aborter), aborter);
+    } catch (const exception_aborted&) {
+        return {ArtworkStatus::aborted};
+    } catch (const exception_album_art_not_found&) {
+        return {ArtworkStatus::missing};
+    } catch (...) {
+        return {ArtworkStatus::unavailable};
+    }
+}
+
 } // namespace refrain

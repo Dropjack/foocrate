@@ -4,6 +4,8 @@
 #include "now_playing_state.h"
 #include "playback_state.h"
 #include "playlist_view_model.h"
+#include "playlist_config_model.h"
+#include "playlist_grouping_model.h"
 #include "settings.h"
 
 #include <windows.h>
@@ -19,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
@@ -27,6 +30,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -43,6 +47,7 @@ constexpr GUID kPlaybackPanelGuid{0x9e26e4b0, 0x41a9, 0x4b08, {0xa3, 0x55, 0x74,
 constexpr UINT kRefreshMessage = WM_APP + 0x421;
 constexpr UINT kArtworkReadyMessage = WM_APP + 0x423;
 constexpr UINT kLyricsMiddleClickMessage = WM_APP + 0x424;
+constexpr UINT kGroupArtworkReadyMessage = WM_APP + 0x425;
 
 enum class ControlId {
     none,
@@ -65,6 +70,7 @@ enum class ControlId {
     rating5,
     rightDivider,
     trackDetails,
+    playlistHeader,
     playlistBody,
     playlistScrollbar,
 };
@@ -104,11 +110,7 @@ struct DetailRow {
 };
 
 struct PlaylistRowText {
-    std::wstring number;
-    std::wstring title;
-    std::wstring artist;
-    std::wstring album;
-    std::wstring length;
+    std::vector<std::wstring> columns;
 };
 
 struct ArtworkAsyncState {
@@ -122,6 +124,25 @@ struct ArtworkAsyncState {
 struct ArtworkCompletion {
     std::uint64_t generation{};
     ArtworkPixels pixels;
+};
+
+struct GroupArtworkRequest {
+    std::uint64_t generation{};
+    std::string key;
+    metadb_handle_list items;
+    GUID artworkId{};
+};
+
+struct GroupArtworkCompletion {
+    std::uint64_t generation{};
+    std::string key;
+    ArtworkPixels pixels;
+};
+
+struct GroupArtworkCacheEntry {
+    bool loading{};
+    ArtworkPixels pixels{ArtworkStatus::unavailable};
+    ComPtr<ID2D1Bitmap> bitmap;
 };
 
 [[nodiscard]] bool contains(const D2D1_RECT_F& rect, D2D1_POINT_2F point) noexcept {
@@ -160,6 +181,7 @@ public:
               | playlist_callback::flag_on_playlist_locked
               | playlist_callback::flag_on_default_format_changed) {}
     ~PlaybackPanel() {
+        stopGroupArtworkWorker();
         stopArtworkWork();
         unregisterPlaybackCallback();
         releaseDeviceResources();
@@ -192,6 +214,8 @@ public:
             m_artworkAsync->window = wnd;
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
+            reloadPlaylistViewSettings();
+            startGroupArtworkWorker();
             registerPlaybackCallback();
             rebuildPlaylistSnapshot(true);
             refreshFromCore();
@@ -202,6 +226,7 @@ public:
             return 0;
         case WM_DESTROY:
             m_lyricsHost.destroy();
+            stopGroupArtworkWorker();
             stopArtworkWork();
             unregisterSettingsWindow(wnd);
             unregisterPlaybackCallback();
@@ -314,6 +339,9 @@ public:
         case kArtworkReadyMessage:
             applyArtworkCompletion(*reinterpret_cast<ArtworkCompletion*>(lp));
             return 0;
+        case kGroupArtworkReadyMessage:
+            applyGroupArtworkCompletion(reinterpret_cast<GroupArtworkCompletion*>(lp));
+            return 0;
         case kLyricsMiddleClickMessage:
             toggleLowerRightView();
             return 0;
@@ -379,6 +407,8 @@ public:
     void on_item_focus_change(t_size playlist, t_size, t_size to) override {
         if (playlist == m_activePlaylist) {
             m_playlistFocus = to;
+            const auto group = groupForTrack(m_playlistGroups, to);
+            if (group != SIZE_MAX) applyAutoCollapse(group);
             ensurePlaylistRowVisible(to);
             invalidate();
         }
@@ -389,11 +419,11 @@ public:
         if (!playback_control::get()->is_playing()) requestRefresh();
     }
     void on_items_modified(t_size playlist, const bit_array&) override {
-        if (playlist == m_activePlaylist) clearPlaylistTextCache();
+        if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
         requestRefresh();
     }
     void on_items_modified_fromplayback(t_size playlist, const bit_array&, play_control::t_display_level) override {
-        if (playlist == m_activePlaylist) clearPlaylistTextCache();
+        if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
         requestRefresh();
     }
     void on_items_replaced(t_size playlist, const bit_array&,
@@ -510,6 +540,83 @@ private:
         invalidate();
     }
 
+    [[nodiscard]] const GroupDefinition& activeGroupDefinition() const {
+        const auto found = std::find_if(m_playlistSettings.groups.begin(), m_playlistSettings.groups.end(),
+            [&](const GroupDefinition& value) { return value.id == m_playlistSettings.activeGroupId; });
+        if (found != m_playlistSettings.groups.end()) return *found;
+        return m_playlistSettings.groups.front();
+    }
+
+    void reloadPlaylistViewSettings() {
+        m_playlistSettings = readPlaylistViewSettings();
+        auto compiler = titleformat_compiler::get();
+        const auto& group = activeGroupDefinition();
+        const std::array<const std::string*, 5> groupFormats{
+            &group.keyFormat, &group.leftPrimary, &group.rightPrimary,
+            &group.leftSecondary, &group.rightSecondary};
+        constexpr std::array<const char*, 5> groupFallbacks{
+            "$if2(%album%,'Single')", "$if2(%album%,'Single')", "", "[%album artist%]", ""};
+        for (std::size_t index = 0; index < groupFormats.size(); ++index) {
+            if (!compiler->compile(m_playlistGroupScripts[index], groupFormats[index]->c_str())) {
+                compiler->compile_safe(m_playlistGroupScripts[index], groupFallbacks[index]);
+            }
+        }
+        m_playlistColumnScripts.clear();
+        m_playlistColumnScripts.reserve(m_playlistSettings.columns.size());
+        for (const auto& column : m_playlistSettings.columns) {
+            titleformat_object::ptr script;
+            if (!column.cover && !compiler->compile(script, column.displayFormat.c_str())) {
+                compiler->compile_safe(script, "$if2(%title%,$filename_ext(%path%))");
+            }
+            m_playlistColumnScripts.push_back(std::move(script));
+        }
+        m_playlistTextCache.clear();
+    }
+
+    [[nodiscard]] std::string formatPlaylistItemUtf8(
+        std::size_t index, const titleformat_object::ptr& script) const {
+        if (m_activePlaylist == SIZE_MAX || index >= m_playlistItems.get_count() || script.is_empty()) return {};
+        pfc::string8 output;
+        playlist_manager::get()->playlist_item_format_title(m_activePlaylist, index, nullptr,
+            output, script, nullptr, playback_control::display_level_all);
+        return output.c_str();
+    }
+
+    void rebuildPlaylistGroups() {
+        ++m_groupArtworkGeneration;
+        {
+            std::scoped_lock lock(m_groupArtworkMutex);
+            m_groupArtworkRequests.clear();
+            if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+        }
+        m_groupArtworkCache.clear();
+        m_groupArtworkBytes = 0;
+        std::unordered_map<std::string, bool> priorCollapsed;
+        for (const auto& group : m_playlistGroups) priorCollapsed[group.key] = group.collapsed;
+        std::vector<PlaylistGroupInput> inputs;
+        inputs.reserve(m_playlistItems.get_count());
+        for (std::size_t index = 0; index < m_playlistItems.get_count(); ++index) {
+            inputs.push_back({formatPlaylistItemUtf8(index, m_playlistGroupScripts[0]),
+                formatPlaylistItemUtf8(index, m_playlistGroupScripts[1]),
+                formatPlaylistItemUtf8(index, m_playlistGroupScripts[2]),
+                formatPlaylistItemUtf8(index, m_playlistGroupScripts[3]),
+                formatPlaylistItemUtf8(index, m_playlistGroupScripts[4])});
+        }
+        m_playlistGroups = buildPlaylistGroups(inputs, m_playlistSettings.collapseByDefault);
+        for (auto& group : m_playlistGroups) {
+            if (const auto found = priorCollapsed.find(group.key); found != priorCollapsed.end()) {
+                group.collapsed = found->second;
+            }
+        }
+        m_playlistDisplayRows = buildPlaylistDisplayRows(m_playlistGroups, 4);
+    }
+
+    void rebuildPlaylistDisplayRows() {
+        m_playlistDisplayRows = buildPlaylistDisplayRows(m_playlistGroups, 4);
+        clampPlaylistScroll();
+        invalidate();
+    }
+
     void refreshPlayingLocation() {
         m_playingPlaylist = SIZE_MAX;
         m_playingItem = SIZE_MAX;
@@ -540,6 +647,7 @@ private:
             api->playlist_get_selection_mask(m_activePlaylist, m_playlistSelection);
             m_playlistFocus = api->playlist_get_focus_item(m_activePlaylist);
         }
+        rebuildPlaylistGroups();
         if (revealFocus && m_playlistFocus != SIZE_MAX) {
             ensurePlaylistRowVisible(m_playlistFocus);
         } else {
@@ -557,15 +665,22 @@ private:
         }
         const auto body = calculateLayout(wnd).playlistBody;
         const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
-        m_playlistTopRow = clampTopRow(m_playlistTopRow, m_playlistItems.get_count(), capacity);
+        m_playlistTopRow = clampTopRow(m_playlistTopRow, m_playlistDisplayRows.size(), capacity);
     }
 
     void ensurePlaylistRowVisible(std::size_t row) {
         const auto wnd = get_wnd();
         if (!wnd || row == SIZE_MAX || row >= m_playlistItems.get_count()) return;
+        const auto groupIndex = groupForTrack(m_playlistGroups, row);
+        if (groupIndex != SIZE_MAX && m_playlistGroups[groupIndex].collapsed) {
+            m_playlistGroups[groupIndex].collapsed = false;
+            m_playlistDisplayRows = buildPlaylistDisplayRows(m_playlistGroups, 4);
+        }
+        const auto displayRow = displayRowForTrack(m_playlistDisplayRows, row);
+        if (displayRow == SIZE_MAX) return;
         const auto body = calculateLayout(wnd).playlistBody;
         const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
-        m_playlistTopRow = ensureRowVisible(m_playlistTopRow, row, m_playlistItems.get_count(), capacity);
+        m_playlistTopRow = ensureRowVisible(m_playlistTopRow, displayRow, m_playlistDisplayRows.size(), capacity);
         invalidate();
     }
 
@@ -575,7 +690,7 @@ private:
         constexpr float rowHeight = 26.0F;
         const auto relative = std::max(0.0F, point.y - body.top);
         const auto row = m_playlistTopRow + static_cast<std::size_t>(relative / rowHeight);
-        return row < m_playlistItems.get_count() ? std::optional<std::size_t>{row} : std::nullopt;
+        return row < m_playlistDisplayRows.size() ? std::optional<std::size_t>{row} : std::nullopt;
     }
 
     void scrollPlaylistRows(long long delta) {
@@ -583,7 +698,7 @@ private:
         if (!wnd) return;
         const auto body = calculateLayout(wnd).playlistBody;
         const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
-        const auto maximum = maximumTopRow(m_playlistItems.get_count(), capacity);
+        const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
         const auto candidate = static_cast<long long>(m_playlistTopRow) + delta;
         m_playlistTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL,
             static_cast<long long>(maximum)));
@@ -594,7 +709,7 @@ private:
         const auto layout = calculateLayout(wnd);
         const auto bodyHeight = layout.playlistBody.bottom - layout.playlistBody.top;
         const auto capacity = visibleRowCapacity(bodyHeight, 26.0F);
-        const auto maximum = maximumTopRow(m_playlistItems.get_count(), capacity);
+        const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
         const auto trackHeight = layout.playlistScrollTrack.bottom - layout.playlistScrollTrack.top;
         const auto thumbHeight = layout.playlistScrollThumb.bottom - layout.playlistScrollThumb.top;
         m_playlistTopRow = topRowFromScrollbar(pointerY, m_playlistScrollbarGrabOffset,
@@ -635,25 +750,253 @@ private:
             pfc::bit_array_true(), pfc::bit_array_false());
     }
 
+    void selectPlaylistGroup(std::size_t groupIndex, bool ctrl, bool shift) {
+        if (m_activePlaylist == SIZE_MAX || groupIndex >= m_playlistGroups.size()) return;
+        const auto& group = m_playlistGroups[groupIndex];
+        auto api = playlist_manager::get();
+        m_playlistSelection.resize(m_playlistItems.get_count());
+        api->playlist_get_selection_mask(m_activePlaylist, m_playlistSelection);
+        if (shift) {
+            if (!ctrl) api->playlist_set_selection(m_activePlaylist, pfc::bit_array_true(), pfc::bit_array_false());
+            const auto anchor = m_playlistAnchor < m_playlistItems.get_count() ? m_playlistAnchor : group.start;
+            const auto [first, last] = inclusiveRange(anchor, group.start + group.count - 1);
+            api->playlist_set_selection(m_activePlaylist, pfc::bit_array_range(first, last - first + 1), pfc::bit_array_true());
+        } else {
+            bool allSelected = true;
+            for (std::size_t offset = 0; offset < group.count; ++offset)
+                allSelected = allSelected && m_playlistSelection.get(group.start + offset);
+            if (!ctrl) api->playlist_set_selection(m_activePlaylist, pfc::bit_array_true(), pfc::bit_array_false());
+            if (ctrl && allSelected) {
+                api->playlist_set_selection(m_activePlaylist,
+                    pfc::bit_array_range(group.start, group.count), pfc::bit_array_false());
+            } else {
+                api->playlist_set_selection(m_activePlaylist,
+                    pfc::bit_array_range(group.start, group.count), pfc::bit_array_true());
+            }
+        }
+        api->playlist_set_focus_item(m_activePlaylist, group.start);
+        m_playlistFocus = group.start;
+        m_playlistAnchor = group.start;
+    }
+
+    void applyAutoCollapse(std::size_t keepGroup) {
+        if (!m_playlistSettings.autoCollapse) return;
+        bool changed{};
+        for (std::size_t index = 0; index < m_playlistGroups.size(); ++index) {
+            const auto collapse = index != keepGroup;
+            changed = changed || m_playlistGroups[index].collapsed != collapse;
+            m_playlistGroups[index].collapsed = collapse;
+        }
+        if (changed) rebuildPlaylistDisplayRows();
+    }
+
     void onPlaylistLeftButtonDown(HWND wnd, D2D1_POINT_2F point) {
         m_focus = ControlId::playlistBody;
         const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        if (const auto row = playlistRowAt(wnd, point)) selectPlaylistRow(*row, ctrl, shift);
-        else if (!ctrl && !shift) clearPlaylistSelection();
+        if (const auto row = playlistRowAt(wnd, point)) {
+            const auto& display = m_playlistDisplayRows[*row];
+            if (display.kind == PlaylistDisplayRowKind::groupHeader) {
+                selectPlaylistGroup(display.group, ctrl, shift);
+                applyAutoCollapse(display.group);
+            } else if (display.kind == PlaylistDisplayRowKind::track) {
+                selectPlaylistRow(display.track, ctrl, shift);
+                applyAutoCollapse(display.group);
+            }
+        } else if (!ctrl && !shift) clearPlaylistSelection();
         invalidate();
     }
 
     void onLeftButtonDoubleClick(HWND wnd, LPARAM lp) {
         const auto point = pointFromLParam(lp, dpiScale());
         if (const auto row = playlistRowAt(wnd, point); row && m_activePlaylist != SIZE_MAX) {
-            selectPlaylistRow(*row, false, false);
-            playlist_manager::get()->playlist_execute_default_action(m_activePlaylist, *row);
+            auto& display = m_playlistDisplayRows[*row];
+            if (display.kind == PlaylistDisplayRowKind::groupHeader) {
+                m_playlistGroups[display.group].collapsed = !m_playlistGroups[display.group].collapsed;
+                rebuildPlaylistDisplayRows();
+            } else if (display.kind == PlaylistDisplayRowKind::track) {
+                selectPlaylistRow(display.track, false, false);
+                playlist_manager::get()->playlist_execute_default_action(m_activePlaylist, display.track);
+            }
         }
+    }
+
+    [[nodiscard]] std::optional<std::size_t> playlistColumnAt(HWND wnd, float pointerX) const {
+        const auto layout = calculateLayout(wnd);
+        if (pointerX < layout.playlistHeader.left || pointerX > layout.playlistHeader.right) return std::nullopt;
+        auto totalWeight = 0;
+        for (const auto& column : m_playlistSettings.columns) if (column.visible) totalWeight += column.widthWeight;
+        auto x = layout.playlistHeader.left;
+        for (std::size_t index = 0; index < m_playlistSettings.columns.size(); ++index) {
+            const auto& column = m_playlistSettings.columns[index];
+            if (!column.visible) continue;
+            const auto right = x + (layout.playlistBody.right - layout.playlistBody.left)
+                * static_cast<float>(column.widthWeight) / static_cast<float>(std::max(1, totalWeight));
+            if (pointerX >= x && pointerX < right) return index;
+            x = right;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> playlistBoundaryAt(
+        HWND wnd, float pointerX) const {
+        const auto layout = calculateLayout(wnd);
+        auto totalWeight = 0;
+        for (const auto& column : m_playlistSettings.columns) if (column.visible) totalWeight += column.widthWeight;
+        auto x = layout.playlistHeader.left;
+        std::optional<std::size_t> previous;
+        for (std::size_t index = 0; index < m_playlistSettings.columns.size(); ++index) {
+            const auto& column = m_playlistSettings.columns[index];
+            if (!column.visible) continue;
+            if (previous && std::abs(pointerX - x) <= 4.0F) return std::pair{*previous, index};
+            x += (layout.playlistBody.right - layout.playlistBody.left)
+                * static_cast<float>(column.widthWeight) / static_cast<float>(std::max(1, totalWeight));
+            previous = index;
+        }
+        return std::nullopt;
+    }
+
+    void updatePlaylistHeaderDrag(HWND wnd, float pointerX) {
+        if (!m_headerPressedColumn) return;
+        const auto delta = pointerX - m_headerPressX;
+        m_headerMoved = m_headerMoved || std::abs(delta) >= 4.0F;
+        if (!m_headerResizeColumns) return;
+        const auto layout = calculateLayout(wnd);
+        auto totalWeight = 0;
+        for (const auto& column : m_headerStartSettings.columns) if (column.visible) totalWeight += column.widthWeight;
+        const auto width = std::max(1.0F, layout.playlistBody.right - layout.playlistBody.left);
+        const auto weightDelta = static_cast<int>(std::lround(delta / width * static_cast<float>(totalWeight)));
+        const auto [left, right] = *m_headerResizeColumns;
+        const auto combined = m_headerStartSettings.columns[left].widthWeight
+            + m_headerStartSettings.columns[right].widthWeight;
+        const auto newLeft = std::clamp(m_headerStartSettings.columns[left].widthWeight + weightDelta,
+            100, combined - 100);
+        m_playlistSettings.columns[left].widthWeight = newLeft;
+        m_playlistSettings.columns[right].widthWeight = combined - newLeft;
+        invalidate();
+    }
+
+    [[nodiscard]] bool playlistCanReorder() const {
+        if (m_activePlaylist == SIZE_MAX) return false;
+        const auto api = playlist_manager::get();
+        return !api->playlist_lock_is_present(m_activePlaylist)
+            || (api->playlist_lock_get_filter_mask(m_activePlaylist) & playlist_lock::filter_reorder) == 0;
+    }
+
+    bool sortActivePlaylist(const std::string& format, bool descending = false) {
+        if (format.empty() || m_activePlaylist == SIZE_MAX || m_playlistItems.get_count() < 2) return true;
+        if (!playlistCanReorder()) {
+            MessageBoxW(get_wnd(), L"This playlist does not allow item reordering.", L"Refrain", MB_OK | MB_ICONINFORMATION);
+            return false;
+        }
+        auto api = playlist_manager::get();
+        api->playlist_undo_backup(m_activePlaylist);
+        bool sorted{};
+        if (descending) {
+            titleformat_object::ptr script;
+            if (titleformat_compiler::get()->compile(script, format.c_str())) {
+                std::vector<t_size> order(m_playlistItems.get_count());
+                metadb_handle_list_helper::sort_by_format_get_order(
+                    m_playlistItems, order.data(), script, nullptr, -1);
+                sorted = api->playlist_reorder_items(m_activePlaylist, order.data(), order.size());
+            }
+        } else {
+            sorted = api->playlist_sort_by_format(m_activePlaylist, format.c_str(), false);
+        }
+        if (!sorted) {
+            MessageBoxW(get_wnd(), L"foobar2000 could not sort this playlist.", L"Refrain", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        rebuildPlaylistSnapshot(true);
+        return true;
+    }
+
+    void activatePlaylistGroup(std::size_t index) {
+        if (index >= m_playlistSettings.groups.size()) return;
+        const auto& group = m_playlistSettings.groups[index];
+        if (group.id == m_playlistSettings.activeGroupId) return;
+        if (!sortActivePlaylist(group.sortFormat)) return;
+        m_sortColumnId.clear();
+        m_sortDescending = false;
+        m_playlistSettings.activeGroupId = group.id;
+        writePlaylistViewSettings(m_playlistSettings);
+    }
+
+    void showPlaylistHeaderMenu(HWND wnd, POINT clientPoint) {
+        const auto menu = CreatePopupMenu();
+        const auto groups = CreatePopupMenu();
+        const auto columns = CreatePopupMenu();
+        if (!menu || !groups || !columns) {
+            if (columns) DestroyMenu(columns); if (groups) DestroyMenu(groups); if (menu) DestroyMenu(menu);
+            return;
+        }
+        constexpr UINT groupBase = 1000;
+        constexpr UINT columnBase = 2000;
+        for (std::size_t index = 0; index < m_playlistSettings.groups.size(); ++index) {
+            const auto label = utf8ToWide(m_playlistSettings.groups[index].label.c_str());
+            AppendMenuW(groups, MF_STRING | (m_playlistSettings.groups[index].id == m_playlistSettings.activeGroupId
+                ? MF_CHECKED : 0), groupBase + static_cast<UINT>(index), label.c_str());
+        }
+        for (std::size_t index = 0; index < m_playlistSettings.columns.size(); ++index) {
+            const auto label = utf8ToWide(m_playlistSettings.columns[index].label.c_str());
+            AppendMenuW(columns, MF_STRING | (m_playlistSettings.columns[index].visible ? MF_CHECKED : 0),
+                columnBase + static_cast<UINT>(index), label.c_str());
+        }
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(groups), L"Group by");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(columns), L"Columns");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 3001, L"Collapse all groups");
+        AppendMenuW(menu, MF_STRING, 3002, L"Expand all groups");
+        AppendMenuW(menu, MF_STRING | (m_playlistSettings.autoCollapse ? MF_CHECKED : 0),
+            3003, L"Auto-collapse");
+        AppendMenuW(menu, MF_STRING | (m_playlistSettings.collapseByDefault ? MF_CHECKED : 0),
+            3004, L"Collapse groups by default");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 3005, L"Refresh group artwork");
+        AppendMenuW(menu, MF_STRING, 3006, L"Restore default playlist layout");
+        AppendMenuW(menu, MF_STRING, 3007, L"Playlist View preferences...");
+        ClientToScreen(wnd, &clientPoint);
+        const auto command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            clientPoint.x, clientPoint.y, wnd, nullptr);
+        if (command >= groupBase && command < groupBase + m_playlistSettings.groups.size()) {
+            activatePlaylistGroup(command - groupBase);
+        } else if (command >= columnBase && command < columnBase + m_playlistSettings.columns.size()) {
+            auto& column = m_playlistSettings.columns[command - columnBase];
+            column.visible = !column.visible;
+            m_playlistSettings = normalizePlaylistViewSettings(m_playlistSettings);
+            writePlaylistViewSettings(m_playlistSettings);
+        } else if (command == 3001 || command == 3002) {
+            for (auto& group : m_playlistGroups) group.collapsed = command == 3001;
+            rebuildPlaylistDisplayRows();
+        } else if (command == 3003 || command == 3004) {
+            if (command == 3003) m_playlistSettings.autoCollapse = !m_playlistSettings.autoCollapse;
+            else m_playlistSettings.collapseByDefault = !m_playlistSettings.collapseByDefault;
+            writePlaylistViewSettings(m_playlistSettings);
+        } else if (command == 3005) {
+            ++m_groupArtworkGeneration;
+            {
+                std::scoped_lock lock(m_groupArtworkMutex);
+                m_groupArtworkRequests.clear();
+                if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+            }
+            m_groupArtworkCache.clear();
+            m_groupArtworkBytes = 0;
+            invalidate();
+        } else if (command == 3006) {
+            m_playlistSettings = defaultPlaylistViewSettings();
+            writePlaylistViewSettings(m_playlistSettings);
+        } else if (command == 3007) {
+            ui_control::get()->show_preferences(kPlaylistPreferencesPageGuid);
+        }
+        DestroyMenu(menu);
     }
 
     void onRightButtonUp(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
         const auto layout = calculateLayout(wnd);
+        if (contains(layout.playlistHeader, point)) {
+            showPlaylistHeaderMenu(wnd, clientPoint);
+            return;
+        }
         if (!contains(layout.playlistArea, point)) {
             showTrackDetailsMenu(wnd, point, clientPoint);
             return;
@@ -661,13 +1004,20 @@ private:
         if (m_activePlaylist == SIZE_MAX) return;
         auto api = playlist_manager::get();
         if (const auto row = playlistRowAt(wnd, point)) {
+            const auto display = m_playlistDisplayRows[*row];
+            if (display.kind == PlaylistDisplayRowKind::spacer) return;
+            if (display.kind == PlaylistDisplayRowKind::groupHeader) {
+                selectPlaylistGroup(display.group, false, false);
+            }
+            const auto track = display.kind == PlaylistDisplayRowKind::track
+                ? display.track : m_playlistGroups[display.group].start;
             m_playlistSelection.resize(m_playlistItems.get_count());
             api->playlist_get_selection_mask(m_activePlaylist, m_playlistSelection);
-            if (!m_playlistSelection.get(*row)) {
-                selectPlaylistRow(*row, false, false);
+            if (!m_playlistSelection.get(track)) {
+                selectPlaylistRow(track, false, false);
             } else {
-                api->playlist_set_focus_item(m_activePlaylist, *row);
-                m_playlistFocus = *row;
+                api->playlist_set_focus_item(m_activePlaylist, track);
+                m_playlistFocus = track;
             }
             metadb_handle_list frozenSelection;
             api->playlist_get_selected_items(m_activePlaylist, frozenSelection);
@@ -683,6 +1033,18 @@ private:
 
     bool onPlaylistKeyDown(HWND wnd, WPARAM key) {
         if (m_activePlaylist == SIZE_MAX) return false;
+        if (key == VK_F5) {
+            ++m_groupArtworkGeneration;
+            {
+                std::scoped_lock lock(m_groupArtworkMutex);
+                m_groupArtworkRequests.clear();
+                if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+            }
+            m_groupArtworkCache.clear();
+            m_groupArtworkBytes = 0;
+            invalidate();
+            return true;
+        }
         auto api = playlist_manager::get();
         const auto count = m_playlistItems.get_count();
         const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -776,10 +1138,6 @@ private:
             compiler->compile_safe(m_codecScript, "$if2(%codec%,Unknown codec)");
             compiler->compile_safe(m_bitrateScript, "$if2(%bitrate%,Unknown bitrate)");
             compiler->compile_safe(m_ratingScript, "$if2(%rating%,0)");
-            compiler->compile_safe(m_playlistTitleScript, "$if2(%title%,$filename(%path%))");
-            compiler->compile_safe(m_playlistArtistScript, "[%artist%]");
-            compiler->compile_safe(m_playlistAlbumScript, "[%album%]");
-            compiler->compile_safe(m_playlistLengthScript, "[%length%]");
         }
         createTextResources();
     }
@@ -835,6 +1193,10 @@ private:
     }
 
     void releaseDeviceResources() noexcept {
+        for (auto& [key, entry] : m_groupArtworkCache) {
+            (void)key;
+            entry.bitmap.Reset();
+        }
         m_light.Reset();
         m_artworkBitmap.Reset();
         m_accent.Reset();
@@ -916,9 +1278,9 @@ private:
                 headerHeight, playlistRight, top);
             constexpr float rowHeight = 26.0F;
             const auto capacity = visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, rowHeight);
-            const auto maximum = maximumTopRow(m_playlistItems.get_count(), capacity);
+            const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
             const auto trackHeight = layout.playlistScrollTrack.bottom - layout.playlistScrollTrack.top;
-            const auto thumbHeight = scrollbarThumbHeight(trackHeight, m_playlistItems.get_count(), capacity);
+            const auto thumbHeight = scrollbarThumbHeight(trackHeight, m_playlistDisplayRows.size(), capacity);
             const auto thumbTop = scrollbarThumbTop(layout.playlistScrollTrack.top, trackHeight,
                 thumbHeight, m_playlistTopRow, maximum);
             layout.playlistScrollThumb = D2D1::RectF(layout.playlistScrollTrack.left + 2.0F,
@@ -943,6 +1305,7 @@ private:
             return ControlId::trackDetails;
         }
         if (contains(layout.playlistScrollTrack, point)) return ControlId::playlistScrollbar;
+        if (contains(layout.playlistHeader, point)) return ControlId::playlistHeader;
         if (contains(layout.playlistBody, point)) return ControlId::playlistBody;
         if (contains(layout.seek, point)) return m_state.canSeek() ? ControlId::seek : ControlId::none;
         if (contains(layout.previous, point)) return ControlId::previous;
@@ -1040,6 +1403,10 @@ private:
 
         const auto result = m_renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
+            for (auto& [key, entry] : m_groupArtworkCache) {
+                (void)key;
+                entry.bitmap.Reset();
+            }
             m_light.Reset();
             m_accent.Reset();
             m_disabled.Reset();
@@ -1057,18 +1424,11 @@ private:
             return found->second;
         }
         PlaylistRowText row;
-        row.number = std::to_wstring(index + 1);
-        if (m_activePlaylist != SIZE_MAX && index < m_playlistItems.get_count()) {
-            auto format = [&](const titleformat_object::ptr& script) {
-                pfc::string8 output;
-                playlist_manager::get()->playlist_item_format_title(m_activePlaylist, index, nullptr,
-                    output, script, nullptr, playback_control::display_level_all);
-                return utf8ToWide(output.c_str());
-            };
-            row.title = format(m_playlistTitleScript);
-            row.artist = format(m_playlistArtistScript);
-            row.album = format(m_playlistAlbumScript);
-            row.length = format(m_playlistLengthScript);
+        row.columns.reserve(m_playlistSettings.columns.size());
+        for (std::size_t column = 0; column < m_playlistSettings.columns.size(); ++column) {
+            row.columns.push_back(!m_playlistSettings.columns[column].visible
+                    || m_playlistSettings.columns[column].cover
+                ? std::wstring{} : utf8ToWide(formatPlaylistItemUtf8(index, m_playlistColumnScripts[column]).c_str()));
         }
         if (m_playlistTextCache.size() >= 512) m_playlistTextCache.clear();
         m_playlistTextCache.emplace(index, row);
@@ -1082,23 +1442,35 @@ private:
             D2D1::Point2F(layout.playlistHeader.right, layout.playlistHeader.bottom), m_disabled.Get(), 1.0F);
 
         const auto contentRight = layout.playlistBody.right;
-        const auto numberRight = std::min(contentRight, 52.0F);
-        const auto lengthLeft = std::max(numberRight, contentRight - 72.0F);
-        const auto remaining = std::max(0.0F, lengthLeft - numberRight);
-        const auto titleRight = numberRight + remaining * 0.40F;
-        const auto artistRight = numberRight + remaining * 0.66F;
-        const auto albumRight = lengthLeft;
-        const auto headerY = layout.playlistHeader;
-        drawTextWith(L"#", D2D1::RectF(8.0F, headerY.top, numberRight - 8.0F, headerY.bottom),
-            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_foreground.Get());
-        drawTextWith(L"Title", D2D1::RectF(numberRight + 8.0F, headerY.top, titleRight - 6.0F, headerY.bottom),
-            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
-        drawTextWith(L"Artist", D2D1::RectF(titleRight + 8.0F, headerY.top, artistRight - 6.0F, headerY.bottom),
-            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
-        drawTextWith(L"Album", D2D1::RectF(artistRight + 8.0F, headerY.top, albumRight - 6.0F, headerY.bottom),
-            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
-        drawTextWith(L"Length", D2D1::RectF(lengthLeft + 6.0F, headerY.top, contentRight - 6.0F, headerY.bottom),
-            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_foreground.Get());
+        struct DrawColumn { std::size_t index{}; D2D1_RECT_F rect{}; };
+        std::vector<DrawColumn> columns;
+        auto totalWeight = 0;
+        for (const auto& column : m_playlistSettings.columns) if (column.visible) totalWeight += column.widthWeight;
+        auto x = layout.playlistBody.left;
+        for (std::size_t index = 0; index < m_playlistSettings.columns.size(); ++index) {
+            const auto& column = m_playlistSettings.columns[index];
+            if (!column.visible) continue;
+            const auto next = index + 1 == m_playlistSettings.columns.size()
+                ? contentRight : x + (contentRight - layout.playlistBody.left)
+                    * static_cast<float>(column.widthWeight) / static_cast<float>(std::max(1, totalWeight));
+            columns.push_back({index, D2D1::RectF(x, layout.playlistHeader.top, std::min(next, contentRight), layout.playlistHeader.bottom)});
+            x = next;
+        }
+        auto alignment = [](ColumnAlignment value) {
+            if (value == ColumnAlignment::center) return DWRITE_TEXT_ALIGNMENT_CENTER;
+            if (value == ColumnAlignment::trailing) return DWRITE_TEXT_ALIGNMENT_TRAILING;
+            return DWRITE_TEXT_ALIGNMENT_LEADING;
+        };
+        for (const auto& column : columns) {
+            const auto& definition = m_playlistSettings.columns[column.index];
+            auto rect = column.rect; rect.left += 6.0F; rect.right -= 6.0F;
+            auto label = utf8ToWide(definition.label.c_str());
+            if (definition.id == m_sortColumnId) label += m_sortDescending ? L"  \x2193" : L"  \x2191";
+            drawTextWith(label, rect, m_secondaryFormat.Get(),
+                alignment(definition.alignment), m_foreground.Get());
+            m_renderTarget->DrawLine(D2D1::Point2F(column.rect.right, column.rect.top + 5.0F),
+                D2D1::Point2F(column.rect.right, column.rect.bottom - 5.0F), m_disabled.Get(), 0.5F);
+        }
 
         if (m_activePlaylist == SIZE_MAX) {
             drawTextWith(L"No active playlist", layout.playlistBody, m_secondaryFormat.Get(),
@@ -1112,13 +1484,47 @@ private:
         }
 
         constexpr float rowHeight = 26.0F;
-        const auto visible = visibleRows(m_playlistTopRow, m_playlistItems.get_count(),
+        std::vector<std::pair<std::size_t, float>> visibleGroupCovers;
+        const auto visible = visibleRows(m_playlistTopRow, m_playlistDisplayRows.size(),
             layout.playlistBody.bottom - layout.playlistBody.top, rowHeight, 0);
         m_renderTarget->PushAxisAlignedClip(layout.playlistBody, D2D1_ANTIALIAS_MODE_ALIASED);
-        for (auto index = visible.first; index < visible.end; ++index) {
+        for (auto displayIndex = visible.first; displayIndex < visible.end; ++displayIndex) {
             const auto y = layout.playlistBody.top
-                + static_cast<float>(index - m_playlistTopRow) * rowHeight;
+                + static_cast<float>(displayIndex - m_playlistTopRow) * rowHeight;
             const auto rowRect = D2D1::RectF(layout.playlistBody.left, y, contentRight, y + rowHeight);
+            const auto& display = m_playlistDisplayRows[displayIndex];
+            if (display.kind == PlaylistDisplayRowKind::groupHeader) {
+                const auto& group = m_playlistGroups[display.group];
+                if (!group.collapsed) visibleGroupCovers.emplace_back(display.group, y + rowHeight);
+                const auto groupPlaying = m_playingPlaylist == m_activePlaylist
+                    && m_playingItem >= group.start && m_playingItem < group.start + group.count;
+                m_renderTarget->FillRectangle(rowRect, m_surface.Get());
+                const auto triangleX = rowRect.left + 11.0F;
+                const auto triangleY = rowRect.top + rowHeight * 0.5F;
+                if (group.collapsed) drawTriangle(D2D1::Point2F(triangleX - 3.0F, triangleY - 5.0F),
+                    D2D1::Point2F(triangleX + 4.0F, triangleY), D2D1::Point2F(triangleX - 3.0F, triangleY + 5.0F), m_foreground.Get());
+                else drawTriangle(D2D1::Point2F(triangleX - 5.0F, triangleY - 3.0F),
+                    D2D1::Point2F(triangleX + 5.0F, triangleY - 3.0F), D2D1::Point2F(triangleX, triangleY + 4.0F), m_foreground.Get());
+                auto leftText = utf8ToWide(group.leftPrimary.c_str());
+                const auto leftSecondary = utf8ToWide(group.leftSecondary.c_str());
+                if (!leftSecondary.empty()) leftText += L"  |  " + leftSecondary;
+                auto rightText = utf8ToWide(group.rightPrimary.c_str());
+                const auto rightSecondary = utf8ToWide(group.rightSecondary.c_str());
+                if (!rightSecondary.empty()) rightText = rightSecondary + L"  |  " + rightText;
+                if (groupPlaying) drawTriangle(D2D1::Point2F(rowRect.right - 16.0F, triangleY - 5.0F),
+                    D2D1::Point2F(rowRect.right - 8.0F, triangleY),
+                    D2D1::Point2F(rowRect.right - 16.0F, triangleY + 5.0F), m_foreground.Get());
+                drawTextWith(leftText,
+                    D2D1::RectF(rowRect.left + 24.0F, y, rowRect.right * 0.72F, y + rowHeight),
+                    m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
+                    groupPlaying ? m_accent.Get() : m_foreground.Get());
+                drawTextWith(rightText,
+                    D2D1::RectF(rowRect.right * 0.72F, y, rowRect.right - (groupPlaying ? 22.0F : 8.0F), y + rowHeight),
+                    m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_disabled.Get());
+                continue;
+            }
+            if (display.kind == PlaylistDisplayRowKind::spacer) continue;
+            const auto index = display.track;
             const auto selected = m_playlistSelection.get(index);
             const auto focused = index == m_playlistFocus;
             const auto playing = m_playingPlaylist == m_activePlaylist && index == m_playingItem;
@@ -1134,23 +1540,55 @@ private:
             }
             const auto row = formatPlaylistRow(index);
             const auto textBrush = playing ? m_accent.Get() : m_foreground.Get();
-            drawTextWith(row.number, D2D1::RectF(8.0F, y, numberRight - 8.0F, y + rowHeight),
-                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, textBrush);
-            drawTextWith(row.title, D2D1::RectF(numberRight + 8.0F, y, titleRight - 6.0F, y + rowHeight),
-                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, textBrush);
-            drawTextWith(row.artist, D2D1::RectF(titleRight + 8.0F, y, artistRight - 6.0F, y + rowHeight),
-                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, textBrush);
-            drawTextWith(row.album, D2D1::RectF(artistRight + 8.0F, y, albumRight - 6.0F, y + rowHeight),
-                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, textBrush);
-            drawTextWith(row.length, D2D1::RectF(lengthLeft + 6.0F, y, contentRight - 6.0F, y + rowHeight),
-                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, textBrush);
+            for (const auto& column : columns) {
+                const auto& definition = m_playlistSettings.columns[column.index];
+                if (definition.cover || column.index >= row.columns.size()) continue;
+                auto rect = D2D1::RectF(column.rect.left + 6.0F, y, column.rect.right - 6.0F, y + rowHeight);
+                auto text = row.columns[column.index];
+                if (definition.id == "builtin.rating") {
+                    const auto rating = std::clamp(_wtoi(text.c_str()), 0, 5);
+                    text.assign(static_cast<std::size_t>(rating), L'\x2605');
+                    text.append(static_cast<std::size_t>(5 - rating), L'\x2606');
+                }
+                drawTextWith(text, rect, m_secondaryFormat.Get(),
+                    alignment(definition.alignment), textBrush);
+            }
             m_renderTarget->DrawLine(D2D1::Point2F(rowRect.left, rowRect.bottom),
                 D2D1::Point2F(rowRect.right, rowRect.bottom), m_surface.Get(), 1.0F);
+        }
+        const auto coverColumn = std::find_if(columns.begin(), columns.end(), [&](const DrawColumn& column) {
+            return m_playlistSettings.columns[column.index].cover;
+        });
+        if (coverColumn != columns.end()) {
+            for (const auto& [groupIndex, top] : visibleGroupCovers) {
+                auto rect = D2D1::RectF(coverColumn->rect.left + 4.0F, top + 4.0F,
+                    coverColumn->rect.right - 4.0F, top + rowHeight * 4.0F - 4.0F);
+                m_renderTarget->FillRectangle(rect, m_surface.Get());
+                auto& artwork = requestGroupArtwork(groupIndex);
+                createGroupArtworkBitmap(artwork);
+                if (artwork.bitmap) {
+                    const auto bitmapSize = artwork.bitmap->GetSize();
+                    const auto scale = std::min((rect.right - rect.left) / bitmapSize.width,
+                        (rect.bottom - rect.top) / bitmapSize.height);
+                    const auto width = bitmapSize.width * scale;
+                    const auto height = bitmapSize.height * scale;
+                    const auto target = D2D1::RectF(rect.left + (rect.right - rect.left - width) * 0.5F,
+                        rect.top + (rect.bottom - rect.top - height) * 0.5F,
+                        rect.left + (rect.right - rect.left + width) * 0.5F,
+                        rect.top + (rect.bottom - rect.top + height) * 0.5F);
+                    m_renderTarget->DrawBitmap(artwork.bitmap.Get(), target, 1.0F,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                } else {
+                    m_renderTarget->DrawRectangle(rect, m_disabled.Get(), 1.0F);
+                    drawTextWith(artwork.loading ? L"Loading" : L"No cover", rect,
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+                }
+            }
         }
         m_renderTarget->PopAxisAlignedClip();
 
         const auto capacity = visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, rowHeight);
-        if (m_playlistItems.get_count() > capacity) {
+        if (m_playlistDisplayRows.size() > capacity) {
             m_renderTarget->FillRectangle(layout.playlistScrollTrack, m_surface.Get());
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(layout.playlistScrollThumb, 4.0F, 4.0F),
                 m_active == ControlId::playlistScrollbar ? m_accent.Get() : m_disabled.Get());
@@ -1503,6 +1941,128 @@ private:
         }
     }
 
+    void startGroupArtworkWorker() {
+        if (m_groupArtworkThread.joinable()) return;
+        m_groupArtworkThread = std::jthread([this](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                GroupArtworkRequest request;
+                std::shared_ptr<abort_callback_impl> aborter;
+                {
+                    std::unique_lock lock(m_groupArtworkMutex);
+                    m_groupArtworkCondition.wait(lock, [&] {
+                        return stop.stop_requested() || !m_groupArtworkRequests.empty();
+                    });
+                    if (stop.stop_requested()) break;
+                    request = std::move(m_groupArtworkRequests.front());
+                    m_groupArtworkRequests.erase(m_groupArtworkRequests.begin());
+                    aborter = std::make_shared<abort_callback_impl>();
+                    m_groupArtworkAborter = aborter;
+                }
+                auto pixels = loadGroupArtwork(request.items, request.artworkId, *aborter);
+                {
+                    std::scoped_lock lock(m_groupArtworkMutex);
+                    if (m_groupArtworkAborter == aborter) m_groupArtworkAborter.reset();
+                }
+                if (pixels.status == ArtworkStatus::aborted || stop.stop_requested()) continue;
+                auto* completion = new GroupArtworkCompletion{
+                    request.generation, std::move(request.key), std::move(pixels)};
+                const auto wnd = get_wnd();
+                if (!wnd || !PostMessage(wnd, kGroupArtworkReadyMessage, 0,
+                        reinterpret_cast<LPARAM>(completion))) delete completion;
+            }
+        });
+    }
+
+    void stopGroupArtworkWorker() noexcept {
+        if (!m_groupArtworkThread.joinable()) return;
+        m_groupArtworkThread.request_stop();
+        {
+            std::scoped_lock lock(m_groupArtworkMutex);
+            if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+            m_groupArtworkRequests.clear();
+        }
+        m_groupArtworkCondition.notify_all();
+        m_groupArtworkThread.join();
+        MSG message{};
+        while (PeekMessageW(&message, get_wnd(), kGroupArtworkReadyMessage,
+                kGroupArtworkReadyMessage, PM_REMOVE)) {
+            delete reinterpret_cast<GroupArtworkCompletion*>(message.lParam);
+        }
+    }
+
+    void applyGroupArtworkCompletion(GroupArtworkCompletion* raw) {
+        const std::unique_ptr<GroupArtworkCompletion> completion(raw);
+        if (!completion || completion->generation != m_groupArtworkGeneration) return;
+        const auto found = m_groupArtworkCache.find(completion->key);
+        if (found == m_groupArtworkCache.end()) return;
+        m_groupArtworkBytes -= std::min(m_groupArtworkBytes, found->second.pixels.bgra.size());
+        constexpr std::size_t maximumBytes = 64U * 1024U * 1024U;
+        const auto incoming = completion->pixels.bgra.size();
+        while (m_groupArtworkBytes + incoming > maximumBytes) {
+            const auto victim = std::find_if(m_groupArtworkCache.begin(), m_groupArtworkCache.end(), [&](const auto& item) {
+                return item.first != completion->key && !item.second.loading;
+            });
+            if (victim == m_groupArtworkCache.end()) break;
+            m_groupArtworkBytes -= std::min(m_groupArtworkBytes, victim->second.pixels.bgra.size());
+            m_groupArtworkCache.erase(victim);
+        }
+        found->second.loading = false;
+        if (m_groupArtworkBytes + incoming <= maximumBytes) {
+            found->second.pixels = std::move(completion->pixels);
+            m_groupArtworkBytes += incoming;
+        } else {
+            found->second.pixels = {ArtworkStatus::unavailable};
+        }
+        found->second.bitmap.Reset();
+        invalidate();
+    }
+
+    [[nodiscard]] std::string groupArtworkKey(std::size_t groupIndex) const {
+        return std::to_string(groupIndex) + '\x1f' + m_playlistGroups[groupIndex].key;
+    }
+
+    GroupArtworkCacheEntry& requestGroupArtwork(std::size_t groupIndex) {
+        const auto key = groupArtworkKey(groupIndex);
+        if (const auto found = m_groupArtworkCache.find(key); found != m_groupArtworkCache.end()) return found->second;
+        if (m_groupArtworkCache.size() >= 64) {
+            const auto victim = m_groupArtworkCache.begin();
+            m_groupArtworkBytes -= std::min(m_groupArtworkBytes, victim->second.pixels.bgra.size());
+            m_groupArtworkCache.erase(victim);
+        }
+        auto [entry, inserted] = m_groupArtworkCache.emplace(key, GroupArtworkCacheEntry{});
+        (void)inserted;
+        const auto& source = activeGroupDefinition().artwork;
+        if (source == GroupArtworkSource::placeholder) {
+            entry->second.pixels.status = ArtworkStatus::missing;
+            return entry->second;
+        }
+        const auto& group = m_playlistGroups[groupIndex];
+        GroupArtworkRequest request;
+        request.generation = m_groupArtworkGeneration;
+        request.key = key;
+        request.artworkId = source == GroupArtworkSource::artist
+            ? album_art_ids::artist : album_art_ids::cover_front;
+        for (std::size_t offset = 0; offset < group.count; ++offset) {
+            request.items.add_item(m_playlistItems[group.start + offset]);
+        }
+        entry->second.loading = true;
+        {
+            std::scoped_lock lock(m_groupArtworkMutex);
+            m_groupArtworkRequests.push_back(std::move(request));
+        }
+        m_groupArtworkCondition.notify_one();
+        return entry->second;
+    }
+
+    void createGroupArtworkBitmap(GroupArtworkCacheEntry& entry) {
+        if (!m_renderTarget || entry.bitmap || entry.pixels.status != ArtworkStatus::ready
+            || entry.pixels.width == 0 || entry.pixels.height == 0 || entry.pixels.bgra.empty()) return;
+        m_renderTarget->CreateBitmap(D2D1::SizeU(entry.pixels.width, entry.pixels.height),
+            entry.pixels.bgra.data(), entry.pixels.width * 4U,
+            D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                D2D1_ALPHA_MODE_PREMULTIPLIED)), entry.bitmap.ReleaseAndGetAddressOf());
+    }
+
     void startArtworkWork(const metadb_handle_ptr& target) {
         const auto state = m_artworkAsync;
         const auto generation = state->generation.fetch_add(1) + 1;
@@ -1807,6 +2367,8 @@ private:
             updateRightDivider(wnd, point.y);
         } else if (m_active == ControlId::playlistScrollbar) {
             updatePlaylistScrollbar(wnd, point.y);
+        } else if (m_active == ControlId::playlistHeader) {
+            updatePlaylistHeaderDrag(wnd, point.x);
         }
     }
 
@@ -1821,6 +2383,16 @@ private:
         }
         if (hit == ControlId::playlistBody) {
             onPlaylistLeftButtonDown(wnd, point);
+            return;
+        }
+        if (hit == ControlId::playlistHeader) {
+            m_headerPressedColumn = playlistColumnAt(wnd, point.x);
+            m_headerResizeColumns = playlistBoundaryAt(wnd, point.x);
+            m_headerStartSettings = m_playlistSettings;
+            m_headerPressX = point.x;
+            m_headerMoved = false;
+            m_active = ControlId::playlistHeader;
+            SetCapture(wnd);
             return;
         }
         if (!isEnabled(hit)) {
@@ -1881,6 +2453,36 @@ private:
             m_dragHeaderPermille = -1;
             writeSettings(settings);
             syncLyricsHost(wnd);
+        } else if (active == ControlId::playlistHeader) {
+            if (m_headerResizeColumns) {
+                writePlaylistViewSettings(m_playlistSettings);
+            } else if (m_headerPressedColumn) {
+                const auto source = *m_headerPressedColumn;
+                if (m_headerMoved) {
+                    if (const auto target = playlistColumnAt(wnd, point.x);
+                        target && *target != source && !m_playlistSettings.columns[source].cover
+                            && !m_playlistSettings.columns[*target].cover) {
+                        std::swap(m_playlistSettings.columns[source], m_playlistSettings.columns[*target]);
+                        writePlaylistViewSettings(m_playlistSettings);
+                    }
+                } else {
+                    const auto& definition = m_playlistSettings.columns[source];
+                    if (definition.cover) {
+                        m_headerPressedColumn.reset();
+                        m_headerResizeColumns.reset();
+                        invalidate();
+                        return;
+                    }
+                    const auto descending = m_sortColumnId == definition.id ? !m_sortDescending : false;
+                    if (sortActivePlaylist(definition.sortFormat.empty()
+                            ? definition.displayFormat : definition.sortFormat, descending)) {
+                        m_sortColumnId = definition.id;
+                        m_sortDescending = descending;
+                    }
+                }
+            }
+            m_headerPressedColumn.reset();
+            m_headerResizeColumns.reset();
         } else if (active != ControlId::volume && active != ControlId::playlistScrollbar && active == hit) {
             activate(active);
         }
@@ -2008,10 +2610,15 @@ private:
     }
 
     void cancelInteraction() {
+        if (m_active == ControlId::playlistHeader && m_headerResizeColumns) {
+            m_playlistSettings = m_headerStartSettings;
+        }
         m_active = ControlId::none;
         m_previewing = false;
         m_dragHeaderPermille = -1;
         m_playlistScrollbarGrabOffset = 0.0F;
+        m_headerPressedColumn.reset();
+        m_headerResizeColumns.reset();
         if (GetCapture() == get_wnd()) {
             ReleaseCapture();
         }
@@ -2093,6 +2700,9 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
+        reloadPlaylistViewSettings();
+        rebuildPlaylistGroups();
+        clampPlaylistScroll();
         if (settings.lyricsAutoSwitch != m_autoSwitchEnabled) {
             m_autoSwitchEnabled = settings.lyricsAutoSwitch;
             m_lowerRightView = settings.lyricsAutoSwitch
@@ -2141,6 +2751,26 @@ private:
     std::size_t m_playlistTopRow{};
     float m_playlistScrollbarGrabOffset{};
     std::unordered_map<std::size_t, PlaylistRowText> m_playlistTextCache;
+    std::optional<std::size_t> m_headerPressedColumn;
+    std::optional<std::pair<std::size_t, std::size_t>> m_headerResizeColumns;
+    PlaylistViewSettings m_headerStartSettings{defaultPlaylistViewSettings()};
+    float m_headerPressX{};
+    bool m_headerMoved{};
+    std::string m_sortColumnId;
+    bool m_sortDescending{};
+    PlaylistViewSettings m_playlistSettings{defaultPlaylistViewSettings()};
+    std::vector<PlaylistGroup> m_playlistGroups;
+    std::vector<PlaylistDisplayRow> m_playlistDisplayRows;
+    std::vector<titleformat_object::ptr> m_playlistColumnScripts;
+    std::array<titleformat_object::ptr, 5> m_playlistGroupScripts;
+    std::uint64_t m_groupArtworkGeneration{};
+    std::size_t m_groupArtworkBytes{};
+    std::unordered_map<std::string, GroupArtworkCacheEntry> m_groupArtworkCache;
+    std::vector<GroupArtworkRequest> m_groupArtworkRequests;
+    std::mutex m_groupArtworkMutex;
+    std::condition_variable m_groupArtworkCondition;
+    std::shared_ptr<abort_callback_impl> m_groupArtworkAborter;
+    std::jthread m_groupArtworkThread;
     LyricsHost m_lyricsHost;
     double m_previewPosition{};
     float m_dpi{96.0F};
@@ -2163,10 +2793,6 @@ private:
     titleformat_object::ptr m_codecScript;
     titleformat_object::ptr m_bitrateScript;
     titleformat_object::ptr m_ratingScript;
-    titleformat_object::ptr m_playlistTitleScript;
-    titleformat_object::ptr m_playlistArtistScript;
-    titleformat_object::ptr m_playlistAlbumScript;
-    titleformat_object::ptr m_playlistLengthScript;
     ComPtr<ID2D1SolidColorBrush> m_background;
     ComPtr<ID2D1SolidColorBrush> m_surface;
     ComPtr<ID2D1SolidColorBrush> m_foreground;

@@ -29,6 +29,8 @@ constexpr GUID kShowReplayGainGuid{
     0x26b186af, 0x9781, 0x45c0, {0x93, 0x91, 0x95, 0x32, 0xa4, 0x0c, 0x86, 0x1d}};
 constexpr GUID kRightHeaderPermilleGuid{
     0x6434bf69, 0x3e63, 0x4f17, {0x86, 0x44, 0xa1, 0xd1, 0xe3, 0x20, 0xf1, 0x4c}};
+constexpr GUID kPlaylistViewSettingsGuid{
+    0xd8a6f36a, 0x474c, 0x4fd6, {0x89, 0x3f, 0x08, 0x8e, 0xcc, 0x83, 0xa4, 0xa2}};
 
 cfg_int g_configVersion(kConfigVersionGuid, 0);
 cfg_int g_timeDisplay(kTimeDisplayGuid, static_cast<std::int64_t>(TimeDisplayMode::total));
@@ -38,6 +40,7 @@ cfg_bool g_lyricsAutoSwitch(kLyricsAutoSwitchGuid, true);
 cfg_int g_lowerRightView(kLowerRightViewGuid, static_cast<std::int64_t>(LowerRightView::lyrics));
 cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
 cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
+cfg_string g_playlistViewSettings(kPlaylistViewSettingsGuid, "");
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
@@ -103,6 +106,46 @@ void writeSettings(const SettingsValues& values) {
     g_showReplayGain = normalized.values.showReplayGain;
     g_rightHeaderPermille = static_cast<t_int32>(normalized.values.rightHeaderPermille);
     g_configVersion = static_cast<t_int32>(std::max<std::int64_t>(g_configVersion.get(), kCurrentSettingsVersion));
+    notifySettingsWindows();
+}
+
+PlaylistViewSettings readPlaylistViewSettings() {
+    const auto stored = g_playlistViewSettings.get();
+    if (stored.is_empty()) return defaultPlaylistViewSettings();
+    auto value = deserializePlaylistViewSettings(stored.c_str());
+    auto compiler = titleformat_compiler::get();
+    auto valid = [&](const std::string& text, bool allowEmpty) {
+        titleformat_object::ptr script;
+        return (allowEmpty && text.empty()) || compiler->compile(script, text.c_str());
+    };
+    bool repaired{};
+    for (auto& group : value.groups) {
+        if (!valid(group.keyFormat, false)) { group.keyFormat = "$if2(%album%,'Single')"; repaired = true; }
+        if (!valid(group.sortFormat, false)) { group.sortFormat = "%album% | %discnumber% | %tracknumber% | %title%"; repaired = true; }
+        for (auto* field : {&group.leftPrimary, &group.rightPrimary, &group.leftSecondary, &group.rightSecondary}) {
+            if (!valid(*field, true)) { field->clear(); repaired = true; }
+        }
+    }
+    for (auto& column : value.columns) {
+        if (!column.cover && !valid(column.displayFormat, false)) {
+            column.displayFormat = "$if2(%title%,$filename_ext(%path%))"; repaired = true;
+        }
+        if (!valid(column.sortFormat, true)) { column.sortFormat.clear(); repaired = true; }
+    }
+    if (repaired) {
+        const auto serialized = serializePlaylistViewSettings(value);
+        g_playlistViewSettings.set(serialized.c_str());
+    }
+    return value;
+}
+
+void writePlaylistViewSettings(const PlaylistViewSettings& values) {
+    const auto serialized = serializePlaylistViewSettings(values);
+    g_playlistViewSettings.set(serialized.c_str());
+    notifySettingsWindows();
+}
+
+void notifySettingsChanged() {
     notifySettingsWindows();
 }
 
