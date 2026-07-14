@@ -23,4 +23,15 @@ Before any inspection, inference, or modification in this repository:
 
 4. If any output is mojibake, discard it. Fix the decoding or display method and reread the original bytes before drawing conclusions or taking action. Never rewrite a file merely because the terminal displayed it incorrectly.
 
+# Local build tool paths
+
+Do not assume that CMake or CTest is available through `PATH` in this repository. Use the Visual Studio bundled executables explicitly:
+
+```powershell
+$CMake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$CTest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
+```
+
+Invoke them with `& $CMake` and `& $CTest`. If either recorded path does not exist, report the environment mismatch and inspect `docs/DEVELOPMENT_SETUP.md`; do not fall back to a bare `cmake` or `ctest` command.
+
 `docs/PROJECT_RULES.md` is the sole detailed project charter. This file is only the automatically discovered, encoding-safe entry point.
