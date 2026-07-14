@@ -314,7 +314,8 @@ private:
             if (column.label.empty()) {
                 MessageBoxW(m_window, L"A column label is empty.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
             }
-            if ((!column.cover && !valid(column.displayFormat, false)) || !valid(column.sortFormat, true)) {
+            if ((!column.cover && column.id != "builtin.state" && !valid(column.displayFormat, false))
+                || !valid(column.sortFormat, true)) {
                 MessageBoxW(m_window, L"A column title-format expression is invalid. Fix it before applying.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
             }
         }

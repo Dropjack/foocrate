@@ -41,6 +41,10 @@ int main() {
     broken = normalizePlaylistViewSettings(std::move(broken));
     expect(broken.activeGroupId == "builtin.album.simple", "missing active group must fall back");
     expect(!broken.columns.empty(), "missing built-in columns must be restored");
+    const auto state = std::find_if(broken.columns.begin(), broken.columns.end(),
+        [](const auto& column) { return column.id == "builtin.state"; });
+    expect(state != broken.columns.end() && state->builtIn && state->visible,
+        "State / Queue must be a stable visible built-in column");
     expect(std::any_of(broken.columns.begin(), broken.columns.end(), [](const auto& c) { return c.visible && !c.cover; }),
         "at least one text column must remain visible");
     return failures == 0 ? 0 : 1;

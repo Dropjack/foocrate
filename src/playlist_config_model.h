@@ -87,6 +87,7 @@ inline constexpr std::int32_t kPlaylistViewSettingsVersion = 1;
 [[nodiscard]] inline std::vector<ColumnDefinition> defaultColumnDefinitions() {
     return {
         {"builtin.cover", "Cover", "", "", ColumnAlignment::center, true, 900, true, true},
+        {"builtin.state", "State", "", "", ColumnAlignment::center, true, 600, true, false},
         {"builtin.track", "#", "$if(%discnumber%,$num(%discnumber%,1)'.',)$if(%tracknumber%,$num(%tracknumber%,2),%list_index%)",
             "%tracknumber% | %album artist% | %album% | %discnumber% | %title%",
             ColumnAlignment::trailing, true, 650, true, false},

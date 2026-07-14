@@ -44,7 +44,9 @@ Refrain 不是允许用户自由拼装、拖走、浮动、交换或增删面板
 | `Column Header` | 列表表头 | `Playlist View` 内的列标题区域 |
 | `Group Header` | 分组标题 | `Playlist View` 内的专辑等分组标题 |
 | `Track List` | 曲目列表 | `Playlist View` 内的曲目行区域 |
-| `Now Playing Panel` | 当前播放面板 | `Playlist Workspace` 右侧，容纳封面、歌词与歌曲信息 |
+| `Right Side Panel` | 右侧面板容器 | `Playlist Workspace` 右侧，在当前播放与播放队列模式间切换 |
+| `Now Playing Panel` | 当前播放面板 | `Right Side Panel` 默认模式，容纳封面、歌词与歌曲信息 |
+| `Playback Queue Panel` | 播放队列面板 | `Right Side Panel` 的整栏队列模式 |
 | `Now Playing Header` | 当前播放摘要区 | `Now Playing Panel` 上部，固定显示封面、评分与摘要 |
 | `Artwork View` | 封面视图 | `Now Playing Header` 内的封面内容 |
 | `Lyrics View` | 歌词视图 | `Now Playing Panel` 下部的默认内容 |
@@ -60,9 +62,9 @@ Refrain 不是允许用户自由拼装、拖走、浮动、交换或增删面板
 | `Control Bar` | 快捷控制区 | `Playback Bar` 下部，始终存在 |
 | `Workspace Switcher` | 页面切换组 | `Control Bar` 左侧的页面入口与设置齿轮 |
 | `Transport Controls` | 传输控制组 | `Control Bar` 中央的打开、上一首、播放、下一首、停止 |
-| `Playback Tools` | 播放工具组 | `Control Bar` 右侧的媒体库、顺序、输出、静音和音量 |
+| `Playback Tools` | 播放工具组 | `Control Bar` 右侧的队列、媒体库、输出、静音和音量 |
 
-`Playlist Workspace` 的固定顺序为 `Playlist Browser | Playlist View | Now Playing Panel`。`Album Cover Browser Workspace` 的固定顺序为 `Album Cover Browser | Album Track List`。页面切换只能在这些已定义模式之间发生，不能把其中一个区域拖进另一模式或生成自定义组合。
+`Playlist Workspace` 的固定顺序为 `Playlist Browser | Playlist View | Right Side Panel`。右栏默认显示 `Now Playing Panel`，可由底部正式按钮整栏切换为 `Playback Queue Panel`；切换不改变宽度、顺序或父级。`Album Cover Browser Workspace` 的固定顺序为 `Album Cover Browser | Album Track List`。页面切换只能在这些已定义模式之间发生，不能把其中一个区域拖进另一模式或生成自定义组合。
 
 允许并保存的分隔尺寸只有四组：`Playlist Browser / Playlist View` 的左右宽度、`Playlist View / Now Playing Panel` 的左右宽度、`Now Playing Header / 右下视图` 的上下高度，以及 `Album Cover Browser / Album Track List` 的左右宽度。分隔线不能改变顺序、隐藏区域、生成浮动窗口或重组页面。
 
@@ -119,12 +121,21 @@ Refrain 不是允许用户自由拼装、拖走、浮动、交换或增删面板
 - 切换不改变右上内容、不停止播放或歌词搜索；当前规格暂定保存切换状态，仍需用户最终确认。
 - ESLyric 缺失或失败时在原区域显示安装/恢复提示，不能影响播放列表、封面和播放控制。
 
+### 3.5.1 右栏播放队列模式
+
+- 底部 `Playback Tools` 的队列按钮把整个 `Right Side Panel` 在 `Now Playing Panel` 与 `Playback Queue Panel` 间切换。
+- 队列模式使用完整右栏高度；切回后恢复封面、歌词/歌曲信息及原上下分隔比例。
+- 队列模式不创建临时播放列表；直接读取和管理 foobar2000 真实播放队列。
+- 队列只显示用户显式排入的项目，不复制活动播放列表来预测未来顺序；重复项目允许存在。Remove/Clear 位于队列右键菜单，Delete 删除所选，双击/Enter 立即播放并消费目标项。
+- 队列曲目表头与列表和 `Album Track Header` / `Album Track List` 共用绘制与基础交互资源，但数据、选择和特有命令相互隔离。
+- 用户主动打开队列后，切歌和停止不自动关闭；队列模式不跨重启保存。
+
 ### 3.6 底部控制区
 
 - 上沿为横跨主窗口的播放进度条，左侧显示已播放时间，右侧显示总时长或经观察批准的剩余时间。
-- 中央为播放顺序、上一首、播放/暂停、下一首和停止。
+- 中央为上一首、播放/暂停、下一首和停止。
 - 左右功能按钮组、静音和音量按截图位置与分组还原；具体图标命令必须由实际参考观察确认，不能看图猜测。
-- 播放状态、进度、音量、静音、输出设备和播放顺序与 foobar2000 双向同步。
+- 播放状态、进度、音量、静音和输出设备与 foobar2000 双向同步。Default、Random、Shuffle 等播放顺序继续使用 foobar2000 自带菜单、快捷键和配置，Refrain 不增加第二个入口或未来曲目预测列表。
 - 不可跳转的流显示明确禁用状态；用户拖动进度时先预览，松开后请求跳转，不伪造成功。
 - 设置齿轮打开 foobar2000 Preferences 中的 Refrain 设置页。
 
