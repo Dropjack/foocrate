@@ -1,5 +1,6 @@
 #include "playback_panel.h"
 #include "artwork_loader.h"
+#include "album_browser_model.h"
 #include "compact_track_list_model.h"
 #include "lyrics_host.h"
 #include "now_playing_state.h"
@@ -25,10 +26,13 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <random>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -53,6 +57,7 @@ constexpr UINT kLyricsMiddleClickMessage = WM_APP + 0x424;
 constexpr UINT kGroupArtworkReadyMessage = WM_APP + 0x425;
 constexpr UINT kQueueChangedMessage = WM_APP + 0x426;
 constexpr UINT kDropReadyMessage = WM_APP + 0x427;
+constexpr UINT kRestoreAlbumSourceMessage = WM_APP + 0x428;
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kStatusTimer = 0x5272;
 
@@ -68,6 +73,25 @@ public:
 
 service_factory_single_t<QueueChangeCallback> g_queueChangeCallbackFactory;
 
+class AlbumViewPlaylistLock : public playlist_lock {
+public:
+    bool query_items_add(t_size, const pfc::list_base_const_t<metadb_handle_ptr>&, const bit_array&) override { return false; }
+    bool query_items_reorder(const t_size*, t_size) override { return false; }
+    bool query_items_remove(const bit_array&, bool force) override { return force; }
+    bool query_item_replace(t_size, const metadb_handle_ptr&, const metadb_handle_ptr&) override { return false; }
+    bool query_playlist_rename(const char*, t_size) override { return false; }
+    bool query_playlist_remove() override { return false; }
+    bool execute_default_action(t_size) override { return false; }
+    void on_playlist_index_change(t_size index) override { m_index = index; }
+    void on_playlist_remove() override { m_index = SIZE_MAX; }
+    void get_lock_name(pfc::string_base& out) override { out = "Refrain Album View"; }
+    void show_ui() override {}
+    t_uint32 get_filter_mask() override {
+        return filter_add | filter_remove | filter_reorder | filter_replace | filter_rename | filter_remove_playlist;
+    }
+    t_size m_index{SIZE_MAX};
+};
+
 enum class ControlId {
     none,
     seek,
@@ -78,6 +102,8 @@ enum class ControlId {
     mute,
     volume,
     settings,
+    playlistWorkspace,
+    albumWorkspace,
     queueToggle,
     artwork,
     trackTitle,
@@ -97,7 +123,17 @@ enum class ControlId {
     queueHeader,
     queueBody,
     queueScrollbar,
+    albumSource,
+    albumGrid,
+    albumTrackList,
+    albumDivider,
+    albumLibraryPreferences,
+    albumGridScrollbar,
+    albumTrackScrollbar,
 };
+
+enum class Workspace { playlist, album };
+enum class AlbumSourceKind { playlist, mediaLibrary };
 
 enum class DropDestination {
     none,
@@ -114,6 +150,8 @@ struct Layout {
     D2D1_RECT_F mute{};
     D2D1_RECT_F volume{};
     D2D1_RECT_F settings{};
+    D2D1_RECT_F playlistWorkspace{};
+    D2D1_RECT_F albumWorkspace{};
     D2D1_RECT_F queueToggle{};
     D2D1_RECT_F elapsed{};
     D2D1_RECT_F total{};
@@ -137,6 +175,17 @@ struct Layout {
     D2D1_RECT_F queueBody{};
     D2D1_RECT_F queueScrollTrack{};
     D2D1_RECT_F queueScrollThumb{};
+    D2D1_RECT_F albumSource{};
+    D2D1_RECT_F albumGrid{};
+    D2D1_RECT_F albumDivider{};
+    D2D1_RECT_F albumHeader{};
+    D2D1_RECT_F albumTrackHeader{};
+    D2D1_RECT_F albumTrackBody{};
+    D2D1_RECT_F albumLibraryPreferences{};
+    D2D1_RECT_F albumGridScrollTrack{};
+    D2D1_RECT_F albumGridScrollThumb{};
+    D2D1_RECT_F albumTrackScrollTrack{};
+    D2D1_RECT_F albumTrackScrollThumb{};
     float surfaceTop{};
 };
 
@@ -175,18 +224,21 @@ struct GroupArtworkRequest {
     std::string key;
     metadb_handle_list items;
     GUID artworkId{};
+    bool album{};
 };
 
 struct GroupArtworkCompletion {
     std::uint64_t generation{};
     std::string key;
     ArtworkPixels pixels;
+    bool album{};
 };
 
 struct GroupArtworkCacheEntry {
     bool loading{};
     ArtworkPixels pixels{ArtworkStatus::unavailable};
     ComPtr<ID2D1Bitmap> bitmap;
+    std::uint64_t lastUse{};
 };
 
 struct DropAsyncState {
@@ -231,14 +283,18 @@ struct DropCompletion {
 class PlaybackPanel : public uie::container_uie_window_v3,
                       public play_callback,
                       private playlist_callback_impl_base,
-                      private metadb_io_callback_dynamic_impl_base {
+                      private metadb_io_callback_dynamic_impl_base,
+                      private library_callback_v2_dynamic_impl_base {
 public:
     PlaybackPanel()
         : playlist_callback_impl_base(playlist_callback::flag_item_ops
-              | playlist_callback::flag_on_playlist_activate
-              | playlist_callback::flag_on_playlist_locked
-              | playlist_callback::flag_on_default_format_changed) {}
+              | playlist_callback::flag_playlist_ops
+              | playlist_callback::flag_on_default_format_changed
+              | playlist_callback::flag_on_playback_order_changed) {}
     ~PlaybackPanel() {
+        endAlbumPlaybackSession();
+        releaseAlbumBridgeLock();
+        stopAlbumArtworkWorker();
         stopGroupArtworkWorker();
         stopArtworkWork();
         unregisterPlaybackCallback();
@@ -272,8 +328,11 @@ public:
             m_artworkAsync->window = wnd;
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
+            m_albumSplitPermille = readAlbumBrowserSettings().splitPermille;
+            restoreAlbumBridgeLock();
             reloadPlaylistViewSettings();
             startGroupArtworkWorker();
+            startAlbumArtworkWorker();
             registerPlaybackCallback();
             rebuildPlaylistSnapshot(true);
             refreshQueueSnapshot();
@@ -305,6 +364,7 @@ public:
             if (m_dropTarget.is_valid()) m_dropTarget->detach();
             m_dropTarget.release();
             m_lyricsHost.destroy();
+            stopAlbumArtworkWorker();
             stopGroupArtworkWorker();
             stopArtworkWork();
             unregisterSettingsWindow(wnd);
@@ -323,6 +383,7 @@ public:
                 m_renderTarget->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
             }
             clampPlaylistScroll();
+            clampAlbumScroll();
             syncLyricsHost(wnd);
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
@@ -352,6 +413,7 @@ public:
             return 0;
         case WM_MOUSELEAVE:
             m_trackingMouse = false;
+            m_albumHover.reset();
             if (m_active == ControlId::none) {
                 setHover(ControlId::none);
             }
@@ -416,6 +478,10 @@ public:
                 SetCursor(LoadCursor(nullptr, IDC_SIZENS));
                 return TRUE;
             }
+            if (LOWORD(lp) == HTCLIENT && m_hover == ControlId::albumDivider) {
+                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
             if (LOWORD(lp) == HTCLIENT && (m_hover == ControlId::seek || m_hover == ControlId::volume
                     || isRatingControl(m_hover))) {
                 SetCursor(LoadCursor(nullptr, IDC_HAND));
@@ -443,6 +509,9 @@ public:
         case kDropReadyMessage:
             applyDropCompletion(reinterpret_cast<DropCompletion*>(lp));
             return 0;
+        case kRestoreAlbumSourceMessage:
+            restoreAlbumSourceAfterPlaybackStart();
+            return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -453,10 +522,22 @@ public:
         requestRefresh();
     }
     void on_playback_new_track(metadb_handle_ptr) override {
+        if (m_albumSessionActive) {
+            t_size playlist = SIZE_MAX, item = SIZE_MAX;
+            playlist_manager::get()->get_playing_item_location(&playlist, &item);
+            (void)item;
+            if (playlist != m_albumBridgePlaylist) {
+                endAlbumPlaybackSession();
+            }
+            if (m_albumSourceRestorePending) {
+                if (const auto wnd = get_wnd()) PostMessage(wnd, kRestoreAlbumSourceMessage, 0, 0);
+            }
+        }
         if (readSettings().lyricsAutoSwitch) setLowerRightView(LowerRightView::lyrics, false);
         requestRefresh();
     }
     void on_playback_stop(play_control::t_stop_reason reason) override {
+        if (!m_startingAlbumSession) endAlbumPlaybackSession();
         m_state.playing = false;
         m_state.paused = false;
         m_state.seekable = false;
@@ -492,14 +573,17 @@ public:
 
     void on_items_added(t_size playlist, t_size, metadb_handle_list_cref, const bit_array&) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshAlbumSourceIfPlaylist(playlist);
         refreshQueueSnapshot();
     }
     void on_items_reordered(t_size playlist, const t_size*, t_size) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshAlbumSourceIfPlaylist(playlist);
         refreshQueueSnapshot();
     }
     void on_items_removed(t_size playlist, const bit_array&, t_size, t_size) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshAlbumSourceIfPlaylist(playlist);
         refreshQueueSnapshot();
     }
     void on_items_selection_change(t_size playlist, const bit_array&, const bit_array&) override {
@@ -521,6 +605,7 @@ public:
     }
     void on_items_modified(t_size playlist, const bit_array&) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshAlbumSourceIfPlaylist(playlist);
         requestRefresh();
     }
     void on_items_modified_fromplayback(
@@ -536,12 +621,30 @@ public:
     void on_items_replaced(t_size playlist, const bit_array&,
         const pfc::list_base_const_t<playlist_callback::t_on_items_replaced_entry>&) override {
         if (playlist == m_activePlaylist) rebuildPlaylistSnapshot(false);
+        refreshAlbumSourceIfPlaylist(playlist);
     }
     void on_item_ensure_visible(t_size playlist, t_size item) override {
         if (playlist == m_activePlaylist) ensurePlaylistRowVisible(item);
     }
     void on_playlist_locked(t_size playlist, bool) override {
         if (playlist == m_activePlaylist) invalidate();
+    }
+    void on_playback_order_changed(t_size order) override {
+        if (!m_albumSessionActive || m_restoringAlbumPlaybackOrder) return;
+        m_albumPriorPlaybackOrder = order;
+        if (playlist_manager::get()->playback_order_get_count() > 0 && order != 0) {
+            m_restoringAlbumPlaybackOrder = true;
+            playlist_manager::get()->playback_order_set_active(0);
+            m_restoringAlbumPlaybackOrder = false;
+        }
+    }
+    void on_playlist_renamed(t_size playlist, const char*, t_size) override {
+        refreshAlbumSourceIfPlaylist(playlist);
+    }
+    void on_playlists_removed(const bit_array&, t_size, t_size) override {
+        if (m_workspace == Workspace::album && m_albumSourceKind == AlbumSourceKind::playlist) {
+            loadAlbumSourcePlaylist(m_albumSourcePlaylistGuid);
+        }
     }
     void on_default_format_changed() override {
         clearPlaylistTextCache();
@@ -557,6 +660,13 @@ public:
             }
         }
     }
+
+    void on_items_added(metadb_handle_list_cref) override { refreshAlbumLibrarySource(); }
+    void on_items_removed(metadb_handle_list_cref) override { refreshAlbumLibrarySource(); }
+    void on_items_modified_v2(metadb_handle_list_cref, metadb_io_callback_v2_data&) override {
+        refreshAlbumLibrarySource();
+    }
+    void on_library_initialized() override { refreshAlbumLibrarySource(); }
 
 private:
     class DropTargetImpl : public ImplementCOMRefCounter<IDropTarget> {
@@ -654,7 +764,8 @@ private:
     void syncLyricsHost(HWND wnd) {
         if (!wnd || !IsWindow(wnd)) return;
         m_lyricsHost.resize(lowerRightPixels(wnd));
-        m_lyricsHost.setVisible(!m_queueMode && m_lowerRightView == LowerRightView::lyrics);
+        m_lyricsHost.setVisible(m_workspace == Workspace::playlist && !m_queueMode
+            && m_lowerRightView == LowerRightView::lyrics);
         InvalidateRect(wnd, nullptr, FALSE);
     }
 
@@ -676,6 +787,13 @@ private:
     }
 
     void toggleQueueMode() {
+        if (m_workspace == Workspace::album) {
+            setWorkspace(Workspace::playlist);
+            m_queueMode = true;
+            if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
+            invalidate();
+            return;
+        }
         m_queueMode = !m_queueMode;
         m_queueSelected.assign(m_queueItems.size(), false);
         m_queueFocus = m_queueItems.empty() ? SIZE_MAX : 0;
@@ -920,7 +1038,7 @@ private:
             {
                 std::scoped_lock lock(m_groupArtworkMutex);
                 m_groupArtworkRequests.clear();
-                if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+                if (m_groupArtworkAborter && !m_groupArtworkAborterAlbum) m_groupArtworkAborter->abort();
             }
             m_groupArtworkCache.clear();
             m_groupArtworkBytes = 0;
@@ -979,6 +1097,370 @@ private:
         }
         refreshPlayingLocation();
         invalidate();
+    }
+
+    [[nodiscard]] std::string formatHandleUtf8(
+        const metadb_handle_ptr& handle, const titleformat_object::ptr& script) const {
+        if (handle.is_empty() || script.is_empty()) return {};
+        pfc::string8 output;
+        return handle->format_title(nullptr, output, script, nullptr) ? std::string(output.c_str()) : std::string{};
+    }
+
+    void rebuildAlbumModel() {
+        const auto previousKey = m_albumSelection < m_albums.size() ? m_albums[m_albumSelection].key : std::string{};
+        std::vector<AlbumSourceTrack> input;
+        input.reserve(m_albumSourceItems.get_count());
+        for (std::size_t index = 0; index < m_albumSourceItems.get_count(); ++index) {
+            const auto& item = m_albumSourceItems[index];
+            const auto parseNumber = [&](const titleformat_object::ptr& script) {
+                const auto text = formatHandleUtf8(item, script);
+                const auto value = std::strtoul(text.c_str(), nullptr, 10);
+                return value > std::numeric_limits<unsigned>::max() ? 0U : static_cast<unsigned>(value);
+            };
+            input.push_back({index, formatHandleUtf8(item, m_albumNameScript),
+                formatHandleUtf8(item, m_albumArtistScript), formatHandleUtf8(item, m_titleScript),
+                formatHandleUtf8(item, m_artistScript), formatHandleUtf8(item, m_albumDateScript),
+                parseNumber(m_albumDiscScript), parseNumber(m_albumTrackScript)});
+        }
+        m_albumInput = std::move(input);
+        m_albums = buildAlbumBrowserAlbums(m_albumInput);
+        m_albumSelection = 0;
+        if (!previousKey.empty()) {
+            const auto found = std::find_if(m_albums.begin(), m_albums.end(), [&](const auto& album) {
+                return album.key == previousKey;
+            });
+            if (found != m_albums.end()) m_albumSelection = static_cast<std::size_t>(found - m_albums.begin());
+        }
+        m_albumTrackSelection = 0;
+        m_albumGridTopRow = 0;
+        ++m_albumArtworkGeneration;
+        {
+            std::scoped_lock lock(m_albumArtworkMutex);
+            m_albumArtworkRequests.clear();
+            if (m_albumArtworkAborter) m_albumArtworkAborter->abort();
+        }
+        m_albumArtworkCache.clear();
+        m_albumArtworkBytes = 0;
+        invalidate();
+    }
+
+    [[nodiscard]] std::string albumSourceIdentity() const {
+        if (m_albumSourceKind == AlbumSourceKind::mediaLibrary) return "library";
+        return std::string("playlist:") + std::string(reinterpret_cast<const char*>(&m_albumSourcePlaylistGuid),
+            sizeof(m_albumSourcePlaylistGuid));
+    }
+
+    void rememberAlbumSourceState() {
+        if (m_albums.empty() || m_albumSelection >= m_albums.size()) return;
+        m_albumSourceStates[albumSourceIdentity()] = {m_albums[m_albumSelection].key, m_albumGridTopRow};
+    }
+
+    void persistAlbumBrowserState() {
+        auto saved = readAlbumBrowserSettings();
+        saved.mediaLibrary = m_albumSourceKind == AlbumSourceKind::mediaLibrary;
+        saved.playlistGuid = m_albumSourcePlaylistGuid;
+        saved.splitPermille = m_albumSplitPermille;
+        saved.albumKey = m_albumSelection < m_albums.size() ? m_albums[m_albumSelection].key : std::string{};
+        writeAlbumBrowserSettings(saved);
+    }
+
+    void restoreAlbumSourceState() {
+        const auto found = m_albumSourceStates.find(albumSourceIdentity());
+        if (found == m_albumSourceStates.end()) return;
+        const auto album = std::find_if(m_albums.begin(), m_albums.end(), [&](const auto& value) {
+            return value.key == found->second.first;
+        });
+        if (album != m_albums.end()) m_albumSelection = static_cast<std::size_t>(album - m_albums.begin());
+        m_albumGridTopRow = found->second.second;
+        if (const auto wnd = get_wnd()) {
+            const auto layout = calculateLayout(wnd);
+            const auto columns = albumGridColumns(layout);
+            const auto rows = (m_albums.size() + columns - 1) / columns;
+            const auto visible = std::max<std::size_t>(1, static_cast<std::size_t>(
+                std::max(0.0F, layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+            m_albumGridTopRow = std::min(m_albumGridTopRow, rows > visible ? rows - visible : 0);
+        }
+    }
+
+    void resetAlbumTrackSelection() {
+        const auto count = m_albumSelection < m_albums.size()
+            ? m_albums[m_albumSelection].sourceIndices.size() : 0;
+        m_albumTrackSelected.assign(count, false);
+        m_albumTrackSelection = count > 0 ? 0 : SIZE_MAX;
+        m_albumTrackAnchor = m_albumTrackSelection;
+        if (count > 0) m_albumTrackSelected[0] = true;
+        m_albumTrackTopRow = 0;
+    }
+
+    void clampAlbumScroll() {
+        const auto wnd = get_wnd();
+        if (!wnd || m_workspace != Workspace::album) return;
+        const auto layout = calculateLayout(wnd);
+        const auto columns = albumGridColumns(layout);
+        const auto rows = (m_albums.size() + columns - 1) / columns;
+        const auto visible = std::max<std::size_t>(1, static_cast<std::size_t>(
+            (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+        m_albumGridTopRow = std::min(m_albumGridTopRow, rows > visible ? rows - visible : 0);
+        const auto count = m_albumSelection < m_albums.size()
+            ? m_albums[m_albumSelection].sourceIndices.size() : 0;
+        const auto capacity = visibleRowCapacity(layout.albumTrackBody.bottom - layout.albumTrackBody.top,
+            kCompactTrackRowHeight);
+        m_albumTrackTopRow = clampTopRow(m_albumTrackTopRow, count, capacity);
+    }
+
+    void selectAlbumTrack(std::size_t row, bool ctrl, bool shift) {
+        if (m_albumSelection >= m_albums.size()) return;
+        const auto count = m_albums[m_albumSelection].sourceIndices.size();
+        if (row >= count) return;
+        if (m_albumTrackSelected.size() != count) m_albumTrackSelected.assign(count, false);
+        if (shift && m_albumTrackAnchor < count) {
+            if (!ctrl) std::fill(m_albumTrackSelected.begin(), m_albumTrackSelected.end(), false);
+            const auto first = std::min(row, m_albumTrackAnchor);
+            const auto last = std::max(row, m_albumTrackAnchor);
+            for (auto index = first; index <= last; ++index) m_albumTrackSelected[index] = true;
+        } else if (ctrl) {
+            m_albumTrackSelected[row] = !m_albumTrackSelected[row];
+            m_albumTrackAnchor = row;
+        } else {
+            std::fill(m_albumTrackSelected.begin(), m_albumTrackSelected.end(), false);
+            m_albumTrackSelected[row] = true;
+            m_albumTrackAnchor = row;
+        }
+        m_albumTrackSelection = row;
+        invalidate();
+    }
+
+    void loadAlbumSourcePlaylist(const GUID& guid) {
+        rememberAlbumSourceState();
+        m_albumSourceKind = AlbumSourceKind::playlist;
+        m_albumSourcePlaylistGuid = guid;
+        m_albumReturnPlaylistGuid = guid;
+        m_albumSourceItems.remove_all();
+        const auto index = playlist_manager_v5::get()->find_playlist_by_guid(guid);
+        pfc::string8 name;
+        if (index != SIZE_MAX) {
+            playlist_manager::get()->playlist_get_all_items(index, m_albumSourceItems);
+            if (playlist_manager::get()->playlist_get_name(index, name)) m_albumSourceName = utf8ToWide(name.c_str());
+        } else {
+            loadAlbumSourceLibrary();
+            return;
+        }
+        m_albumSelection = SIZE_MAX;
+        rebuildAlbumModel();
+        restoreAlbumSourceState();
+        const auto saved = readAlbumBrowserSettings();
+        if (!saved.mediaLibrary && InlineIsEqualGUID(saved.playlistGuid, guid) && !saved.albumKey.empty()) {
+            const auto album = std::find_if(m_albums.begin(), m_albums.end(), [&](const auto& value) {
+                return value.key == saved.albumKey;
+            });
+            if (album != m_albums.end()) m_albumSelection = static_cast<std::size_t>(album - m_albums.begin());
+        }
+        resetAlbumTrackSelection();
+        persistAlbumBrowserState();
+    }
+
+    void loadAlbumSourceLibrary() {
+        rememberAlbumSourceState();
+        m_albumSourceKind = AlbumSourceKind::mediaLibrary;
+        m_albumSourceName = library_manager::get()->is_library_enabled()
+            ? L"Media Library" : L"Media Library unavailable";
+        m_albumSourceItems.remove_all();
+        if (library_manager::get()->is_library_enabled()) library_manager::get()->get_all_items(m_albumSourceItems);
+        m_albumSelection = SIZE_MAX;
+        rebuildAlbumModel();
+        restoreAlbumSourceState();
+        const auto saved = readAlbumBrowserSettings();
+        if (saved.mediaLibrary && !saved.albumKey.empty()) {
+            const auto album = std::find_if(m_albums.begin(), m_albums.end(), [&](const auto& value) {
+                return value.key == saved.albumKey;
+            });
+            if (album != m_albums.end()) m_albumSelection = static_cast<std::size_t>(album - m_albums.begin());
+        }
+        resetAlbumTrackSelection();
+        persistAlbumBrowserState();
+    }
+
+    void refreshAlbumSourceIfPlaylist(t_size playlist) {
+        if (m_workspace != Workspace::album || m_albumSourceKind != AlbumSourceKind::playlist) return;
+        const auto api = playlist_manager_v5::get();
+        if (playlist < api->get_playlist_count()
+            && InlineIsEqualGUID(api->playlist_get_guid(playlist), m_albumSourcePlaylistGuid)) {
+            loadAlbumSourcePlaylist(m_albumSourcePlaylistGuid);
+        }
+    }
+
+    void refreshAlbumLibrarySource() {
+        if (m_workspace == Workspace::album && m_albumSourceKind == AlbumSourceKind::mediaLibrary) {
+            loadAlbumSourceLibrary();
+        }
+    }
+
+    void setWorkspace(Workspace workspace) {
+        if (m_workspace == workspace) return;
+        if (workspace == Workspace::album) {
+            auto api = playlist_manager_v5::get();
+            m_playlistQueueModeBeforeAlbum = m_queueMode;
+            const auto active = api->get_active_playlist();
+            if (active != SIZE_MAX) {
+                m_albumReturnPlaylistGuid = api->playlist_get_guid(active);
+                loadAlbumSourcePlaylist(m_albumReturnPlaylistGuid);
+            }
+            else {
+                const auto saved = readAlbumBrowserSettings();
+                if (!saved.mediaLibrary && playlist_manager_v5::get()->find_playlist_by_guid(saved.playlistGuid) != SIZE_MAX) {
+                    loadAlbumSourcePlaylist(saved.playlistGuid);
+                } else loadAlbumSourceLibrary();
+            }
+            m_queueMode = false;
+        } else {
+            m_queueMode = m_playlistQueueModeBeforeAlbum;
+            const auto source = playlist_manager_v5::get()->find_playlist_by_guid(m_albumReturnPlaylistGuid);
+            if (source != SIZE_MAX) playlist_manager::get()->set_active_playlist(source);
+        }
+        m_workspace = workspace;
+        if (workspace == Workspace::playlist) rebuildPlaylistSnapshot(false);
+        if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
+        invalidate();
+    }
+
+    void releaseAlbumBridgeLock() noexcept {
+        if (m_albumLock.is_empty() || !core_api::is_main_thread()) return;
+        try {
+            if (m_albumLock->m_index != SIZE_MAX) {
+                playlist_manager::get()->playlist_lock_uninstall(m_albumLock->m_index, m_albumLock);
+            }
+        } catch (...) {
+        }
+        m_albumLock.release();
+    }
+
+    void restoreAlbumBridgeLock() {
+        const auto saved = readAlbumBrowserSettings();
+        const auto playlist = playlist_manager_v5::get()->find_playlist_by_guid(saved.bridgeGuid);
+        if (playlist == SIZE_MAX || playlist_manager::get()->playlist_lock_is_present(playlist)) return;
+        if (m_albumLock.is_empty()) m_albumLock = new service_impl_t<AlbumViewPlaylistLock>();
+        if (playlist_manager::get()->playlist_lock_install(playlist, m_albumLock)) {
+            m_albumLock->m_index = playlist;
+            m_albumBridgePlaylist = playlist;
+        }
+    }
+
+    [[nodiscard]] t_size ensureAlbumBridgePlaylist() {
+        auto api = playlist_manager::get();
+        auto saved = readAlbumBrowserSettings();
+        t_size playlist = playlist_manager_v5::get()->find_playlist_by_guid(saved.bridgeGuid);
+        pfc::string8 name;
+        if (playlist == SIZE_MAX) {
+            for (t_size index = 0; index < api->get_playlist_count(); ++index) {
+                if (api->playlist_get_name(index, name) && std::strcmp(name.c_str(), "Refrain Album View") == 0
+                    && !api->playlist_lock_is_present(index)) {
+                    playlist = index;
+                    break;
+                }
+            }
+        }
+        if (playlist == SIZE_MAX) playlist = api->create_playlist("Refrain Album View", SIZE_MAX, SIZE_MAX);
+        if (playlist == SIZE_MAX) return SIZE_MAX;
+        saved.bridgeGuid = playlist_manager_v5::get()->playlist_get_guid(playlist);
+        writeAlbumBrowserSettings(saved);
+        if (m_albumLock.is_empty()) m_albumLock = new service_impl_t<AlbumViewPlaylistLock>();
+        if (m_albumLock->m_index != SIZE_MAX && m_albumLock->m_index != playlist) {
+            api->playlist_lock_uninstall(m_albumLock->m_index, m_albumLock);
+            m_albumLock->m_index = SIZE_MAX;
+        }
+        if (api->playlist_lock_is_present(playlist)) {
+            if (m_albumLock->m_index != playlist) return SIZE_MAX;
+            if (!api->playlist_lock_uninstall(playlist, m_albumLock)) return SIZE_MAX;
+            m_albumLock->m_index = SIZE_MAX;
+        }
+        api->playlist_clear(playlist);
+        return playlist;
+    }
+
+    [[nodiscard]] bool playbackOrderIsShuffle() const {
+        const auto api = playlist_manager::get();
+        const auto active = api->playback_order_get_active();
+        if (active >= api->playback_order_get_count()) return false;
+        auto name = std::string(api->playback_order_get_name(active));
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) {
+            return static_cast<char>(std::tolower(value));
+        });
+        return name.find("shuffle") != std::string::npos || name.find("random") != std::string::npos;
+    }
+
+    void endAlbumPlaybackSession() {
+        if (!m_albumSessionActive) return;
+        m_albumSessionActive = false;
+        auto api = playlist_manager::get();
+        if (m_albumPriorPlaybackOrder < api->playback_order_get_count()) {
+            m_restoringAlbumPlaybackOrder = true;
+            api->playback_order_set_active(m_albumPriorPlaybackOrder);
+            m_restoringAlbumPlaybackOrder = false;
+        }
+        m_albumPriorPlaybackOrder = SIZE_MAX;
+    }
+
+    void restoreAlbumSourceAfterPlaybackStart() {
+        if (!m_albumSourceRestorePending) return;
+        m_albumSourceRestorePending = false;
+        const auto source = playlist_manager_v5::get()->find_playlist_by_guid(m_albumPendingReturnPlaylistGuid);
+        if (source != SIZE_MAX) playlist_manager::get()->set_active_playlist(source);
+        rebuildPlaylistSnapshot(false);
+    }
+
+    void playAlbumTrack(std::size_t row) {
+        if (m_albumSelection >= m_albums.size()) return;
+        const auto& album = m_albums[m_albumSelection];
+        if (row >= album.sourceIndices.size()) return;
+        const auto sourceGuid = m_albumReturnPlaylistGuid;
+        const auto shuffle = playbackOrderIsShuffle();
+        auto order = album.sourceIndices;
+        std::size_t start = row;
+        if (shuffle) {
+            const auto clicked = order[row];
+            order.erase(order.begin() + static_cast<std::ptrdiff_t>(row));
+            std::mt19937 generator(std::random_device{}());
+            std::shuffle(order.begin(), order.end(), generator);
+            order.insert(order.begin(), clicked);
+            start = 0;
+        }
+        metadb_handle_list handles;
+        for (const auto source : order) {
+            if (source < m_albumSourceItems.get_count()) handles.add_item(m_albumSourceItems[source]);
+        }
+        if (handles.get_count() == 0) return;
+        auto api = playlist_manager::get();
+        const auto bridge = ensureAlbumBridgePlaylist();
+        if (bridge == SIZE_MAX) {
+            showStatus(L"Refrain Album View is locked by another component.");
+            return;
+        }
+        if (!api->playlist_add_items(bridge, handles, pfc::bit_array_false())) {
+            showStatus(L"foobar2000 could not prepare Refrain Album View.");
+            return;
+        }
+        m_albumBridgePlaylist = bridge;
+        m_albumPriorPlaybackOrder = api->playback_order_get_active();
+        // foobar2000 defines index zero as its built-in Default order; using it prevents
+        // Repeat/Shuffle modes from escaping the finite album session.
+        if (api->playback_order_get_count() > 0) api->playback_order_set_active(0);
+        m_albumSessionActive = true;
+        m_startingAlbumSession = true;
+        m_albumSourceRestorePending = true;
+        m_albumPendingReturnPlaylistGuid = sourceGuid;
+        api->set_active_playlist(bridge);
+        const auto started = api->playlist_execute_default_action(bridge, start);
+        const auto locked = started && api->playlist_lock_install(bridge, m_albumLock);
+        if (locked) m_albumLock->m_index = bridge;
+        m_startingAlbumSession = false;
+        if (!started || !locked) {
+            if (started) playback_control::get()->stop();
+            endAlbumPlaybackSession();
+            showStatus(started
+                ? L"Refrain could not protect its album playback list."
+                : L"foobar2000 could not start this album.");
+            restoreAlbumSourceAfterPlaybackStart();
+        }
     }
 
     void clampPlaylistScroll() {
@@ -1534,6 +2016,20 @@ private:
 
     void onLeftButtonDoubleClick(HWND wnd, LPARAM lp) {
         const auto point = pointFromLParam(lp, dpiScale());
+        if (m_workspace == Workspace::album) {
+            const auto layout = calculateLayout(wnd);
+            if (const auto album = albumAt(layout, point)) {
+                m_albumSelection = *album;
+                resetAlbumTrackSelection();
+                persistAlbumBrowserState();
+                playAlbumTrack(0);
+            } else if (const auto row = albumTrackAt(layout, point)) {
+                selectAlbumTrack(*row, false, false);
+                playAlbumTrack(*row);
+            }
+            invalidate();
+            return;
+        }
         if (m_queueMode) {
             if (const auto row = queueRowAt(wnd, point)) {
                 selectQueueRow(*row, false, false);
@@ -1737,7 +2233,7 @@ private:
             {
                 std::scoped_lock lock(m_groupArtworkMutex);
                 m_groupArtworkRequests.clear();
-                if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+                if (m_groupArtworkAborter && !m_groupArtworkAborterAlbum) m_groupArtworkAborter->abort();
             }
             m_groupArtworkCache.clear();
             m_groupArtworkBytes = 0;
@@ -1796,6 +2292,28 @@ private:
 
     void onRightButtonUp(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
         const auto layout = calculateLayout(wnd);
+        if (m_workspace == Workspace::album) {
+            if (const auto row = albumTrackAt(layout, point); row && m_albumSelection < m_albums.size()) {
+                if (*row >= m_albumTrackSelected.size() || !m_albumTrackSelected[*row]) {
+                    selectAlbumTrack(*row, false, false);
+                }
+                const auto source = m_albums[m_albumSelection].sourceIndices[*row];
+                if (source < m_albumSourceItems.get_count()) {
+                    metadb_handle_list items;
+                    for (std::size_t index = 0; index < m_albumTrackSelected.size(); ++index) {
+                        if (!m_albumTrackSelected[index]) continue;
+                        const auto selectedSource = m_albums[m_albumSelection].sourceIndices[index];
+                        if (selectedSource < m_albumSourceItems.get_count()) {
+                            items.add_item(m_albumSourceItems[selectedSource]);
+                        }
+                    }
+                    ClientToScreen(wnd, &clientPoint);
+                    contextmenu_manager::win32_run_menu_context(wnd, items, &clientPoint);
+                }
+                invalidate();
+            }
+            return;
+        }
         if (m_queueMode && contains(layout.queuePanel, point)) {
             showQueueMenu(wnd, point, clientPoint);
             return;
@@ -1845,7 +2363,7 @@ private:
             {
                 std::scoped_lock lock(m_groupArtworkMutex);
                 m_groupArtworkRequests.clear();
-                if (m_groupArtworkAborter) m_groupArtworkAborter->abort();
+                if (m_groupArtworkAborter && !m_groupArtworkAborterAlbum) m_groupArtworkAborter->abort();
             }
             m_groupArtworkCache.clear();
             m_groupArtworkBytes = 0;
@@ -1946,6 +2464,11 @@ private:
             compiler->compile_safe(m_bitrateScript, "$if2(%bitrate%,Unknown bitrate)");
             compiler->compile_safe(m_ratingScript, "$if2(%rating%,0)");
             compiler->compile_safe(m_queueLengthScript, "[%length%]");
+            compiler->compile_safe(m_albumNameScript, "[%album%]");
+            compiler->compile_safe(m_albumArtistScript, "$if2(%album artist%,%artist%)");
+            compiler->compile_safe(m_albumDateScript, "[%date%]");
+            compiler->compile_safe(m_albumDiscScript, "[%discnumber%]");
+            compiler->compile_safe(m_albumTrackScript, "[%tracknumber%]");
         }
         createTextResources();
     }
@@ -2005,6 +2528,10 @@ private:
             (void)key;
             entry.bitmap.Reset();
         }
+        for (auto& [key, entry] : m_albumArtworkCache) {
+            (void)key;
+            entry.bitmap.Reset();
+        }
         m_light.Reset();
         m_artworkBitmap.Reset();
         m_accent.Reset();
@@ -2042,8 +2569,48 @@ private:
             width - 16.0F, buttonY + 28.0F);
         layout.queueToggle = D2D1::RectF(layout.mute.left - 42.0F, buttonY,
             layout.mute.left - 6.0F, buttonY + 36.0F);
-        if (readSettings().showSettingsButton) {
-            layout.settings = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
+        layout.playlistWorkspace = D2D1::RectF(16.0F, buttonY, 52.0F, buttonY + 36.0F);
+        layout.albumWorkspace = D2D1::RectF(58.0F, buttonY, 94.0F, buttonY + 36.0F);
+        if (readSettings().showSettingsButton) layout.settings = D2D1::RectF(100.0F, buttonY, 136.0F, buttonY + 36.0F);
+
+        if (m_workspace == Workspace::album && top > 100.0F && width > 420.0F) {
+            const auto split = std::clamp(width * static_cast<float>(m_albumSplitPermille) / 1000.0F,
+                240.0F, std::max(241.0F, width - 280.0F));
+            layout.albumSource = D2D1::RectF(0.0F, 0.0F, split - 4.0F, 42.0F);
+            layout.albumGrid = D2D1::RectF(0.0F, 42.0F, split - 16.0F, top);
+            layout.albumGridScrollTrack = D2D1::RectF(split - 16.0F, 42.0F, split - 4.0F, top);
+            layout.albumDivider = D2D1::RectF(split - 4.0F, 0.0F, split + 4.0F, top);
+            layout.albumHeader = D2D1::RectF(split + 4.0F, 0.0F, width, 70.0F);
+            layout.albumTrackHeader = D2D1::RectF(split + 4.0F, 70.0F, width, 98.0F);
+            layout.albumTrackBody = D2D1::RectF(split + 4.0F, 98.0F, width - 12.0F, top);
+            layout.albumTrackScrollTrack = D2D1::RectF(width - 12.0F, 98.0F, width, top);
+            const auto columns = albumGridColumns(layout);
+            const auto albumRows = (m_albums.size() + columns - 1) / columns;
+            const auto visibleAlbumRows = std::max<std::size_t>(1, static_cast<std::size_t>(
+                (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+            const auto albumMaximum = albumRows > visibleAlbumRows ? albumRows - visibleAlbumRows : 0;
+            const auto albumTrackHeight = layout.albumGridScrollTrack.bottom - layout.albumGridScrollTrack.top;
+            const auto albumThumbHeight = scrollbarThumbHeight(albumTrackHeight, albumRows, visibleAlbumRows);
+            const auto albumThumbTop = scrollbarThumbTop(layout.albumGridScrollTrack.top, albumTrackHeight,
+                albumThumbHeight, m_albumGridTopRow, albumMaximum);
+            layout.albumGridScrollThumb = D2D1::RectF(layout.albumGridScrollTrack.left + 2.0F,
+                albumThumbTop, layout.albumGridScrollTrack.right - 2.0F, albumThumbTop + albumThumbHeight);
+            const auto trackCount = m_albumSelection < m_albums.size()
+                ? m_albums[m_albumSelection].sourceIndices.size() : 0;
+            const auto trackCapacity = visibleRowCapacity(layout.albumTrackBody.bottom
+                - layout.albumTrackBody.top, kCompactTrackRowHeight);
+            const auto trackMaximum = maximumTopRow(trackCount, trackCapacity);
+            const auto trackHeight = layout.albumTrackScrollTrack.bottom - layout.albumTrackScrollTrack.top;
+            const auto trackThumbHeight = scrollbarThumbHeight(trackHeight, trackCount, trackCapacity);
+            const auto trackThumbTop = scrollbarThumbTop(layout.albumTrackScrollTrack.top, trackHeight,
+                trackThumbHeight, m_albumTrackTopRow, trackMaximum);
+            layout.albumTrackScrollThumb = D2D1::RectF(layout.albumTrackScrollTrack.left + 2.0F,
+                trackThumbTop, layout.albumTrackScrollTrack.right - 2.0F, trackThumbTop + trackThumbHeight);
+            const auto centerX = (layout.albumGrid.left + layout.albumGrid.right) * 0.5F;
+            const auto centerY = (layout.albumGrid.top + layout.albumGrid.bottom) * 0.5F;
+            layout.albumLibraryPreferences = D2D1::RectF(centerX - 110.0F, centerY + 18.0F,
+                centerX + 110.0F, centerY + 54.0F);
+            return layout;
         }
 
         if (top > 170.0F && width > 220.0F) {
@@ -2121,6 +2688,17 @@ private:
 
     [[nodiscard]] ControlId hitTest(HWND wnd, D2D1_POINT_2F point) const {
         const auto layout = calculateLayout(wnd);
+        if (m_workspace == Workspace::album) {
+            if (contains(layout.albumDivider, point)) return ControlId::albumDivider;
+            if (contains(layout.albumSource, point)) return ControlId::albumSource;
+            if (contains(layout.albumGridScrollTrack, point)) return ControlId::albumGridScrollbar;
+            if (contains(layout.albumTrackScrollTrack, point)) return ControlId::albumTrackScrollbar;
+            if (m_albumSourceKind == AlbumSourceKind::mediaLibrary
+                && !library_manager::get()->is_library_enabled()
+                && contains(layout.albumLibraryPreferences, point)) return ControlId::albumLibraryPreferences;
+            if (contains(layout.albumGrid, point)) return ControlId::albumGrid;
+            if (contains(layout.albumTrackBody, point)) return ControlId::albumTrackList;
+        }
         if (m_queueMode) {
             if (contains(layout.queueScrollTrack, point)) return ControlId::queueScrollbar;
             if (contains(layout.queueBody, point)) return ControlId::queueBody;
@@ -2151,6 +2729,8 @@ private:
         if (contains(layout.mute, point)) return ControlId::mute;
         if (contains(layout.volume, point)) return m_state.customVolume ? ControlId::none : ControlId::volume;
         if (contains(layout.settings, point)) return ControlId::settings;
+        if (contains(layout.playlistWorkspace, point)) return ControlId::playlistWorkspace;
+        if (contains(layout.albumWorkspace, point)) return ControlId::albumWorkspace;
         if (contains(layout.queueToggle, point)) return ControlId::queueToggle;
         return ControlId::none;
     }
@@ -2165,6 +2745,15 @@ private:
         case ControlId::next:
         case ControlId::mute: return true;
         case ControlId::settings: return readSettings().showSettingsButton;
+        case ControlId::playlistWorkspace:
+        case ControlId::albumWorkspace:
+        case ControlId::albumSource:
+        case ControlId::albumGrid:
+        case ControlId::albumTrackList:
+        case ControlId::albumDivider: return true;
+        case ControlId::albumLibraryPreferences: return true;
+        case ControlId::albumGridScrollbar:
+        case ControlId::albumTrackScrollbar: return true;
         case ControlId::queueToggle: return true;
         case ControlId::rating1:
         case ControlId::rating2:
@@ -2204,17 +2793,19 @@ private:
         m_renderTarget->DrawLine(D2D1::Point2F(0.0F, layout.surfaceTop), D2D1::Point2F(size.width, layout.surfaceTop),
             m_disabled.Get(), 1.0F);
 
-        drawPlaylist(layout);
-        if (!m_statusText.empty() && layout.playlistArea.right > layout.playlistArea.left) {
-            const auto status = D2D1::RectF(layout.playlistArea.left + 12.0F,
-                std::max(layout.playlistArea.top, layout.playlistArea.bottom - 38.0F),
-                layout.playlistArea.right - 12.0F, layout.playlistArea.bottom - 8.0F);
+        if (m_workspace == Workspace::album) drawAlbumWorkspace(layout);
+        else drawPlaylist(layout);
+        if (!m_statusText.empty() && (layout.playlistArea.right > layout.playlistArea.left
+                || layout.albumGrid.right > layout.albumGrid.left)) {
+            const auto area = m_workspace == Workspace::album ? layout.albumGrid : layout.playlistArea;
+            const auto status = D2D1::RectF(area.left + 12.0F,
+                std::max(area.top, area.bottom - 38.0F), area.right - 12.0F, area.bottom - 8.0F);
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(status, 4.0F, 4.0F), m_surface.Get());
             drawTextWith(m_statusText, status, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_foreground.Get());
         }
-        if (m_queueMode) {
+        if (m_workspace == Workspace::playlist && m_queueMode) {
             drawPlaybackQueue(layout);
-        } else {
+        } else if (m_workspace == Workspace::playlist) {
             drawNowPlayingHeader(layout);
             if (layout.rightDivider.right > layout.rightDivider.left) {
                 m_renderTarget->FillRectangle(layout.rightDivider,
@@ -2240,6 +2831,8 @@ private:
         if (readSettings().showSettingsButton) {
             drawButton(layout.settings, ControlId::settings);
         }
+        drawButton(layout.playlistWorkspace, ControlId::playlistWorkspace);
+        drawButton(layout.albumWorkspace, ControlId::albumWorkspace);
         drawButton(layout.queueToggle, ControlId::queueToggle);
         drawVolume(layout);
 
@@ -2256,6 +2849,10 @@ private:
         const auto result = m_renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
             for (auto& [key, entry] : m_groupArtworkCache) {
+                (void)key;
+                entry.bitmap.Reset();
+            }
+            for (auto& [key, entry] : m_albumArtworkCache) {
                 (void)key;
                 entry.bitmap.Reset();
             }
@@ -2285,6 +2882,178 @@ private:
         if (m_playlistTextCache.size() >= 512) m_playlistTextCache.clear();
         m_playlistTextCache.emplace(index, row);
         return row;
+    }
+
+    [[nodiscard]] std::size_t albumGridColumns(const Layout& layout) const noexcept {
+        return std::max<std::size_t>(1, static_cast<std::size_t>(
+            std::max(1.0F, layout.albumGrid.right - layout.albumGrid.left) / 160.0F));
+    }
+
+    [[nodiscard]] std::optional<std::size_t> albumAt(const Layout& layout, D2D1_POINT_2F point) const {
+        if (!contains(layout.albumGrid, point)) return {};
+        const auto columns = albumGridColumns(layout);
+        const auto cellWidth = (layout.albumGrid.right - layout.albumGrid.left) / static_cast<float>(columns);
+        const auto column = std::min(columns - 1,
+            static_cast<std::size_t>((point.x - layout.albumGrid.left) / cellWidth));
+        const auto row = m_albumGridTopRow + static_cast<std::size_t>((point.y - layout.albumGrid.top) / 184.0F);
+        const auto index = row * columns + column;
+        return index < m_albums.size() ? std::optional<std::size_t>(index) : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> albumTrackAt(const Layout& layout, D2D1_POINT_2F point) const {
+        if (!contains(layout.albumTrackBody, point) || m_albumSelection >= m_albums.size()) return {};
+        const auto relative = point.y - layout.albumTrackBody.top;
+        const auto index = m_albumTrackTopRow + static_cast<std::size_t>(relative / kCompactTrackRowHeight);
+        return index < m_albums[m_albumSelection].sourceIndices.size()
+            ? std::optional<std::size_t>(index) : std::nullopt;
+    }
+
+    void drawAlbumWorkspace(const Layout& layout) {
+        if (layout.albumGrid.right <= layout.albumGrid.left) return;
+        m_renderTarget->FillRectangle(layout.albumSource, m_surface.Get());
+        m_renderTarget->DrawLine(D2D1::Point2F(layout.albumSource.left, layout.albumSource.bottom),
+            D2D1::Point2F(layout.albumSource.right, layout.albumSource.bottom), m_disabled.Get());
+        drawTextWith(L"Current source: " + m_albumSourceName + L"  ▾",
+            D2D1::RectF(layout.albumSource.left + 14.0F, layout.albumSource.top,
+                layout.albumSource.right - 10.0F, layout.albumSource.bottom),
+            m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+        m_renderTarget->FillRectangle(layout.albumDivider,
+            m_active == ControlId::albumDivider || m_hover == ControlId::albumDivider
+                ? m_accent.Get() : m_surface.Get());
+
+        const auto columns = albumGridColumns(layout);
+        const auto cellWidth = (layout.albumGrid.right - layout.albumGrid.left) / static_cast<float>(columns);
+        const auto visibleRows = static_cast<std::size_t>(std::ceil(
+            (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F)) + 1;
+        const auto first = m_albumGridTopRow * columns;
+        const auto last = std::min(m_albums.size(), first + visibleRows * columns);
+        m_renderTarget->PushAxisAlignedClip(layout.albumGrid, D2D1_ANTIALIAS_MODE_ALIASED);
+        for (auto index = first; index < last; ++index) {
+            const auto local = index - first;
+            const auto row = local / columns;
+            const auto column = local % columns;
+            const auto left = layout.albumGrid.left + static_cast<float>(column) * cellWidth;
+            const auto top = layout.albumGrid.top + static_cast<float>(row) * 184.0F;
+            const auto cell = D2D1::RectF(left + 4.0F, top + 4.0F, left + cellWidth - 4.0F, top + 180.0F);
+            if (index == m_albumSelection) {
+                m_renderTarget->FillRectangle(cell, m_surface.Get());
+                m_renderTarget->DrawRectangle(cell, m_foreground.Get(), 1.0F);
+            }
+            const auto artSize = std::max(40.0F, std::min(132.0F, cellWidth - 20.0F));
+            const auto art = D2D1::RectF(left + (cellWidth - artSize) * 0.5F, top + 10.0F,
+                left + (cellWidth + artSize) * 0.5F, top + 10.0F + artSize);
+            auto& artwork = requestAlbumArtwork(index);
+            createGroupArtworkBitmap(artwork);
+            if (artwork.bitmap) m_renderTarget->DrawBitmap(artwork.bitmap.Get(), art, 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            else {
+                m_renderTarget->FillRectangle(art, m_surface.Get());
+                m_renderTarget->DrawRectangle(art, m_disabled.Get());
+                drawTextWith(artwork.loading ? L"Loading..." : L"No cover", art,
+                    m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+            }
+            drawTextWith(utf8ToWide(m_albums[index].album.c_str()),
+                D2D1::RectF(left + 8.0F, art.bottom + 5.0F, left + cellWidth - 8.0F, art.bottom + 25.0F),
+                m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_foreground.Get());
+            drawTextWith(utf8ToWide(m_albums[index].albumArtist.c_str()),
+                D2D1::RectF(left + 8.0F, art.bottom + 25.0F, left + cellWidth - 8.0F, art.bottom + 43.0F),
+                m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+        }
+        m_renderTarget->PopAxisAlignedClip();
+        m_renderTarget->FillRectangle(layout.albumGridScrollTrack, m_surface.Get());
+        if (layout.albumGridScrollThumb.bottom > layout.albumGridScrollThumb.top) {
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(layout.albumGridScrollThumb, 4.0F, 4.0F),
+                m_disabled.Get());
+        }
+        if (m_albumSourceKind == AlbumSourceKind::mediaLibrary
+            && !library_manager::get()->is_library_enabled()) {
+            const auto message = layout.albumLibraryPreferences;
+            drawTextWith(L"Media Library is not configured.", D2D1::RectF(message.left,
+                message.top - 38.0F, message.right, message.top - 6.0F), m_textFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(message, 4.0F, 4.0F),
+                m_hover == ControlId::albumLibraryPreferences ? m_light.Get() : m_surface.Get());
+            m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(message, 4.0F, 4.0F), m_disabled.Get());
+            drawTextWith(L"Open Media Library Preferences", message, m_secondaryFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_CENTER, m_foreground.Get());
+        }
+
+        m_renderTarget->FillRectangle(layout.albumHeader, m_surface.Get());
+        if (m_albumSelection < m_albums.size()) {
+            const auto& album = m_albums[m_albumSelection];
+            drawTextWith(utf8ToWide(album.album.c_str()), D2D1::RectF(layout.albumHeader.left + 14.0F,
+                8.0F, layout.albumHeader.right - 10.0F, 36.0F), m_titleFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+            drawTextWith(utf8ToWide(album.albumArtist.c_str()) + L"  ·  "
+                    + std::to_wstring(album.sourceIndices.size()) + L" tracks",
+                D2D1::RectF(layout.albumHeader.left + 14.0F,
+                38.0F, layout.albumHeader.right - 10.0F, 64.0F), m_secondaryFormat.Get(),
+                DWRITE_TEXT_ALIGNMENT_LEADING, m_disabled.Get());
+        } else {
+            drawTextWith(m_albumSourceItems.get_count() == 0 ? L"No albums in this source" : L"No album selected",
+                layout.albumHeader, m_titleFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+        }
+        m_renderTarget->FillRectangle(layout.albumTrackHeader, m_surface.Get());
+        constexpr std::array<const wchar_t*, 4> labels{L"#", L"Title", L"Artist", L"Length"};
+        constexpr std::array<float, 5> edges{0.0F, 0.10F, 0.55F, 0.84F, 1.0F};
+        const auto width = layout.albumTrackHeader.right - layout.albumTrackHeader.left;
+        for (std::size_t column = 0; column < labels.size(); ++column) {
+            const auto rect = D2D1::RectF(layout.albumTrackHeader.left + edges[column] * width,
+                layout.albumTrackHeader.top, layout.albumTrackHeader.left + edges[column + 1] * width,
+                layout.albumTrackHeader.bottom);
+            drawTextWith(labels[column], rect, m_secondaryFormat.Get(), column == 0 || column == 3
+                ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+        }
+        if (m_albumSelection >= m_albums.size()) return;
+        const auto& album = m_albums[m_albumSelection];
+        const auto capacity = visibleRowCapacity(layout.albumTrackBody.bottom - layout.albumTrackBody.top,
+            kCompactTrackRowHeight);
+        const auto end = std::min(album.sourceIndices.size(), m_albumTrackTopRow + capacity + 1);
+        m_renderTarget->PushAxisAlignedClip(layout.albumTrackBody, D2D1_ANTIALIAS_MODE_ALIASED);
+        refreshPlayingLocation();
+        for (auto row = m_albumTrackTopRow; row < end; ++row) {
+            const auto source = album.sourceIndices[row];
+            if (source >= m_albumSourceItems.get_count()) continue;
+            const auto top = layout.albumTrackBody.top + static_cast<float>(row - m_albumTrackTopRow)
+                * kCompactTrackRowHeight;
+            const auto rect = D2D1::RectF(layout.albumTrackBody.left, top, layout.albumTrackBody.right,
+                top + kCompactTrackRowHeight);
+            if (row < m_albumTrackSelected.size() && m_albumTrackSelected[row]) {
+                m_renderTarget->FillRectangle(rect, m_surface.Get());
+            }
+            if (row == m_albumTrackSelection && GetFocus() == get_wnd()) {
+                m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
+                    rect.right - 1.0F, rect.bottom - 1.0F), m_foreground.Get(), 1.0F);
+            }
+            if (m_albumSourceItems[source] == m_target) m_renderTarget->FillRectangle(
+                D2D1::RectF(rect.left, rect.top, rect.left + 3.0F, rect.bottom), m_accent.Get());
+            const auto& meta = m_albumInput[source];
+            std::wstring ordinal = L"—";
+            if (meta.track != 0) {
+                if (meta.disc != 0) {
+                    wchar_t buffer[32]{};
+                    swprintf_s(buffer, L"%u.%02u", meta.disc, meta.track);
+                    ordinal = buffer;
+                } else ordinal = std::to_wstring(meta.track);
+            }
+            const std::array<std::wstring, 4> values{
+                ordinal, utf8ToWide(meta.title.c_str()),
+                utf8ToWide(meta.artist.c_str()), formatQueueHandle(m_albumSourceItems[source], m_queueLengthScript)};
+            for (std::size_t column = 0; column < values.size(); ++column) {
+                const auto field = D2D1::RectF(rect.left + edges[column] * (rect.right - rect.left) + 5.0F,
+                    rect.top, rect.left + edges[column + 1] * (rect.right - rect.left) - 5.0F, rect.bottom);
+                drawTextWith(values[column], field, m_secondaryFormat.Get(), column == 0 || column == 3
+                    ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+            }
+            m_renderTarget->DrawLine(D2D1::Point2F(rect.left, rect.bottom),
+                D2D1::Point2F(rect.right, rect.bottom), m_surface.Get());
+        }
+        m_renderTarget->PopAxisAlignedClip();
+        m_renderTarget->FillRectangle(layout.albumTrackScrollTrack, m_surface.Get());
+        if (layout.albumTrackScrollThumb.bottom > layout.albumTrackScrollThumb.top) {
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(layout.albumTrackScrollThumb, 4.0F, 4.0F),
+                m_disabled.Get());
+        }
     }
 
     void drawPlaylist(const Layout& layout) {
@@ -2929,15 +3698,19 @@ private:
                     m_groupArtworkRequests.erase(m_groupArtworkRequests.begin());
                     aborter = std::make_shared<abort_callback_impl>();
                     m_groupArtworkAborter = aborter;
+                    m_groupArtworkAborterAlbum = request.album;
                 }
                 auto pixels = loadGroupArtwork(request.items, request.artworkId, *aborter);
                 {
                     std::scoped_lock lock(m_groupArtworkMutex);
-                    if (m_groupArtworkAborter == aborter) m_groupArtworkAborter.reset();
+                    if (m_groupArtworkAborter == aborter) {
+                        m_groupArtworkAborter.reset();
+                        m_groupArtworkAborterAlbum = false;
+                    }
                 }
                 if (pixels.status == ArtworkStatus::aborted || stop.stop_requested()) continue;
                 auto* completion = new GroupArtworkCompletion{
-                    request.generation, std::move(request.key), std::move(pixels)};
+                    request.generation, std::move(request.key), std::move(pixels), request.album};
                 const auto wnd = get_wnd();
                 if (!wnd || !PostMessage(wnd, kGroupArtworkReadyMessage, 0,
                         reinterpret_cast<LPARAM>(completion))) delete completion;
@@ -2964,6 +3737,10 @@ private:
 
     void applyGroupArtworkCompletion(GroupArtworkCompletion* raw) {
         const std::unique_ptr<GroupArtworkCompletion> completion(raw);
+        if (completion && completion->album) {
+            applyAlbumArtworkCompletion(*completion);
+            return;
+        }
         if (!completion || completion->generation != m_groupArtworkGeneration) return;
         const auto found = m_groupArtworkCache.find(completion->key);
         if (found == m_groupArtworkCache.end()) return;
@@ -2987,6 +3764,121 @@ private:
         }
         found->second.bitmap.Reset();
         invalidate();
+    }
+
+    void applyAlbumArtworkCompletion(GroupArtworkCompletion& completion) {
+        if (completion.generation != m_albumArtworkGeneration) return;
+        const auto found = m_albumArtworkCache.find(completion.key);
+        if (found == m_albumArtworkCache.end()) return;
+        m_albumArtworkBytes -= std::min(m_albumArtworkBytes, found->second.pixels.bgra.size());
+        constexpr std::size_t maximumBytes = 64U * 1024U * 1024U;
+        const auto incoming = completion.pixels.bgra.size();
+        while (m_albumArtworkBytes + incoming > maximumBytes) {
+            const auto victim = std::min_element(m_albumArtworkCache.begin(), m_albumArtworkCache.end(),
+                [&](const auto& left, const auto& right) {
+                    const auto leftEligible = left.first != completion.key && !left.second.loading;
+                    const auto rightEligible = right.first != completion.key && !right.second.loading;
+                    if (leftEligible != rightEligible) return leftEligible;
+                    if (!leftEligible) return false;
+                    return left.second.lastUse < right.second.lastUse;
+                });
+            if (victim == m_albumArtworkCache.end()
+                || victim->first == completion.key || victim->second.loading) break;
+            m_albumArtworkBytes -= std::min(m_albumArtworkBytes, victim->second.pixels.bgra.size());
+            m_albumArtworkCache.erase(victim);
+        }
+        found->second.loading = false;
+        if (m_albumArtworkBytes + incoming <= maximumBytes) {
+            found->second.pixels = std::move(completion.pixels);
+            m_albumArtworkBytes += incoming;
+        } else {
+            found->second.pixels = {ArtworkStatus::unavailable};
+        }
+        found->second.bitmap.Reset();
+        invalidate();
+    }
+
+    void startAlbumArtworkWorker() {
+        if (m_albumArtworkThread.joinable()) return;
+        m_albumArtworkThread = std::jthread([this](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                GroupArtworkRequest request;
+                std::shared_ptr<abort_callback_impl> aborter;
+                {
+                    std::unique_lock lock(m_albumArtworkMutex);
+                    m_albumArtworkCondition.wait(lock, [&] {
+                        return stop.stop_requested() || !m_albumArtworkRequests.empty();
+                    });
+                    if (stop.stop_requested()) break;
+                    request = std::move(m_albumArtworkRequests.front());
+                    m_albumArtworkRequests.erase(m_albumArtworkRequests.begin());
+                    aborter = std::make_shared<abort_callback_impl>();
+                    m_albumArtworkAborter = aborter;
+                }
+                // Album Grid cells are thumbnails. Decoding them at Now Playing size would
+                // exhaust the bounded cache after only a few covers and cause visible reload loops.
+                auto pixels = loadGroupArtwork(request.items, request.artworkId, *aborter, 320U);
+                {
+                    std::scoped_lock lock(m_albumArtworkMutex);
+                    if (m_albumArtworkAborter == aborter) m_albumArtworkAborter.reset();
+                }
+                if (pixels.status == ArtworkStatus::aborted || stop.stop_requested()) continue;
+                auto* completion = new GroupArtworkCompletion{
+                    request.generation, std::move(request.key), std::move(pixels), true};
+                const auto wnd = get_wnd();
+                if (!wnd || !PostMessage(wnd, kGroupArtworkReadyMessage, 0,
+                        reinterpret_cast<LPARAM>(completion))) delete completion;
+            }
+        });
+    }
+
+    void stopAlbumArtworkWorker() noexcept {
+        if (!m_albumArtworkThread.joinable()) return;
+        m_albumArtworkThread.request_stop();
+        {
+            std::scoped_lock lock(m_albumArtworkMutex);
+            if (m_albumArtworkAborter) m_albumArtworkAborter->abort();
+            m_albumArtworkRequests.clear();
+        }
+        m_albumArtworkCondition.notify_all();
+        m_albumArtworkThread.join();
+    }
+
+    GroupArtworkCacheEntry& requestAlbumArtwork(std::size_t albumIndex) {
+        const auto& album = m_albums[albumIndex];
+        if (const auto found = m_albumArtworkCache.find(album.key); found != m_albumArtworkCache.end()) {
+            found->second.lastUse = ++m_albumArtworkUseCounter;
+            return found->second;
+        }
+        while (m_albumArtworkCache.size() >= 160) {
+            const auto victim = std::min_element(m_albumArtworkCache.begin(), m_albumArtworkCache.end(),
+                [](const auto& left, const auto& right) {
+                    if (left.second.loading != right.second.loading) return !left.second.loading;
+                    if (left.second.loading) return false;
+                    return left.second.lastUse < right.second.lastUse;
+                });
+            if (victim == m_albumArtworkCache.end() || victim->second.loading) break;
+            m_albumArtworkBytes -= std::min(m_albumArtworkBytes, victim->second.pixels.bgra.size());
+            m_albumArtworkCache.erase(victim);
+        }
+        auto [entry, inserted] = m_albumArtworkCache.emplace(album.key, GroupArtworkCacheEntry{});
+        (void)inserted;
+        entry->second.lastUse = ++m_albumArtworkUseCounter;
+        GroupArtworkRequest request;
+        request.generation = m_albumArtworkGeneration;
+        request.key = album.key;
+        request.artworkId = album_art_ids::cover_front;
+        request.album = true;
+        for (const auto source : album.sourceIndices) {
+            if (source < m_albumSourceItems.get_count()) request.items.add_item(m_albumSourceItems[source]);
+        }
+        entry->second.loading = true;
+        {
+            std::scoped_lock lock(m_albumArtworkMutex);
+            m_albumArtworkRequests.push_back(std::move(request));
+        }
+        m_albumArtworkCondition.notify_one();
+        return entry->second;
     }
 
     [[nodiscard]] std::string groupArtworkKey(std::size_t groupIndex) const {
@@ -3102,13 +3994,17 @@ private:
         const auto hot = m_hover == id;
         const auto pressed = m_active == id;
         const auto primary = id == ControlId::playPause;
+        const auto selectedWorkspace = (id == ControlId::playlistWorkspace && m_workspace == Workspace::playlist)
+            || (id == ControlId::albumWorkspace && m_workspace == Workspace::album);
         auto fill = primary ? m_accent.Get() : m_surface.Get();
         if (pressed) {
             fill = m_disabled.Get();
         } else if (hot && !primary) {
             fill = m_light.Get();
         }
-        if (primary || hot || pressed) {
+        if (selectedWorkspace) {
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rect, 4.0F, 4.0F), m_disabled.Get());
+        } else if (primary || hot || pressed) {
             m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F((rect.left + rect.right) * 0.5F,
                 (rect.top + rect.bottom) * 0.5F), (rect.right - rect.left) * 0.5F, (rect.bottom - rect.top) * 0.5F), fill);
         }
@@ -3178,6 +4074,19 @@ private:
             }
             break;
         }
+        case ControlId::playlistWorkspace:
+            for (int row = -1; row <= 1; ++row) {
+                const auto y = cy + static_cast<float>(row) * 6.0F;
+                m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 8.0F, y), 1.3F, 1.3F), brush);
+                m_renderTarget->DrawLine(D2D1::Point2F(cx - 4.0F, y), D2D1::Point2F(cx + 9.0F, y), brush, 1.6F);
+            }
+            break;
+        case ControlId::albumWorkspace:
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx - 10.0F, cy - 9.0F, cx - 1.0F, cy), brush, 1.5F);
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx + 2.0F, cy - 9.0F, cx + 11.0F, cy), brush, 1.5F);
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx - 10.0F, cy + 3.0F, cx - 1.0F, cy + 12.0F), brush, 1.5F);
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx + 2.0F, cy + 3.0F, cx + 11.0F, cy + 12.0F), brush, 1.5F);
+            break;
         case ControlId::queueToggle: {
             const auto iconBrush = m_queueMode ? m_accent.Get() : brush;
             for (int row = -1; row <= 1; ++row) {
@@ -3267,6 +4176,34 @@ private:
         const auto thumbHeight = layout.queueScrollThumb.bottom - layout.queueScrollThumb.top;
         m_queueTopRow = topRowFromScrollbar(pointerY, m_queueScrollbarGrabOffset,
             layout.queueScrollTrack.top, trackHeight, thumbHeight, maximum);
+        invalidate();
+    }
+
+    void updateAlbumGridScrollbar(HWND wnd, float pointerY) {
+        const auto layout = calculateLayout(wnd);
+        const auto columns = albumGridColumns(layout);
+        const auto rows = (m_albums.size() + columns - 1) / columns;
+        const auto visible = std::max<std::size_t>(1, static_cast<std::size_t>(
+            (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+        const auto maximum = rows > visible ? rows - visible : 0;
+        const auto trackHeight = layout.albumGridScrollTrack.bottom - layout.albumGridScrollTrack.top;
+        const auto thumbHeight = layout.albumGridScrollThumb.bottom - layout.albumGridScrollThumb.top;
+        m_albumGridTopRow = topRowFromScrollbar(pointerY, m_albumGridScrollbarGrabOffset,
+            layout.albumGridScrollTrack.top, trackHeight, thumbHeight, maximum);
+        invalidate();
+    }
+
+    void updateAlbumTrackScrollbar(HWND wnd, float pointerY) {
+        const auto layout = calculateLayout(wnd);
+        const auto count = m_albumSelection < m_albums.size()
+            ? m_albums[m_albumSelection].sourceIndices.size() : 0;
+        const auto capacity = visibleRowCapacity(layout.albumTrackBody.bottom - layout.albumTrackBody.top,
+            kCompactTrackRowHeight);
+        const auto maximum = maximumTopRow(count, capacity);
+        const auto trackHeight = layout.albumTrackScrollTrack.bottom - layout.albumTrackScrollTrack.top;
+        const auto thumbHeight = layout.albumTrackScrollThumb.bottom - layout.albumTrackScrollThumb.top;
+        m_albumTrackTopRow = topRowFromScrollbar(pointerY, m_albumTrackScrollbarGrabOffset,
+            layout.albumTrackScrollTrack.top, trackHeight, thumbHeight, maximum);
         invalidate();
     }
 
@@ -3404,6 +4341,9 @@ private:
             m_trackingMouse = true;
         }
         const auto point = pointFromLParam(lp, dpiScale());
+        const auto priorAlbumHover = m_albumHover;
+        m_albumHover = m_workspace == Workspace::album ? albumAt(calculateLayout(wnd), point) : std::nullopt;
+        if (priorAlbumHover != m_albumHover && m_hover == ControlId::albumGrid) updateTooltip(ControlId::albumGrid);
         const auto priorRatingHover = m_playlistRatingHover;
         m_playlistRatingHover = playlistRatingAt(wnd, point);
         if (priorRatingHover != m_playlistRatingHover) invalidate();
@@ -3415,6 +4355,17 @@ private:
             updateVolume(wnd, point.x);
         } else if (m_active == ControlId::rightDivider) {
             updateRightDivider(wnd, point.y);
+        } else if (m_active == ControlId::albumDivider) {
+            RECT client{};
+            GetClientRect(wnd, &client);
+            const auto width = std::max(1.0F, static_cast<float>(client.right - client.left) / dpiScale());
+            m_albumSplitPermille = std::clamp(static_cast<int>(std::lround(point.x / width * 1000.0F)), 350, 800);
+            clampAlbumScroll();
+            invalidate();
+        } else if (m_active == ControlId::albumGridScrollbar) {
+            updateAlbumGridScrollbar(wnd, point.y);
+        } else if (m_active == ControlId::albumTrackScrollbar) {
+            updateAlbumTrackScrollbar(wnd, point.y);
         } else if (m_active == ControlId::playlistScrollbar) {
             updatePlaylistScrollbar(wnd, point.y);
         } else if (m_active == ControlId::playlistHeader) {
@@ -3432,6 +4383,25 @@ private:
         SetFocus(wnd);
         const auto point = pointFromLParam(lp, dpiScale());
         const auto hit = hitTest(wnd, point);
+        if (m_workspace == Workspace::album && hit == ControlId::albumGrid) {
+            if (const auto album = albumAt(calculateLayout(wnd), point)) {
+                m_albumSelection = *album;
+                resetAlbumTrackSelection();
+                persistAlbumBrowserState();
+                m_focus = ControlId::albumGrid;
+                invalidate();
+            }
+            return;
+        }
+        if (m_workspace == Workspace::album && hit == ControlId::albumTrackList) {
+            if (const auto row = albumTrackAt(calculateLayout(wnd), point)) {
+                selectAlbumTrack(*row, (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+                    (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+                m_focus = ControlId::albumTrackList;
+                invalidate();
+            }
+            return;
+        }
         if (const auto rating = playlistRatingAt(wnd, point)) {
             m_playlistRatingPress = rating;
             m_active = ControlId::playlistRating;
@@ -3492,6 +4462,24 @@ private:
         } else if (hit == ControlId::rightDivider) {
             m_dragHeaderPermille = static_cast<int>(readSettings().rightHeaderPermille);
             updateRightDivider(wnd, point.y);
+        } else if (hit == ControlId::albumGridScrollbar) {
+            const auto layout = calculateLayout(wnd);
+            if (contains(layout.albumGridScrollThumb, point)) {
+                m_albumGridScrollbarGrabOffset = point.y - layout.albumGridScrollThumb.top;
+            } else {
+                m_albumGridScrollbarGrabOffset = (layout.albumGridScrollThumb.bottom
+                    - layout.albumGridScrollThumb.top) * 0.5F;
+                updateAlbumGridScrollbar(wnd, point.y);
+            }
+        } else if (hit == ControlId::albumTrackScrollbar) {
+            const auto layout = calculateLayout(wnd);
+            if (contains(layout.albumTrackScrollThumb, point)) {
+                m_albumTrackScrollbarGrabOffset = point.y - layout.albumTrackScrollThumb.top;
+            } else {
+                m_albumTrackScrollbarGrabOffset = (layout.albumTrackScrollThumb.bottom
+                    - layout.albumTrackScrollThumb.top) * 0.5F;
+                updateAlbumTrackScrollbar(wnd, point.y);
+            }
         } else if (hit == ControlId::playlistScrollbar) {
             const auto layout = calculateLayout(wnd);
             if (contains(layout.playlistScrollThumb, point)) {
@@ -3550,6 +4538,8 @@ private:
             m_dragHeaderPermille = -1;
             writeSettings(settings);
             syncLyricsHost(wnd);
+        } else if (active == ControlId::albumDivider) {
+            persistAlbumBrowserState();
         } else if (active == ControlId::playlistHeader) {
             if (m_headerResizeColumns) {
                 writePlaylistViewSettings(m_playlistSettings);
@@ -3609,7 +4599,27 @@ private:
         const auto point = D2D1::Point2F(static_cast<float>(pixels.x) / dpiScale(),
             static_cast<float>(pixels.y) / dpiScale());
         const auto layout = calculateLayout(wnd);
-        if (m_queueMode && contains(layout.queuePanel, point)) {
+        if (m_workspace == Workspace::album && contains(layout.albumGrid, point)) {
+            const auto columns = albumGridColumns(layout);
+            const auto rows = (m_albums.size() + columns - 1) / columns;
+            const auto visible = std::max<std::size_t>(1, static_cast<std::size_t>(
+                (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+            const auto maximum = rows > visible ? rows - visible : 0;
+            const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            const auto candidate = static_cast<long long>(m_albumGridTopRow) - static_cast<long long>(notches) * 2LL;
+            m_albumGridTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL, static_cast<long long>(maximum)));
+            invalidate();
+        } else if (m_workspace == Workspace::album && contains(layout.albumTrackBody, point)
+            && m_albumSelection < m_albums.size()) {
+            const auto count = m_albums[m_albumSelection].sourceIndices.size();
+            const auto capacity = visibleRowCapacity(layout.albumTrackBody.bottom - layout.albumTrackBody.top,
+                kCompactTrackRowHeight);
+            const auto maximum = maximumTopRow(count, capacity);
+            const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            const auto candidate = static_cast<long long>(m_albumTrackTopRow) - static_cast<long long>(notches) * 3LL;
+            m_albumTrackTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL, static_cast<long long>(maximum)));
+            invalidate();
+        } else if (m_queueMode && contains(layout.queuePanel, point)) {
             const auto capacity = visibleRowCapacity(layout.queueBody.bottom - layout.queueBody.top, kCompactTrackRowHeight);
             const auto maximum = maximumTopRow(m_queueItems.size(), capacity);
             const auto notches = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
@@ -3671,11 +4681,109 @@ private:
         return true;
     }
 
+    void showAlbumSourceMenu() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        AppendMenuW(menu, MF_STRING | (m_albumSourceKind == AlbumSourceKind::mediaLibrary ? MF_CHECKED : 0),
+            1, L"Media Library");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        std::vector<GUID> playlistGuids;
+        auto api = playlist_manager_v5::get();
+        pfc::string8 name;
+        for (t_size index = 0; index < api->get_playlist_count(); ++index) {
+            if (!api->playlist_get_name(index, name) || std::strcmp(name.c_str(), "Refrain Album View") == 0) continue;
+            playlistGuids.push_back(api->playlist_get_guid(index));
+            const auto checked = m_albumSourceKind == AlbumSourceKind::playlist
+                && InlineIsEqualGUID(playlistGuids.back(), m_albumSourcePlaylistGuid);
+            const auto label = utf8ToWide(name.c_str());
+            AppendMenuW(menu, MF_STRING | (checked ? MF_CHECKED : 0),
+                100 + static_cast<UINT>(playlistGuids.size() - 1), label.c_str());
+        }
+        const auto layout = calculateLayout(wnd);
+        POINT point{static_cast<LONG>(layout.albumSource.left * dpiScale()),
+            static_cast<LONG>(layout.albumSource.bottom * dpiScale())};
+        ClientToScreen(wnd, &point);
+        const auto command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x, point.y, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command == 1) loadAlbumSourceLibrary();
+        else if (command >= 100 && command - 100 < playlistGuids.size()) {
+            loadAlbumSourcePlaylist(playlistGuids[command - 100]);
+        }
+    }
+
     bool onKeyDown(HWND wnd, WPARAM key) {
-        const std::array<ControlId, 7> allButtons{
-            ControlId::settings, ControlId::previous, ControlId::playPause,
-            ControlId::next, ControlId::stop, ControlId::queueToggle, ControlId::mute};
-        std::array<ControlId, 7> buttons{};
+        if (m_workspace == Workspace::album && (m_focus == ControlId::albumGrid
+                || m_focus == ControlId::albumTrackList)) {
+            const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (key == VK_RETURN && m_focus == ControlId::albumTrackList) {
+                playAlbumTrack(m_albumTrackSelection);
+                return true;
+            }
+            if (m_focus == ControlId::albumGrid && !m_albums.empty()) {
+                const auto columns = albumGridColumns(calculateLayout(wnd));
+                auto next = m_albumSelection;
+                if (key == VK_LEFT && next > 0) --next;
+                else if (key == VK_RIGHT) next = std::min(m_albums.size() - 1, next + 1);
+                else if (key == VK_UP) next = next >= columns ? next - columns : next;
+                else if (key == VK_DOWN) next = std::min(m_albums.size() - 1, next + columns);
+                else if (key == VK_RETURN) { playAlbumTrack(0); return true; }
+                else if (key == VK_HOME) next = 0;
+                else if (key == VK_END) next = m_albums.size() - 1;
+                else next = SIZE_MAX;
+                if (next != SIZE_MAX) {
+                    m_albumSelection = next;
+                    resetAlbumTrackSelection();
+                    persistAlbumBrowserState();
+                    const auto row = next / columns;
+                    const auto layout = calculateLayout(wnd);
+                    const auto visible = std::max<std::size_t>(1, static_cast<std::size_t>(
+                        (layout.albumGrid.bottom - layout.albumGrid.top) / 184.0F));
+                    if (row < m_albumGridTopRow) m_albumGridTopRow = row;
+                    else if (row >= m_albumGridTopRow + visible) m_albumGridTopRow = row - visible + 1;
+                    invalidate();
+                    return true;
+                }
+            } else if (m_focus == ControlId::albumTrackList && m_albumSelection < m_albums.size()) {
+                const auto count = m_albums[m_albumSelection].sourceIndices.size();
+                if (key == VK_DELETE) return true;
+                if (count > 0) {
+                    if (ctrl && key == 'A') {
+                        m_albumTrackSelected.assign(count, true);
+                        invalidate();
+                        return true;
+                    }
+                    if (key == VK_SPACE && m_albumTrackSelection < count) {
+                        selectAlbumTrack(m_albumTrackSelection, true, false);
+                        return true;
+                    }
+                    auto next = m_albumTrackSelection;
+                    if (key == VK_UP && next > 0) --next;
+                    else if (key == VK_DOWN) next = std::min(count - 1, next + 1);
+                    else if (key == VK_HOME) next = 0;
+                    else if (key == VK_END) next = count - 1;
+                    else next = SIZE_MAX;
+                    if (next != SIZE_MAX) {
+                        if (ctrl && !shift) m_albumTrackSelection = next;
+                        else selectAlbumTrack(next, ctrl, shift);
+                        const auto layout = calculateLayout(wnd);
+                        const auto capacity = visibleRowCapacity(layout.albumTrackBody.bottom
+                            - layout.albumTrackBody.top, kCompactTrackRowHeight);
+                        m_albumTrackTopRow = ensureRowVisible(m_albumTrackTopRow, next, count, capacity);
+                        invalidate();
+                        return true;
+                    }
+                }
+            }
+        }
+        const std::array<ControlId, 9> allButtons{
+            ControlId::playlistWorkspace, ControlId::albumWorkspace, ControlId::settings,
+            ControlId::previous, ControlId::playPause, ControlId::next,
+            ControlId::stop, ControlId::queueToggle, ControlId::mute};
+        std::array<ControlId, 9> buttons{};
         const auto settingsVisible = readSettings().showSettingsButton;
         auto buttonCount = std::size_t{};
         for (const auto button : allButtons) {
@@ -3745,6 +4853,10 @@ private:
         case ControlId::stop: api->userStop(); break;
         case ControlId::mute: api->userMute(); break;
         case ControlId::settings: showRefrainPreferences(); break;
+        case ControlId::playlistWorkspace: setWorkspace(Workspace::playlist); break;
+        case ControlId::albumWorkspace: setWorkspace(Workspace::album); break;
+        case ControlId::albumSource: showAlbumSourceMenu(); break;
+        case ControlId::albumLibraryPreferences: library_manager::get()->show_preferences(); break;
         case ControlId::queueToggle: toggleQueueMode(); break;
         default: break;
         }
@@ -3776,6 +4888,8 @@ private:
         m_previewing = false;
         m_dragHeaderPermille = -1;
         m_playlistScrollbarGrabOffset = 0.0F;
+        m_albumGridScrollbarGrabOffset = 0.0F;
+        m_albumTrackScrollbarGrabOffset = 0.0F;
         m_headerPressedColumn.reset();
         m_headerResizeColumns.reset();
         m_queueDragCandidate.reset();
@@ -3839,6 +4953,19 @@ private:
         } else {
             SendMessage(m_tooltip, TTM_ACTIVATE, TRUE, 0);
             switch (id) {
+            case ControlId::playlistWorkspace: m_tooltipText = L"Playlist Workspace"; break;
+            case ControlId::albumWorkspace: m_tooltipText = L"Album Workspace"; break;
+            case ControlId::albumSource: m_tooltipText = L"Choose album source"; break;
+            case ControlId::albumLibraryPreferences: m_tooltipText = L"Open Media Library Preferences"; break;
+            case ControlId::albumGrid:
+                if (m_albumHover && *m_albumHover < m_albums.size()) {
+                    const auto& album = m_albums[*m_albumHover];
+                    m_tooltipText = utf8ToWide(album.album.c_str()) + L"\r\n"
+                        + utf8ToWide(album.albumArtist.c_str());
+                    if (!album.date.empty()) m_tooltipText += L"\r\n" + utf8ToWide(album.date.c_str());
+                    m_tooltipText += L"\r\n" + std::to_wstring(album.sourceIndices.size()) + L" tracks";
+                }
+                break;
             case ControlId::seek: m_tooltipText = L"Seek"; break;
             case ControlId::previous: m_tooltipText = L"Previous"; break;
             case ControlId::playPause: m_tooltipText = m_state.playing && !m_state.paused ? L"Pause" : L"Play"; break;
@@ -3915,6 +5042,42 @@ private:
     bool m_ignoreCaptureChanged{};
     bool m_previewing{};
     bool m_queueMode{};
+    bool m_playlistQueueModeBeforeAlbum{};
+    Workspace m_workspace{Workspace::playlist};
+    AlbumSourceKind m_albumSourceKind{AlbumSourceKind::playlist};
+    GUID m_albumSourcePlaylistGuid{};
+    GUID m_albumReturnPlaylistGuid{};
+    GUID m_albumPendingReturnPlaylistGuid{};
+    std::wstring m_albumSourceName{L"Current playlist"};
+    metadb_handle_list m_albumSourceItems;
+    std::vector<AlbumSourceTrack> m_albumInput;
+    std::vector<AlbumBrowserAlbum> m_albums;
+    std::size_t m_albumSelection{};
+    std::size_t m_albumTrackSelection{};
+    std::vector<bool> m_albumTrackSelected;
+    std::size_t m_albumTrackAnchor{SIZE_MAX};
+    std::size_t m_albumGridTopRow{};
+    std::size_t m_albumTrackTopRow{};
+    float m_albumGridScrollbarGrabOffset{};
+    float m_albumTrackScrollbarGrabOffset{};
+    std::unordered_map<std::string, std::pair<std::string, std::size_t>> m_albumSourceStates;
+    int m_albumSplitPermille{780};
+    std::uint64_t m_albumArtworkGeneration{};
+    std::size_t m_albumArtworkBytes{};
+    std::uint64_t m_albumArtworkUseCounter{};
+    std::unordered_map<std::string, GroupArtworkCacheEntry> m_albumArtworkCache;
+    std::vector<GroupArtworkRequest> m_albumArtworkRequests;
+    std::mutex m_albumArtworkMutex;
+    std::condition_variable m_albumArtworkCondition;
+    std::shared_ptr<abort_callback_impl> m_albumArtworkAborter;
+    std::jthread m_albumArtworkThread;
+    service_ptr_t<AlbumViewPlaylistLock> m_albumLock;
+    t_size m_albumBridgePlaylist{SIZE_MAX};
+    t_size m_albumPriorPlaybackOrder{SIZE_MAX};
+    bool m_albumSessionActive{};
+    bool m_startingAlbumSession{};
+    bool m_albumSourceRestorePending{};
+    bool m_restoringAlbumPlaybackOrder{};
     LowerRightView m_lowerRightView{LowerRightView::lyrics};
     bool m_autoSwitchEnabled{true};
     int m_dragHeaderPermille{-1};
@@ -3957,6 +5120,7 @@ private:
     bool m_oleDragFromThisPanel{};
     bool m_oleDropHandledByThisPanel{};
     std::optional<std::pair<std::size_t, int>> m_playlistRatingHover;
+    std::optional<std::size_t> m_albumHover;
     std::optional<std::pair<std::size_t, int>> m_playlistRatingPress;
     bool m_externalDropAccepts{};
     bool m_externalDropNative{};
@@ -3986,6 +5150,7 @@ private:
     std::mutex m_groupArtworkMutex;
     std::condition_variable m_groupArtworkCondition;
     std::shared_ptr<abort_callback_impl> m_groupArtworkAborter;
+    bool m_groupArtworkAborterAlbum{};
     std::jthread m_groupArtworkThread;
     LyricsHost m_lyricsHost;
     double m_previewPosition{};
@@ -4011,6 +5176,11 @@ private:
     titleformat_object::ptr m_bitrateScript;
     titleformat_object::ptr m_ratingScript;
     titleformat_object::ptr m_queueLengthScript;
+    titleformat_object::ptr m_albumNameScript;
+    titleformat_object::ptr m_albumArtistScript;
+    titleformat_object::ptr m_albumDateScript;
+    titleformat_object::ptr m_albumDiscScript;
+    titleformat_object::ptr m_albumTrackScript;
     ComPtr<ID2D1SolidColorBrush> m_background;
     ComPtr<ID2D1SolidColorBrush> m_surface;
     ComPtr<ID2D1SolidColorBrush> m_foreground;

@@ -25,6 +25,7 @@ include(cmake/Foobar2000Sdk.cmake)
 add_library(foo_refrain MODULE
   src/artwork_loader.cpp
   src/artwork_loader.h
+  src/album_browser_model.h
   src/component.cpp
   src/component_identity.h
   src/compact_track_list_model.h
@@ -124,6 +125,11 @@ if(BUILD_TESTING)
   target_include_directories(refrain_playlist_interaction_model_tests PRIVATE src)
   target_compile_options(refrain_playlist_interaction_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME playlist_interaction_model COMMAND refrain_playlist_interaction_model_tests)
+
+  add_executable(refrain_album_browser_model_tests tests/album_browser_model_tests.cpp)
+  target_include_directories(refrain_album_browser_model_tests PRIVATE src)
+  target_compile_options(refrain_album_browser_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME album_browser_model COMMAND refrain_album_browser_model_tests)
 endif()
 
 find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)

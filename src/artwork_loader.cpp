@@ -30,7 +30,8 @@ private:
     HRESULT m_result{};
 };
 
-[[nodiscard]] ArtworkPixels decodeArtwork(album_art_data_ptr data, abort_callback& aborter) {
+[[nodiscard]] ArtworkPixels decodeArtwork(
+    album_art_data_ptr data, abort_callback& aborter, std::uint32_t maxDimension) {
     ArtworkPixels result;
     aborter.check();
     if (data.is_empty() || data->size() == 0 || data->size() > static_cast<std::size_t>(UINT_MAX)) {
@@ -70,8 +71,8 @@ private:
         return result;
     }
 
-    constexpr UINT maxDimension = 1024;
-    const auto scale = std::min(1.0, static_cast<double>(maxDimension)
+    const auto boundedDimension = std::max(1U, static_cast<UINT>(maxDimension));
+    const auto scale = std::min(1.0, static_cast<double>(boundedDimension)
         / static_cast<double>(std::max(sourceWidth, sourceHeight)));
     const auto width = std::max(1U, static_cast<UINT>(std::lround(sourceWidth * scale)));
     const auto height = std::max(1U, static_cast<UINT>(std::lround(sourceHeight * scale)));
@@ -130,7 +131,7 @@ ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& 
         ids.add_item(album_art_ids::cover_front);
         const auto extractor = album_art_manager_v2::get()->open(items, ids, aborter);
         const auto data = extractor->query(album_art_ids::cover_front, aborter);
-        return decodeArtwork(data, aborter);
+        return decodeArtwork(data, aborter, 1024U);
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};
     } catch (const exception_album_art_not_found&) {
@@ -141,13 +142,14 @@ ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& 
 }
 
 ArtworkPixels loadGroupArtwork(
-    metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter) noexcept {
+    metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter,
+    std::uint32_t maxDimension) noexcept {
     try {
         if (targets.get_count() == 0) return {ArtworkStatus::missing};
         pfc::list_t<GUID> ids;
         ids.add_item(artworkId);
         const auto extractor = album_art_manager_v2::get()->open(targets, ids, aborter);
-        return decodeArtwork(extractor->query(artworkId, aborter), aborter);
+        return decodeArtwork(extractor->query(artworkId, aborter), aborter, maxDimension);
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};
     } catch (const exception_album_art_not_found&) {

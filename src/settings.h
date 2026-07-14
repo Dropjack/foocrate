@@ -25,10 +25,20 @@ struct DependencyStatus {
     std::wstring officialUrl;
 };
 
+struct AlbumBrowserSettings {
+    bool mediaLibrary{};
+    GUID playlistGuid{};
+    GUID bridgeGuid{};
+    int splitPermille{780};
+    std::string albumKey;
+};
+
 [[nodiscard]] SettingsValues readSettings();
 void writeSettings(const SettingsValues& values);
 [[nodiscard]] PlaylistViewSettings readPlaylistViewSettings();
 void writePlaylistViewSettings(const PlaylistViewSettings& values);
+[[nodiscard]] AlbumBrowserSettings readAlbumBrowserSettings();
+void writeAlbumBrowserSettings(const AlbumBrowserSettings& values);
 void notifySettingsChanged();
 void registerSettingsWindow(HWND window);
 void unregisterSettingsWindow(HWND window) noexcept;

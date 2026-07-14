@@ -31,6 +31,16 @@ constexpr GUID kRightHeaderPermilleGuid{
     0x6434bf69, 0x3e63, 0x4f17, {0x86, 0x44, 0xa1, 0xd1, 0xe3, 0x20, 0xf1, 0x4c}};
 constexpr GUID kPlaylistViewSettingsGuid{
     0xd8a6f36a, 0x474c, 0x4fd6, {0x89, 0x3f, 0x08, 0x8e, 0xcc, 0x83, 0xa4, 0xa2}};
+constexpr GUID kAlbumSourceKindGuid{
+    0xdbb3c92f, 0xbd40, 0x4e5c, {0xa4, 0xed, 0xa8, 0x8d, 0xe1, 0x79, 0xa7, 0xe4}};
+constexpr GUID kAlbumSourcePlaylistGuid{
+    0x3e1727b4, 0xefca, 0x4e7c, {0xa3, 0x04, 0x57, 0xd9, 0x23, 0xb6, 0xba, 0x37}};
+constexpr GUID kAlbumSplitPermilleGuid{
+    0xc7df192c, 0xad7e, 0x45bb, {0xa0, 0x3b, 0xc4, 0xe5, 0x9c, 0xfe, 0x56, 0x43}};
+constexpr GUID kAlbumBridgePlaylistGuid{
+    0xed20fbc8, 0xbce0, 0x49d8, {0xa6, 0xd4, 0xe6, 0xf6, 0xe1, 0x3a, 0x4e, 0xfb}};
+constexpr GUID kAlbumSelectionKeyGuid{
+    0x69b9b165, 0xc9e9, 0x42aa, {0x80, 0xc8, 0xb9, 0x77, 0xbe, 0x2e, 0x02, 0x14}};
 
 cfg_int g_configVersion(kConfigVersionGuid, 0);
 cfg_int g_timeDisplay(kTimeDisplayGuid, static_cast<std::int64_t>(TimeDisplayMode::total));
@@ -41,6 +51,11 @@ cfg_int g_lowerRightView(kLowerRightViewGuid, static_cast<std::int64_t>(LowerRig
 cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
 cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
 cfg_string g_playlistViewSettings(kPlaylistViewSettingsGuid, "");
+cfg_bool g_albumSourceLibrary(kAlbumSourceKindGuid, false);
+cfg_guid g_albumSourcePlaylist(kAlbumSourcePlaylistGuid, GUID{});
+cfg_int g_albumSplitPermille(kAlbumSplitPermilleGuid, 780);
+cfg_guid g_albumBridgePlaylist(kAlbumBridgePlaylistGuid, GUID{});
+cfg_string g_albumSelectionKey(kAlbumSelectionKeyGuid, "");
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
@@ -143,6 +158,19 @@ void writePlaylistViewSettings(const PlaylistViewSettings& values) {
     const auto serialized = serializePlaylistViewSettings(values);
     g_playlistViewSettings.set(serialized.c_str());
     notifySettingsWindows();
+}
+
+AlbumBrowserSettings readAlbumBrowserSettings() {
+    return {g_albumSourceLibrary.get(), g_albumSourcePlaylist.get(), g_albumBridgePlaylist.get(),
+        std::clamp(static_cast<int>(g_albumSplitPermille.get()), 350, 800), g_albumSelectionKey.get().c_str()};
+}
+
+void writeAlbumBrowserSettings(const AlbumBrowserSettings& values) {
+    g_albumSourceLibrary = values.mediaLibrary;
+    g_albumSourcePlaylist = values.playlistGuid;
+    g_albumBridgePlaylist = values.bridgeGuid;
+    g_albumSplitPermille = std::clamp(values.splitPermille, 350, 800);
+    g_albumSelectionKey.set(values.albumKey.c_str());
 }
 
 void notifySettingsChanged() {
