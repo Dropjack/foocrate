@@ -221,7 +221,7 @@
 - 通过标准：两套主题都逐状态验收，不是简单反色；颜色不是传达播放/错误/焦点的唯一方式；主题变化不重置布局。
 - 当前规格：[`../specs/modules/THEME_AND_ACCENT_SYSTEM.md`](../specs/modules/THEME_AND_ACCENT_SYSTEM.md) 0.4，已验收。Appearance 已统一为 Colour mode 与 Preset 两行；三模式、四套预设、封面完整主题、即时预览与取消、高对比度回退和设置版本 5 迁移均已完成。用户在加载最新组件后完成检查并明确确认没有问题；等待用户以 `实现深浅主题与强调色系统` 提交。
 
-### [ ] 17 重构 Refrain 设置菜单与配置界面
+### [x] 17 重构 Refrain 设置菜单与配置界面
 
 - 前置：步骤 16 已提交；所有现有设置项、稳定 GUID 和迁移行为可完整盘点。
 - 目标：把主 Refrain 设置、Playlist View 分组/列配置和 Playlist Browser 设置整理为可理解、可增删、可缩放且不裁切的统一设置体验。
