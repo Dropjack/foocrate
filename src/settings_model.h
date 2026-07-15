@@ -1,5 +1,7 @@
 #pragma once
 
+#include "theme_model.h"
+
 #include <cstdint>
 
 namespace refrain {
@@ -23,6 +25,8 @@ struct SettingsValues {
     bool showReplayGain{};
     std::int64_t rightHeaderPermille{500};
     std::int64_t rightColumnPermille{230};
+    ThemePreset themePreset{ThemePreset::mist};
+    ColourMode colourMode{ColourMode::refrainPreset};
 
     bool operator==(const SettingsValues&) const = default;
 };
@@ -37,6 +41,8 @@ struct StoredSettings {
     bool showReplayGain{};
     std::int64_t rightHeaderPermille{500};
     std::int64_t rightColumnPermille{230};
+    std::int64_t themePreset{};
+    std::int64_t colourMode{};
 };
 
 struct SettingsMigration {
@@ -45,7 +51,7 @@ struct SettingsMigration {
     bool rewriteKnownValues{};
 };
 
-inline constexpr std::int64_t kCurrentSettingsVersion = 3;
+inline constexpr std::int64_t kCurrentSettingsVersion = 5;
 
 [[nodiscard]] constexpr SettingsValues defaultSettings() noexcept {
     return {};
@@ -85,6 +91,17 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 3;
         ? stored.rightHeaderPermille : 500;
     result.values.rightColumnPermille = isValidRightColumnPermille(stored.rightColumnPermille)
         ? stored.rightColumnPermille : 230;
+    result.values.themePreset = isValidThemePreset(stored.themePreset)
+        ? static_cast<ThemePreset>(stored.themePreset) : ThemePreset::mist;
+    if (stored.version <= 4) {
+        // Version 4 used Refrain=0, Windows=1 and Columns UI=2. Columns UI is removed;
+        // its old value safely returns to the Refrain preset instead of changing meaning.
+        result.values.colourMode = stored.colourMode == 1
+            ? ColourMode::windows : ColourMode::refrainPreset;
+    } else {
+        result.values.colourMode = isValidColourMode(stored.colourMode)
+            ? static_cast<ColourMode>(stored.colourMode) : ColourMode::refrainPreset;
+    }
 
     if (stored.version <= kCurrentSettingsVersion) {
         result.versionToKeep = kCurrentSettingsVersion;
@@ -92,7 +109,9 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 3;
             || !isValidTimeDisplay(stored.timeDisplay)
             || !isValidLowerRightView(stored.lowerRightView)
             || !isValidRightHeaderPermille(stored.rightHeaderPermille)
-            || !isValidRightColumnPermille(stored.rightColumnPermille);
+            || !isValidRightColumnPermille(stored.rightColumnPermille)
+            || !isValidThemePreset(stored.themePreset)
+            || (stored.version >= 5 && !isValidColourMode(stored.colourMode));
     } else {
         result.versionToKeep = stored.version;
         result.rewriteKnownValues = false;

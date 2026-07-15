@@ -41,7 +41,10 @@ struct PlaylistBrowserSettings {
 };
 
 [[nodiscard]] SettingsValues readSettings();
+[[nodiscard]] SettingsValues readEffectiveSettings();
 void writeSettings(const SettingsValues& values);
+void setSettingsPreview(HWND owner, const SettingsValues& values);
+void clearSettingsPreview(HWND owner) noexcept;
 [[nodiscard]] PlaylistViewSettings readPlaylistViewSettings();
 void writePlaylistViewSettings(const PlaylistViewSettings& values);
 [[nodiscard]] AlbumBrowserSettings readAlbumBrowserSettings();

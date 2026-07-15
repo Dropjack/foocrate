@@ -49,6 +49,8 @@ add_library(foo_refrain MODULE
   src/settings.cpp
   src/settings.h
   src/settings_model.h
+  src/theme_model.cpp
+  src/theme_model.h
 )
 
 set_target_properties(foo_refrain PROPERTIES
@@ -114,6 +116,11 @@ if(BUILD_TESTING)
   target_include_directories(refrain_settings_model_tests PRIVATE src)
   target_compile_options(refrain_settings_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME settings_model COMMAND refrain_settings_model_tests)
+
+  add_executable(refrain_theme_model_tests tests/theme_model_tests.cpp src/theme_model.cpp)
+  target_include_directories(refrain_theme_model_tests PRIVATE src)
+  target_compile_options(refrain_theme_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME theme_model COMMAND refrain_theme_model_tests)
 
   add_executable(refrain_now_playing_state_tests tests/now_playing_state_tests.cpp)
   target_include_directories(refrain_now_playing_state_tests PRIVATE src)

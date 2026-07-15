@@ -12,6 +12,7 @@
 #include "playlist_interaction_model.h"
 #include "playlist_browser_model.h"
 #include "settings.h"
+#include "theme_model.h"
 
 #include <windows.h>
 #include <windowsx.h>
@@ -50,21 +51,32 @@
 namespace refrain {
 namespace {
 
-constexpr auto kPanelBackgroundRgb = 0xF4F1EAu;
+using Microsoft::WRL::ComPtr;
 
-void fillPanelBackground(HWND window, HDC dc) noexcept {
-    RECT client{};
-    GetClientRect(window, &client);
-    const auto brush = CreateSolidBrush(RGB(
-        (kPanelBackgroundRgb >> 16) & 0xFF,
-        (kPanelBackgroundRgb >> 8) & 0xFF,
-        kPanelBackgroundRgb & 0xFF));
-    if (!brush) return;
-    FillRect(dc, &client, brush);
-    DeleteObject(brush);
+[[nodiscard]] RgbColor fromColorRef(COLORREF value) noexcept {
+    return {GetRValue(value), GetGValue(value), GetBValue(value)};
 }
 
-using Microsoft::WRL::ComPtr;
+[[nodiscard]] bool highContrastEnabled() noexcept {
+    HIGHCONTRASTW value{sizeof(value)};
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0)
+        && (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
+[[nodiscard]] bool windowsDarkModeEnabled() noexcept {
+    DWORD lightTheme{1};
+    DWORD size = sizeof(lightTheme);
+    const auto result = RegGetValueW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &lightTheme, &size);
+    return result == ERROR_SUCCESS && lightTheme == 0;
+}
+
+[[nodiscard]] bool isDarkColour(RgbColor value) noexcept {
+    return static_cast<unsigned>(value.red) * 299U
+        + static_cast<unsigned>(value.green) * 587U
+        + static_cast<unsigned>(value.blue) * 114U < 128000U;
+}
 
 constexpr GUID kPlaybackPanelGuid{0x9e26e4b0, 0x41a9, 0x4b08, {0xa3, 0x55, 0x74, 0x55, 0x10, 0x82, 0xc5, 0xf2}};
 constexpr UINT kRefreshMessage = WM_APP + 0x421;
@@ -259,6 +271,7 @@ struct ArtworkAsyncState {
 struct ArtworkCompletion {
     std::uint64_t generation{};
     ArtworkPixels pixels;
+    std::optional<ThemePalette> artworkTheme;
 };
 
 struct GroupArtworkRequest {
@@ -393,6 +406,7 @@ public:
             m_artworkAsync->window = wnd;
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
+            updateThemePalette();
             m_albumSplitPermille = readAlbumBrowserSettings().splitPermille;
             m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
             restoreAlbumBridgeLock();
@@ -471,6 +485,11 @@ public:
                 m_renderTarget->SetDpi(m_dpi, m_dpi);
             }
             InvalidateRect(wnd, nullptr, FALSE);
+            return 0;
+        case WM_SYSCOLORCHANGE:
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            refreshThemeResources();
             return 0;
         case WM_GETMINMAXINFO: {
             const auto scale = dpiScale();
@@ -876,7 +895,7 @@ private:
     }
 
     void createLyricsHost(HWND wnd) {
-        m_lyricsHost.setBackgroundColor(0xFF000000u | kPanelBackgroundRgb);
+        m_lyricsHost.setBackgroundColor(0xFF000000u | rgbValue(m_themePalette.backgroundBase));
         (void)m_lyricsHost.create(wnd, get_host(), lowerRightPixels(wnd), kLyricsMiddleClickMessage);
         syncLyricsHost(wnd);
     }
@@ -3533,6 +3552,71 @@ private:
         createTextResources();
     }
 
+    [[nodiscard]] ThemePalette resolveThemePalette() const {
+        const auto settings = readEffectiveSettings();
+        auto palette = presetPalette(settings.themePreset);
+        if (highContrastEnabled()) {
+            const auto systemBackground = fromColorRef(GetSysColor(COLOR_WINDOW));
+            palette = deriveExternalPalette(systemBackground,
+                fromColorRef(GetSysColor(COLOR_WINDOWTEXT)), fromColorRef(GetSysColor(COLOR_HIGHLIGHT)),
+                fromColorRef(GetSysColor(COLOR_HIGHLIGHTTEXT)), fromColorRef(GetSysColor(COLOR_WINDOWFRAME)),
+                isDarkColour(systemBackground));
+            palette.defaultPlaylist = palette.textPrimary;
+            palette.error = palette.textPrimary;
+            return palette;
+        }
+
+        switch (settings.colourMode) {
+        case ColourMode::windows:
+            palette = presetPalette(windowsDarkModeEnabled() ? ThemePreset::pine : ThemePreset::mist);
+            return applyAccent(palette, fromColorRef(GetSysColor(COLOR_HIGHLIGHT)));
+        case ColourMode::albumArtwork:
+            return m_artworkTheme.value_or(presetPalette(ThemePreset::mist));
+        case ColourMode::refrainPreset:
+        default:
+            return palette;
+        }
+    }
+
+    void updateThemePalette() {
+        m_themePalette = resolveThemePalette();
+        m_lyricsHost.setBackgroundColor(0xFF000000u | rgbValue(m_themePalette.backgroundBase));
+    }
+
+    void releaseThemeBrushes() noexcept {
+        m_error.Reset();
+        m_focusBrush.Reset();
+        m_hoverSurface.Reset();
+        m_border.Reset();
+        m_textOnAccent.Reset();
+        m_secondary.Reset();
+        m_elevated.Reset();
+        m_panel.Reset();
+        m_accentHover.Reset();
+        m_defaultPlaylist.Reset();
+        m_accent.Reset();
+        m_disabled.Reset();
+        m_foreground.Reset();
+        m_surface.Reset();
+        m_background.Reset();
+    }
+
+    void refreshThemeResources() {
+        updateThemePalette();
+        releaseThemeBrushes();
+        invalidate();
+    }
+
+    void fillPanelBackground(HWND window, HDC dc) noexcept {
+        RECT client{};
+        GetClientRect(window, &client);
+        const auto colour = m_themePalette.backgroundBase;
+        const auto brush = CreateSolidBrush(RGB(colour.red, colour.green, colour.blue));
+        if (!brush) return;
+        FillRect(dc, &client, brush);
+        DeleteObject(brush);
+    }
+
     void createTextResources() {
         if (!m_dwriteFactory || m_textFormat) {
             return;
@@ -3551,32 +3635,45 @@ private:
     }
 
     bool createDeviceResources(HWND wnd) {
-        if (m_renderTarget) {
-            return true;
-        }
         if (!m_d2dFactory) {
             return false;
         }
-        RECT rect{};
-        GetClientRect(wnd, &rect);
-        const auto size = D2D1::SizeU(static_cast<UINT32>(std::max(0L, rect.right - rect.left)),
-            static_cast<UINT32>(std::max(0L, rect.bottom - rect.top)));
-        const auto result = m_d2dFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(),
-            D2D1::HwndRenderTargetProperties(wnd, size), m_renderTarget.ReleaseAndGetAddressOf());
-        if (FAILED(result)) {
-            return false;
+        if (!m_renderTarget) {
+            RECT rect{};
+            GetClientRect(wnd, &rect);
+            const auto size = D2D1::SizeU(static_cast<UINT32>(std::max(0L, rect.right - rect.left)),
+                static_cast<UINT32>(std::max(0L, rect.bottom - rect.top)));
+            const auto result = m_d2dFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(),
+                D2D1::HwndRenderTargetProperties(wnd, size), m_renderTarget.ReleaseAndGetAddressOf());
+            if (FAILED(result)) return false;
+            m_renderTarget->SetDpi(m_dpi, m_dpi);
         }
-        m_renderTarget->SetDpi(m_dpi, m_dpi);
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xF4F1EA), m_background.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xDDD7CC), m_surface.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x252A2E), m_foreground.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xA5A099), m_disabled.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xE7A43B), m_accent.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x5F7495), m_defaultPlaylist.ReleaseAndGetAddressOf());
-        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xFFFFFF), m_light.ReleaseAndGetAddressOf());
+        if (!m_background) {
+            updateThemePalette();
+            const auto make = [&](RgbColor colour, ComPtr<ID2D1SolidColorBrush>& target) {
+                return SUCCEEDED(m_renderTarget->CreateSolidColorBrush(
+                    D2D1::ColorF(rgbValue(colour)), target.ReleaseAndGetAddressOf()));
+            };
+            if (!make(m_themePalette.backgroundBase, m_background)
+                || !make(m_themePalette.surfacePanel, m_panel)
+                || !make(m_themePalette.surfaceMuted, m_surface)
+                || !make(m_themePalette.surfaceElevated, m_elevated)
+                || !make(m_themePalette.textPrimary, m_foreground)
+                || !make(m_themePalette.textSecondary, m_secondary)
+                || !make(m_themePalette.textDisabled, m_disabled)
+                || !make(m_themePalette.textOnAccent, m_textOnAccent)
+                || !make(m_themePalette.borderSubtle, m_border)
+                || !make(m_themePalette.accent, m_accent)
+                || !make(m_themePalette.accentHover, m_accentHover)
+                || !make(m_themePalette.stateHover, m_hoverSurface)
+                || !make(m_themePalette.focus, m_focusBrush)
+                || !make(m_themePalette.defaultPlaylist, m_defaultPlaylist)
+                || !make(m_themePalette.error, m_error)) return false;
+        }
         createArtworkBitmap();
-        return m_background && m_surface && m_foreground && m_disabled && m_accent
-            && m_defaultPlaylist && m_light;
+        return m_background && m_panel && m_surface && m_elevated && m_foreground && m_secondary
+            && m_disabled && m_textOnAccent && m_border && m_accent && m_accentHover
+            && m_hoverSurface && m_focusBrush && m_defaultPlaylist && m_error;
     }
 
     void releaseTextResources() noexcept {
@@ -3594,14 +3691,8 @@ private:
             (void)key;
             entry.bitmap.Reset();
         }
-        m_light.Reset();
         m_artworkBitmap.Reset();
-        m_defaultPlaylist.Reset();
-        m_accent.Reset();
-        m_disabled.Reset();
-        m_foreground.Reset();
-        m_surface.Reset();
-        m_background.Reset();
+        releaseThemeBrushes();
         m_renderTarget.Reset();
         m_textFormat.Reset();
         m_dwriteFactory.Reset();
@@ -3954,9 +4045,15 @@ private:
         if (!createDeviceResources(wnd) || !m_textFormat) {
             RECT client{};
             GetClientRect(wnd, &client);
-            FillRect(paintStruct.hdc, &client, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+            const auto background = m_themePalette.backgroundBase;
+            const auto error = m_themePalette.error;
+            const auto brush = CreateSolidBrush(RGB(background.red, background.green, background.blue));
+            if (brush) {
+                FillRect(paintStruct.hdc, &client, brush);
+                DeleteObject(brush);
+            }
             SetBkMode(paintStruct.hdc, TRANSPARENT);
-            SetTextColor(paintStruct.hdc, RGB(64, 64, 64));
+            SetTextColor(paintStruct.hdc, RGB(error.red, error.green, error.blue));
             DrawTextW(paintStruct.hdc, L"Refrain rendering unavailable", -1, &client,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             EndPaint(wnd, &paintStruct);
@@ -3966,8 +4063,8 @@ private:
         const auto layout = calculateLayout(wnd);
         const auto size = m_renderTarget->GetSize();
         m_renderTarget->BeginDraw();
-        m_renderTarget->Clear(D2D1::ColorF(kPanelBackgroundRgb));
-        m_renderTarget->FillRectangle(D2D1::RectF(0.0F, layout.surfaceTop, size.width, size.height), m_surface.Get());
+        m_renderTarget->Clear(D2D1::ColorF(rgbValue(m_themePalette.backgroundBase)));
+        m_renderTarget->FillRectangle(D2D1::RectF(0.0F, layout.surfaceTop, size.width, size.height), m_panel.Get());
         m_renderTarget->DrawLine(D2D1::Point2F(0.0F, layout.surfaceTop), D2D1::Point2F(size.width, layout.surfaceTop),
             m_disabled.Get(), 1.0F);
 
@@ -3981,7 +4078,7 @@ private:
             const auto area = m_workspace == Workspace::album ? layout.albumGrid : layout.playlistArea;
             const auto status = D2D1::RectF(area.left + 12.0F,
                 std::max(area.top, area.bottom - 38.0F), area.right - 12.0F, area.bottom - 8.0F);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(status, 4.0F, 4.0F), m_surface.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(status, 4.0F, 4.0F), m_elevated.Get());
             drawTextWith(m_statusText, status, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_foreground.Get());
         }
         if (m_workspace == Workspace::playlist && m_queueMode) {
@@ -3991,7 +4088,7 @@ private:
             if (layout.rightDivider.right > layout.rightDivider.left) {
                 m_renderTarget->DrawLine(D2D1::Point2F(layout.rightDivider.left, (layout.rightDivider.top + layout.rightDivider.bottom) * 0.5F),
                     D2D1::Point2F(layout.rightDivider.right, (layout.rightDivider.top + layout.rightDivider.bottom) * 0.5F),
-                    m_disabled.Get(), layout::InteriorChromeMetrics::dividerVisualWidth);
+                    m_border.Get(), layout::InteriorChromeMetrics::dividerVisualWidth);
             }
             if (m_lowerRightView == LowerRightView::trackDetails) {
                 drawTrackDetails(layout);
@@ -4002,7 +4099,7 @@ private:
         }
         if (m_workspace == Workspace::playlist && layout.rightColumn.right > layout.rightColumn.left) {
             m_renderTarget->DrawLine(D2D1::Point2F(layout.rightColumn.left, layout.rightColumn.top),
-                D2D1::Point2F(layout.rightColumn.left, layout.rightColumn.bottom), m_disabled.Get(),
+                D2D1::Point2F(layout.rightColumn.left, layout.rightColumn.bottom), m_border.Get(),
                 layout::InteriorChromeMetrics::dividerVisualWidth);
         }
         drawSeek(layout);
@@ -4043,12 +4140,7 @@ private:
                 (void)key;
                 entry.bitmap.Reset();
             }
-            m_light.Reset();
-            m_accent.Reset();
-            m_disabled.Reset();
-            m_foreground.Reset();
-            m_surface.Reset();
-            m_background.Reset();
+            releaseThemeBrushes();
             m_artworkBitmap.Reset();
             m_renderTarget.Reset();
         }
@@ -4104,9 +4196,9 @@ private:
 
     void drawAlbumWorkspace(const Layout& layout) {
         if (layout.albumGrid.right <= layout.albumGrid.left) return;
-        m_renderTarget->FillRectangle(layout.albumSource, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.albumSource, m_panel.Get());
         m_renderTarget->DrawLine(D2D1::Point2F(layout.albumSource.left, layout.albumSource.bottom),
-            D2D1::Point2F(layout.albumSource.right, layout.albumSource.bottom), m_disabled.Get());
+            D2D1::Point2F(layout.albumSource.right, layout.albumSource.bottom), m_border.Get());
         drawTextWith(L"Current source: " + m_albumSourceName + L"  ▾",
             D2D1::RectF(layout.albumSource.left + 14.0F, layout.albumSource.top,
                 layout.albumSource.right - 10.0F, layout.albumSource.bottom),
@@ -4167,7 +4259,7 @@ private:
         if (scrollbarVisible(ScrollbarKind::albumGrid)
             && layout.albumGridScrollThumb.bottom > layout.albumGridScrollThumb.top) {
             const auto thumb = overlayScrollbarThumb(layout.albumGridScrollThumb);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_border.Get());
         }
         if (m_albumSourceKind == AlbumSourceKind::mediaLibrary
             && !library_manager::get()->is_library_enabled()) {
@@ -4176,13 +4268,13 @@ private:
                 message.top - 38.0F, message.right, message.top - 6.0F), m_textFormat.Get(),
                 DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(message, 4.0F, 4.0F),
-                m_hover == ControlId::albumLibraryPreferences ? m_light.Get() : m_surface.Get());
+                m_hover == ControlId::albumLibraryPreferences ? m_hoverSurface.Get() : m_surface.Get());
             m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(message, 4.0F, 4.0F), m_disabled.Get());
             drawTextWith(L"Open Media Library Preferences", message, m_secondaryFormat.Get(),
                 DWRITE_TEXT_ALIGNMENT_CENTER, m_foreground.Get());
         }
 
-        m_renderTarget->FillRectangle(layout.albumHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.albumHeader, m_panel.Get());
         if (m_albumSelection < m_albums.size()) {
             const auto& album = m_albums[m_albumSelection];
             drawTextWith(utf8ToWide(album.album.c_str()), D2D1::RectF(layout.albumHeader.left + 14.0F,
@@ -4197,7 +4289,7 @@ private:
             drawTextWith(m_albumSourceItems.get_count() == 0 ? L"No albums in this source" : L"No album selected",
                 layout.albumHeader, m_titleFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
         }
-        m_renderTarget->FillRectangle(layout.albumTrackHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.albumTrackHeader, m_panel.Get());
         constexpr std::array<const wchar_t*, 4> labels{L"#", L"Title", L"Artist", L"Length"};
         constexpr std::array<float, 5> edges{0.0F, 0.10F, 0.55F, 0.84F, 1.0F};
         const auto width = layout.albumTrackHeader.right - layout.albumTrackHeader.left;
@@ -4227,7 +4319,7 @@ private:
             }
             if (row == m_albumTrackSelection && GetFocus() == get_wnd()) {
                 m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
-                    rect.right - 1.0F, rect.bottom - 1.0F), m_foreground.Get(), 1.0F);
+                    rect.right - 1.0F, rect.bottom - 1.0F), m_focusBrush.Get(), 1.0F);
             }
             if (m_albumSourceItems[source] == m_target) m_renderTarget->FillRectangle(
                 D2D1::RectF(rect.left, rect.top, rect.left + 3.0F, rect.bottom), m_accent.Get());
@@ -4256,7 +4348,7 @@ private:
         if (scrollbarVisible(ScrollbarKind::albumTrack)
             && layout.albumTrackScrollThumb.bottom > layout.albumTrackScrollThumb.top) {
             const auto thumb = overlayScrollbarThumb(layout.albumTrackScrollThumb);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_border.Get());
         }
     }
 
@@ -4264,10 +4356,10 @@ private:
         if (layout.playlistBrowser.right <= layout.playlistBrowser.left) return;
         const auto defaultGuid = readPlaylistBrowserSettings().defaultPlaylistGuid;
         m_renderTarget->FillRectangle(layout.playlistBrowser, m_background.Get());
-        m_renderTarget->FillRectangle(layout.playlistBrowserHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.playlistBrowserHeader, m_panel.Get());
         m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistBrowserHeader.left,
             layout.playlistBrowserHeader.bottom), D2D1::Point2F(layout.playlistBrowserHeader.right,
-            layout.playlistBrowserHeader.bottom), m_disabled.Get(), 1.0F);
+            layout.playlistBrowserHeader.bottom), m_border.Get(), 1.0F);
         drawTextWith(L"Playlists", D2D1::RectF(layout.playlistBrowserHeader.left + 12.0F,
             layout.playlistBrowserHeader.top, layout.playlistBrowserHeader.right - 12.0F,
             layout.playlistBrowserHeader.bottom), m_titleFormat.Get(),
@@ -4287,7 +4379,7 @@ private:
             const auto isDefault = sameGuid(row.guid, defaultGuid);
             if (row.active) m_renderTarget->FillRectangle(rect, m_surface.Get());
             if (selected) m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
-                rect.right - 1.0F, rect.bottom - 1.0F), m_foreground.Get(), 1.0F);
+                rect.right - 1.0F, rect.bottom - 1.0F), m_focusBrush.Get(), 1.0F);
             if (m_externalDropActive && m_externalDropDestination == DropDestination::playlistBrowser
                 && !m_externalDropBrowserBlank && sameGuid(row.guid, m_externalDropBrowserGuid)) {
                 m_renderTarget->DrawRectangle(D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F,
@@ -4324,7 +4416,7 @@ private:
         if (scrollbarVisible(ScrollbarKind::playlistBrowser)
             && m_playlistBrowserRows.size() > browserCapacity) {
             const auto thumb = overlayScrollbarThumb(layout.playlistBrowserScrollThumb);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_border.Get());
         }
         if (m_externalDropActive && m_externalDropDestination == DropDestination::playlistBrowser
             && m_externalDropBrowserBlank) {
@@ -4335,13 +4427,13 @@ private:
         m_renderTarget->DrawLine(D2D1::Point2F((layout.playlistBrowserDivider.left
                 + layout.playlistBrowserDivider.right) * 0.5F, layout.playlistBrowserDivider.top),
             D2D1::Point2F((layout.playlistBrowserDivider.left + layout.playlistBrowserDivider.right) * 0.5F,
-                layout.playlistBrowserDivider.bottom), m_disabled.Get(),
+                layout.playlistBrowserDivider.bottom), m_border.Get(),
             layout::InteriorChromeMetrics::dividerVisualWidth);
     }
 
     void drawPlaylist(const Layout& layout) {
         if (layout.playlistArea.right <= layout.playlistArea.left) return;
-        m_renderTarget->FillRectangle(layout.playlistHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.playlistHeader, m_panel.Get());
 
         const auto contentRight = layout.playlistBody.right;
         struct DrawColumn { std::size_t index{}; D2D1_RECT_F rect{}; };
@@ -4373,9 +4465,9 @@ private:
             m_renderTarget->DrawLine(D2D1::Point2F(column.rect.right, column.rect.top + 5.0F),
                 D2D1::Point2F(column.rect.right, column.rect.bottom - 5.0F), m_disabled.Get(), 0.5F);
         }
-        m_renderTarget->FillRectangle(layout.playlistHeaderScrollbarGutter, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.playlistHeaderScrollbarGutter, m_panel.Get());
         m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistHeader.left, layout.playlistHeader.bottom),
-            D2D1::Point2F(layout.playlistHeader.right, layout.playlistHeader.bottom), m_disabled.Get(), 1.0F);
+            D2D1::Point2F(layout.playlistHeader.right, layout.playlistHeader.bottom), m_border.Get(), 1.0F);
 
         if (m_activePlaylist == SIZE_MAX) {
             drawTextWith(L"No active playlist", layout.playlistBody, m_secondaryFormat.Get(),
@@ -4441,7 +4533,7 @@ private:
             if (focused) {
                 const auto focusRect = D2D1::RectF(rowRect.left + 1.0F, rowRect.top + 1.0F,
                     rowRect.right - 1.0F, rowRect.bottom - 1.0F);
-                m_renderTarget->DrawRectangle(focusRect, m_foreground.Get(), 1.0F);
+                m_renderTarget->DrawRectangle(focusRect, m_focusBrush.Get(), 1.0F);
             }
             const auto row = formatPlaylistRow(index);
             const auto textBrush = playing ? m_accent.Get() : m_foreground.Get();
@@ -4513,7 +4605,7 @@ private:
         const auto capacity = visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, rowHeight);
         if (scrollbarVisible(ScrollbarKind::playlist) && m_playlistDisplayRows.size() > capacity) {
             const auto thumb = overlayScrollbarThumb(layout.playlistScrollThumb);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_border.Get());
         }
     }
 
@@ -4556,11 +4648,12 @@ private:
                 1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         } else {
             m_renderTarget->FillRectangle(layout.artwork, m_surface.Get());
-            m_renderTarget->DrawRectangle(layout.artwork, m_disabled.Get(), 1.0F);
+            m_renderTarget->DrawRectangle(layout.artwork, m_border.Get(), 1.0F);
             const wchar_t* status = L"No artwork";
             if (m_artworkLoading) status = L"Loading artwork...";
             else if (m_artworkPixels.status == ArtworkStatus::unavailable) status = L"Artwork unavailable";
-            drawTextWith(status, layout.artwork, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
+            drawTextWith(status, layout.artwork, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
+                m_artworkPixels.status == ArtworkStatus::unavailable ? m_error.Get() : m_secondary.Get());
         }
 
         const auto hoverRating = ratingForControl(m_hover);
@@ -4575,9 +4668,9 @@ private:
         }
 
         drawTextWith(m_trackTitle, layout.trackTitle, m_titleFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
-            m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
+            m_target.is_valid() ? m_secondary.Get() : m_disabled.Get());
         drawTextWith(m_artistAlbum, layout.artistAlbum, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
-            m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
+            m_target.is_valid() ? m_secondary.Get() : m_disabled.Get());
         drawTextWith(m_codecBitrate, layout.codecBitrate, m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_CENTER,
             m_target.is_valid() ? m_foreground.Get() : m_disabled.Get());
     }
@@ -4610,13 +4703,13 @@ private:
             m_renderTarget->DrawRectangle(D2D1::RectF(layout.queuePanel.left + 1.0F, layout.queuePanel.top + 1.0F,
                 layout.queuePanel.right - 1.0F, layout.queuePanel.bottom - 1.0F), m_accent.Get(), 2.0F);
         }
-        m_renderTarget->FillRectangle(layout.queueHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.queueHeader, m_panel.Get());
         const auto title = L"Playback Queue  (" + std::to_wstring(m_queueItems.size()) + L")";
         drawTextWith(title, D2D1::RectF(layout.queueHeader.left + 10.0F, layout.queueHeader.top,
             layout.queueHeader.right - 10.0F, layout.queueHeader.bottom), m_titleFormat.Get(),
             DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
 
-        m_renderTarget->FillRectangle(layout.queueListHeader, m_surface.Get());
+        m_renderTarget->FillRectangle(layout.queueListHeader, m_panel.Get());
         const auto width = layout.queueBody.right - layout.queueBody.left;
         const auto compactColumns = compactTrackColumns();
         const std::array<const wchar_t*, 5> labels{L"#", L"Title", L"Artist", L"Source", L"Length"};
@@ -4629,7 +4722,7 @@ private:
                 m_foreground.Get());
         }
         m_renderTarget->DrawLine(D2D1::Point2F(layout.queueListHeader.left, layout.queueListHeader.bottom),
-            D2D1::Point2F(layout.queueListHeader.right, layout.queueListHeader.bottom), m_disabled.Get(), 1.0F);
+            D2D1::Point2F(layout.queueListHeader.right, layout.queueListHeader.bottom), m_border.Get(), 1.0F);
 
         if (m_queueItems.empty()) {
             drawTextWith(L"Playback queue is empty", layout.queueBody, m_secondaryFormat.Get(),
@@ -4646,7 +4739,7 @@ private:
             if (index < m_queueSelected.size() && m_queueSelected[index]) m_renderTarget->FillRectangle(rect, m_surface.Get());
             if (index == m_queueFocus) m_renderTarget->DrawRectangle(
                 D2D1::RectF(rect.left + 1.0F, rect.top + 1.0F, rect.right - 1.0F, rect.bottom - 1.0F),
-                m_foreground.Get(), 1.0F);
+                m_focusBrush.Get(), 1.0F);
             const auto row = formatQueueRow(index);
             const std::array<std::wstring, 5> values{std::to_wstring(index + 1), row.title, row.artist, row.source, row.length};
             for (std::size_t column = 0; column < values.size(); ++column) {
@@ -4672,7 +4765,7 @@ private:
         const auto capacity = visibleRowCapacity(layout.queueBody.bottom - layout.queueBody.top, rowHeight);
         if (scrollbarVisible(ScrollbarKind::queue) && m_queueItems.size() > capacity) {
             const auto thumb = overlayScrollbarThumb(layout.queueScrollThumb);
-            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_disabled.Get());
+            m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(thumb, 1.5F, 1.5F), m_border.Get());
         }
     }
 
@@ -4699,7 +4792,7 @@ private:
                 } else {
                     const auto split = layout.lowerRight.left + (layout.lowerRight.right - layout.lowerRight.left) * 0.38F;
                     drawTextWith(row.field, D2D1::RectF(rowRect.left, rowRect.top, split - 4.0F, rowRect.bottom),
-                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_disabled.Get());
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_secondary.Get());
                     drawTextWith(row.value, D2D1::RectF(split, rowRect.top, rowRect.right, rowRect.bottom),
                         m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
                 }
@@ -5217,15 +5310,21 @@ private:
         }
         m_artworkBitmap.Reset();
         m_artworkPixels = {target.is_valid() ? ArtworkStatus::unavailable : ArtworkStatus::missing};
+        m_artworkTheme.reset();
         m_artworkLoading = target.is_valid();
+        if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
+            refreshThemeResources();
+        }
         if (target.is_empty()) return;
 
         fb2k::splitTask([state, target, generation, aborter] {
             auto pixels = loadFrontArtwork(target, *aborter);
             if (pixels.status == ArtworkStatus::aborted) return;
-            fb2k::inMainThread([state, generation, pixels = std::move(pixels)]() mutable {
+            const auto artworkTheme = pixels.status == ArtworkStatus::ready
+                ? extractArtworkTheme(pixels.bgra, pixels.width, pixels.height) : std::nullopt;
+            fb2k::inMainThread([state, generation, pixels = std::move(pixels), artworkTheme]() mutable {
                 if (!state->alive.load() || state->generation.load() != generation || !IsWindow(state->window)) return;
-                ArtworkCompletion completion{generation, std::move(pixels)};
+                ArtworkCompletion completion{generation, std::move(pixels), artworkTheme};
                 SendMessage(state->window, kArtworkReadyMessage, 0, reinterpret_cast<LPARAM>(&completion));
             });
         });
@@ -5235,7 +5334,11 @@ private:
         if (!m_artworkAsync->alive.load() || completion.generation != m_artworkAsync->generation.load()) return;
         m_artworkLoading = false;
         m_artworkPixels = std::move(completion.pixels);
+        m_artworkTheme = completion.artworkTheme;
         m_artworkBitmap.Reset();
+        if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
+            refreshThemeResources();
+        }
         createArtworkBitmap();
         updateTooltip(m_hover);
         rebuildTrackDetails();
@@ -5256,7 +5359,7 @@ private:
     void drawSeek(const Layout& layout) {
         const auto centerY = (layout.seek.top + layout.seek.bottom) * 0.5F;
         const auto rail = D2D1::RectF(layout.seek.left, centerY - 2.0F, layout.seek.right, centerY + 2.0F);
-        m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rail, 2.0F, 2.0F), m_disabled.Get());
+        m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rail, 2.0F, 2.0F), m_border.Get());
         const auto position = m_previewing ? m_previewPosition : m_state.position;
         const auto fraction = static_cast<float>(seekFraction(position, m_state.length));
         const auto x = rail.left + (rail.right - rail.left) * fraction;
@@ -5276,11 +5379,11 @@ private:
         const auto selectedWorkspace = (id == ControlId::playlistWorkspace && m_workspace == Workspace::playlist)
             || (id == ControlId::albumWorkspace && m_workspace == Workspace::album);
         const auto selectedToggle = id == ControlId::queueToggle && m_queueMode;
-        auto fill = primary ? m_accent.Get() : m_surface.Get();
+        auto fill = primary ? (hot ? m_accentHover.Get() : m_accent.Get()) : m_surface.Get();
         if (pressed) {
             fill = m_disabled.Get();
         } else if (hot && !primary) {
-            fill = m_light.Get();
+            fill = m_hoverSurface.Get();
         }
         if (selectedWorkspace || selectedToggle) {
             m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rect, 4.0F, 4.0F), m_disabled.Get());
@@ -5288,7 +5391,7 @@ private:
             m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F((rect.left + rect.right) * 0.5F,
                 (rect.top + rect.bottom) * 0.5F), (rect.right - rect.left) * 0.5F, (rect.bottom - rect.top) * 0.5F), fill);
         }
-        const auto brush = enabled ? (primary ? m_light.Get() : m_foreground.Get()) : m_disabled.Get();
+        const auto brush = enabled ? (primary ? m_textOnAccent.Get() : m_foreground.Get()) : m_disabled.Get();
         const auto iconDesignSize = primary
             ? layout::PlaybackBarVerticalMetrics::primaryIconDesignSize
             : layout::PlaybackBarVerticalMetrics::regularIconDesignSize;
@@ -5309,7 +5412,7 @@ private:
             focusRect.bottom -= 2.0F;
             m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((focusRect.left + focusRect.right) * 0.5F,
                 (focusRect.top + focusRect.bottom) * 0.5F), (focusRect.right - focusRect.left) * 0.5F,
-                (focusRect.bottom - focusRect.top) * 0.5F), brush, 1.0F);
+                (focusRect.bottom - focusRect.top) * 0.5F), m_focusBrush.Get(), 1.0F);
         }
     }
 
@@ -5454,7 +5557,7 @@ private:
         }
         const auto y = (layout.volume.top + layout.volume.bottom) * 0.5F;
         const auto rail = D2D1::RectF(layout.volume.left, y - 2.0F, layout.volume.right, y + 2.0F);
-        m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rail, 2.0F, 2.0F), m_disabled.Get());
+        m_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rail, 2.0F, 2.0F), m_border.Get());
         const auto effectiveDb = m_state.muted() ? m_state.lastAudibleVolumeDb : m_state.volumeDb;
         const auto fraction = static_cast<float>(volumeFractionFromDb(effectiveDb));
         const auto x = rail.left + (rail.right - rail.left) * fraction;
@@ -6478,6 +6581,7 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
+        refreshThemeResources();
         m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
         reloadPlaylistViewSettings();
         rebuildPlaylistGroups();
@@ -6509,6 +6613,7 @@ private:
     int m_rating{};
     bool m_ratingAvailable{};
     ArtworkPixels m_artworkPixels{ArtworkStatus::missing};
+    std::optional<ThemePalette> m_artworkTheme;
     bool m_artworkLoading{};
     std::shared_ptr<ArtworkAsyncState> m_artworkAsync{std::make_shared<ArtworkAsyncState>()};
     bool m_callbackRegistered{};
@@ -6661,6 +6766,7 @@ private:
     std::wstring m_tooltipText;
     std::wstring m_statusText;
     bool m_outputCallbackRegistered{};
+    ThemePalette m_themePalette{presetPalette(ThemePreset::mist)};
 
     ComPtr<ID2D1Factory> m_d2dFactory;
     ComPtr<IDWriteFactory> m_dwriteFactory;
@@ -6682,12 +6788,20 @@ private:
     titleformat_object::ptr m_albumDiscScript;
     titleformat_object::ptr m_albumTrackScript;
     ComPtr<ID2D1SolidColorBrush> m_background;
+    ComPtr<ID2D1SolidColorBrush> m_panel;
     ComPtr<ID2D1SolidColorBrush> m_surface;
+    ComPtr<ID2D1SolidColorBrush> m_elevated;
     ComPtr<ID2D1SolidColorBrush> m_foreground;
+    ComPtr<ID2D1SolidColorBrush> m_secondary;
     ComPtr<ID2D1SolidColorBrush> m_disabled;
+    ComPtr<ID2D1SolidColorBrush> m_textOnAccent;
+    ComPtr<ID2D1SolidColorBrush> m_border;
     ComPtr<ID2D1SolidColorBrush> m_accent;
+    ComPtr<ID2D1SolidColorBrush> m_accentHover;
+    ComPtr<ID2D1SolidColorBrush> m_hoverSurface;
+    ComPtr<ID2D1SolidColorBrush> m_focusBrush;
     ComPtr<ID2D1SolidColorBrush> m_defaultPlaylist;
-    ComPtr<ID2D1SolidColorBrush> m_light;
+    ComPtr<ID2D1SolidColorBrush> m_error;
 };
 
 uie::window_factory<PlaybackPanel> g_playbackPanelFactory;

@@ -23,6 +23,8 @@ enum ControlId : int {
     lyricsAutoSwitch = 1004,
     lowerRightView = 1005,
     showReplayGain = 1006,
+    colourMode = 1007,
+    themePreset = 1008,
     dependencyStatusBase = 1100,
     dependencyButtonBase = 1200,
 };
@@ -49,6 +51,7 @@ public:
     }
 
     ~SettingsPageInstance() {
+        clearSettingsPreview(m_window);
         if (m_window && IsWindow(m_window)) {
             SetWindowLongPtrW(m_window, GWLP_USERDATA, 0);
             if (m_originalProc) {
@@ -61,7 +64,7 @@ public:
     }
 
     t_uint32 get_state() override {
-        auto state = static_cast<t_uint32>(preferences_state::resettable);
+        auto state = static_cast<t_uint32>(preferences_state::resettable | preferences_state::dark_mode_supported);
         if (!(readDraftFromControls() == m_initial)) {
             state |= preferences_state::changed;
         }
@@ -73,6 +76,7 @@ public:
     void apply() override {
         m_draft = readDraftFromControls();
         writeSettings(m_draft);
+        clearSettingsPreview(m_window);
         m_initial = m_draft;
         notifyChanged();
     }
@@ -80,6 +84,7 @@ public:
     void reset() override {
         m_draft = defaultSettings();
         writeDraftToControls();
+        previewDraft();
         notifyChanged();
     }
 
@@ -108,6 +113,7 @@ private:
             return 0;
         case WM_NCDESTROY: {
             const auto original = self->m_originalProc;
+            clearSettingsPreview(window);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             self->m_window = nullptr;
             return CallWindowProcW(original, window, message, wp, lp);
@@ -166,6 +172,20 @@ private:
         m_showReplayGain = addControl(L"BUTTON", L"Show ReplayGain section in track details",
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showReplayGain);
 
+        m_appearanceGroup = addControl(L"BUTTON", L"Appearance", BS_GROUPBOX, 0);
+        m_colourModeLabel = addControl(L"STATIC", L"Colour mode:", SS_LEFT, 0);
+        m_colourMode = addControl(L"COMBOBOX", nullptr,
+            CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::colourMode);
+        for (const auto* value : {L"Follow Windows", L"Refrain preset", L"Follow album artwork"}) {
+            SendMessageW(m_colourMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        }
+        m_themeLabel = addControl(L"STATIC", L"Preset:", SS_LEFT, 0);
+        m_themePreset = addControl(L"COMBOBOX", nullptr,
+            CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::themePreset);
+        for (const auto* value : {L"漫雾青 (Mist)", L"暖纸橙 (Paper)", L"松影深色 (Pine)", L"靛夜琥珀 (Ink)"}) {
+            SendMessageW(m_themePreset, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        }
+
         m_dependenciesGroup = addControl(L"BUTTON", L"Dependencies (read-only)", BS_GROUPBOX, 0);
         for (std::size_t index = 0; index < m_dependencies.size(); ++index) {
             const auto& dependency = m_dependencies[index];
@@ -212,15 +232,21 @@ private:
         MoveWindow(m_lowerRightView, scaled(160), scaled(204), scaled(170), scaled(200), TRUE);
         MoveWindow(m_showReplayGain, margin24, scaled(240), scaled(340), scaled(24), TRUE);
 
-        MoveWindow(m_dependenciesGroup, margin8, scaled(290), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
+        MoveWindow(m_appearanceGroup, margin8, scaled(290), width > margin16 ? width - margin16 : 1, scaled(110), TRUE);
+        MoveWindow(m_colourModeLabel, margin24, scaled(318), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_colourMode, scaled(160), scaled(314), scaled(220), scaled(200), TRUE);
+        MoveWindow(m_themeLabel, margin24, scaled(352), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_themePreset, scaled(160), scaled(348), scaled(220), scaled(200), TRUE);
+
+        MoveWindow(m_dependenciesGroup, margin8, scaled(410), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
         for (std::size_t index = 0; index < m_dependencyLabels.size(); ++index) {
-            const auto y = scaled(318 + static_cast<int>(index) * 38);
+            const auto y = scaled(438 + static_cast<int>(index) * 38);
             MoveWindow(m_dependencyLabels[index], margin24, y + scaled(5),
                 contentWidth > scaled(190) ? contentWidth - scaled(190) : 1, scaled(22), TRUE);
             MoveWindow(m_dependencyButtons[index], width > scaled(174) ? width - scaled(166) : margin8,
                 y, scaled(142), scaled(28), TRUE);
         }
-        MoveWindow(m_dependencyNote, margin24, scaled(434),
+        MoveWindow(m_dependencyNote, margin24, scaled(554),
             contentWidth > margin16 ? contentWidth - margin16 : 1, scaled(34), TRUE);
     }
 
@@ -234,10 +260,16 @@ private:
         }
         if ((id == ControlId::timeMode && notification == CBN_SELCHANGE)
             || (id == ControlId::lowerRightView && notification == CBN_SELCHANGE)
+            || ((id == ControlId::colourMode || id == ControlId::themePreset)
+                && notification == CBN_SELCHANGE)
             || ((id == ControlId::showTooltips || id == ControlId::showSettingsButton
                     || id == ControlId::lyricsAutoSwitch || id == ControlId::showReplayGain)
                 && notification == BN_CLICKED)) {
+            if (id == ControlId::colourMode || id == ControlId::themePreset) {
+                previewDraft();
+            }
             notifyChanged();
+            return;
         }
     }
 
@@ -253,6 +285,12 @@ private:
         values.showReplayGain = SendMessageW(m_showReplayGain, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.rightHeaderPermille = m_draft.rightHeaderPermille;
         values.rightColumnPermille = m_draft.rightColumnPermille;
+        const auto colourMode = SendMessageW(m_colourMode, CB_GETCURSEL, 0, 0);
+        values.colourMode = colourMode >= 0 && colourMode <= 2
+            ? static_cast<ColourMode>(colourMode) : ColourMode::refrainPreset;
+        const auto preset = SendMessageW(m_themePreset, CB_GETCURSEL, 0, 0);
+        values.themePreset = preset >= 0 && preset <= 3
+            ? static_cast<ThemePreset>(preset) : ThemePreset::mist;
         return values;
     }
 
@@ -268,6 +306,22 @@ private:
             m_draft.lowerRightView == LowerRightView::trackDetails ? 1 : 0, 0);
         SendMessageW(m_showReplayGain, BM_SETCHECK,
             m_draft.showReplayGain ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(m_colourMode, CB_SETCURSEL,
+            static_cast<WPARAM>(static_cast<std::int64_t>(m_draft.colourMode)), 0);
+        SendMessageW(m_themePreset, CB_SETCURSEL,
+            static_cast<WPARAM>(static_cast<std::int64_t>(m_draft.themePreset)), 0);
+        updateAppearanceControls();
+    }
+
+    void updateAppearanceControls() const {
+        EnableWindow(m_themePreset, m_draft.colourMode == ColourMode::refrainPreset);
+        EnableWindow(m_themeLabel, m_draft.colourMode == ColourMode::refrainPreset);
+    }
+
+    void previewDraft() {
+        m_draft = readDraftFromControls();
+        setSettingsPreview(m_window, m_draft);
+        updateAppearanceControls();
     }
 
     void notifyChanged() const {
@@ -295,6 +349,11 @@ private:
     HWND m_lowerViewLabel{};
     HWND m_lowerRightView{};
     HWND m_showReplayGain{};
+    HWND m_appearanceGroup{};
+    HWND m_colourModeLabel{};
+    HWND m_colourMode{};
+    HWND m_themeLabel{};
+    HWND m_themePreset{};
     HWND m_dependenciesGroup{};
     std::vector<HWND> m_dependencyLabels;
     std::vector<HWND> m_dependencyButtons;

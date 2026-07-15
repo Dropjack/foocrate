@@ -27,12 +27,14 @@ int main() {
     expect(!defaults.showReplayGain, "ReplayGain details must default off");
     expect(defaults.rightHeaderPermille == 500, "right header must default to half height");
     expect(defaults.rightColumnPermille == 230, "right column must default to 23 percent");
+    expect(defaults.themePreset == ThemePreset::mist, "theme must default to mist");
+    expect(defaults.colourMode == ColourMode::refrainPreset, "colour mode must default to Refrain preset");
 
     const auto firstRun = migrateSettings({0, 0, true, true, true, 0, false, 500, 230});
-    expect(firstRun.versionToKeep == 3, "version zero must migrate to three");
+    expect(firstRun.versionToKeep == 5, "version zero must migrate to five");
     expect(firstRun.rewriteKnownValues, "version migration must be persisted");
 
-    const auto invalid = migrateSettings({3, 77, false, false, false, 77, true, 999, 999});
+    const auto invalid = migrateSettings({5, 77, false, false, false, 77, true, 999, 999, 77, 77});
     expect(invalid.values.timeDisplay == TimeDisplayMode::total, "invalid enum must fall back to total");
     expect(invalid.rewriteKnownValues, "invalid current value must be repaired");
     expect(!invalid.values.showTooltips && !invalid.values.showSettingsButton, "valid booleans must survive repair");
@@ -40,13 +42,27 @@ int main() {
     expect(invalid.values.lowerRightView == LowerRightView::lyrics, "invalid lower view must fall back");
     expect(invalid.values.rightHeaderPermille == 500, "invalid divider must fall back");
     expect(invalid.values.rightColumnPermille == 230, "invalid right column must fall back");
+    expect(invalid.values.themePreset == ThemePreset::mist, "invalid theme must fall back to mist");
+    expect(invalid.values.colourMode == ColourMode::refrainPreset, "invalid colour mode must fall back");
 
-    const auto remaining = migrateSettings({3, 1, true, false, false, 1, true, 640, 360});
+    const auto remaining = migrateSettings({5, 1, true, false, false, 1, true, 640, 360, 3, 2});
     expect(remaining.values.timeDisplay == TimeDisplayMode::remaining, "remaining mode must survive");
     expect(!remaining.rewriteKnownValues, "valid current values must not be rewritten");
     expect(remaining.values.lowerRightView == LowerRightView::trackDetails, "details view must survive");
     expect(remaining.values.rightHeaderPermille == 640, "divider position must survive");
     expect(remaining.values.rightColumnPermille == 360, "right column position must survive");
+    expect(remaining.values.themePreset == ThemePreset::ink, "valid theme must survive");
+    expect(remaining.values.colourMode == ColourMode::albumArtwork, "valid colour mode must survive");
+
+    const auto oldRefrain = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 0});
+    const auto oldWindows = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 1});
+    const auto oldColumns = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 2});
+    expect(oldRefrain.values.colourMode == ColourMode::refrainPreset,
+        "version-four Refrain source must map to Refrain preset");
+    expect(oldWindows.values.colourMode == ColourMode::windows,
+        "version-four Windows source must map to Windows");
+    expect(oldColumns.values.colourMode == ColourMode::refrainPreset,
+        "removed Columns UI source must safely map to Refrain preset");
 
     const auto future = migrateSettings({9, 77, false, true, true, 77, false, 999, 999});
     expect(future.versionToKeep == 9, "future version must not be downgraded");

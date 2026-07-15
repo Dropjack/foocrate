@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+  <rect width="1280" height="760" fill="#F7F7F5"/>
+  <text x="48" y="54" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="28" font-weight="600" fill="#202426">Refrain 主题方案 0.1</text>
+  <text x="48" y="84" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="15" fill="#62696C">两套浅色 + 两套深色；每张卡依次展示背景、面板、表面、正文、次要文字、强调、默认列表与错误色。</text>
+
+  <g transform="translate(48 116)">
+    <rect width="570" height="274" rx="18" fill="#EEF4F7" stroke="#C9D4D0"/>
+    <text x="28" y="42" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="23" font-weight="600" fill="#1F2A2A">漫雾青 · Light Mist</text>
+    <text x="28" y="68" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" fill="#63706E">直接继承 ComicPlate 的清冷雾青气质</text>
+    <g transform="translate(28 94)">
+      <rect width="118" height="74" rx="8" fill="#EEF4F7" stroke="#C9D4D0"/><rect x="130" width="118" height="74" rx="8" fill="#F3F5F2"/><rect x="260" width="118" height="74" rx="8" fill="#E4EAE7"/><rect x="390" width="118" height="74" rx="8" fill="#FFFFFF"/>
+      <text x="10" y="96" font-family="Consolas, monospace" font-size="12" fill="#63706E">#EEF4F7</text><text x="140" y="96" font-family="Consolas, monospace" font-size="12" fill="#63706E">#F3F5F2</text><text x="270" y="96" font-family="Consolas, monospace" font-size="12" fill="#63706E">#E4EAE7</text><text x="400" y="96" font-family="Consolas, monospace" font-size="12" fill="#63706E">#FFFFFF</text>
+      <rect y="116" width="118" height="44" rx="8" fill="#1F2A2A"/><rect x="130" y="116" width="118" height="44" rx="8" fill="#63706E"/><rect x="260" y="116" width="118" height="44" rx="8" fill="#4F7F6A"/><rect x="390" y="116" width="54" height="44" rx="8" fill="#2E5FA8"/><rect x="454" y="116" width="54" height="44" rx="8" fill="#B34444"/>
+    </g>
+  </g>
+
+  <g transform="translate(662 116)">
+    <rect width="570" height="274" rx="18" fill="#F4F1EA" stroke="#C9C1B4"/>
+    <text x="28" y="42" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="23" font-weight="600" fill="#252A2E">暖纸橙 · Foobox Paper</text>
+    <text x="28" y="68" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" fill="#6F6B64">保留任务 15 的纸张底色与暖橙播放强调</text>
+    <g transform="translate(28 94)">
+      <rect width="118" height="74" rx="8" fill="#F4F1EA" stroke="#C9C1B4"/><rect x="130" width="118" height="74" rx="8" fill="#EEE9DF"/><rect x="260" width="118" height="74" rx="8" fill="#DDD7CC"/><rect x="390" width="118" height="74" rx="8" fill="#FFFCF7"/>
+      <text x="10" y="96" font-family="Consolas, monospace" font-size="12" fill="#6F6B64">#F4F1EA</text><text x="140" y="96" font-family="Consolas, monospace" font-size="12" fill="#6F6B64">#EEE9DF</text><text x="270" y="96" font-family="Consolas, monospace" font-size="12" fill="#6F6B64">#DDD7CC</text><text x="400" y="96" font-family="Consolas, monospace" font-size="12" fill="#6F6B64">#FFFCF7</text>
+      <rect y="116" width="118" height="44" rx="8" fill="#252A2E"/><rect x="130" y="116" width="118" height="44" rx="8" fill="#6F6B64"/><rect x="260" y="116" width="118" height="44" rx="8" fill="#E7A43B"/><rect x="390" y="116" width="54" height="44" rx="8" fill="#586D8F"/><rect x="454" y="116" width="54" height="44" rx="8" fill="#A8443A"/>
+    </g>
+  </g>
+
+  <g transform="translate(48 430)">
+    <rect width="570" height="274" rx="18" fill="#151B1A" stroke="#3B4843"/>
+    <text x="28" y="42" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="23" font-weight="600" fill="#EDF4F0">松影深色 · Pine Night</text>
+    <text x="28" y="68" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" fill="#AEBBB5">Light Mist 的深色同系版本，克制而低刺激</text>
+    <g transform="translate(28 94)">
+      <rect width="118" height="74" rx="8" fill="#151B1A" stroke="#3B4843"/><rect x="130" width="118" height="74" rx="8" fill="#1D2623"/><rect x="260" width="118" height="74" rx="8" fill="#27322E"/><rect x="390" width="118" height="74" rx="8" fill="#303C37"/>
+      <text x="10" y="96" font-family="Consolas, monospace" font-size="12" fill="#AEBBB5">#151B1A</text><text x="140" y="96" font-family="Consolas, monospace" font-size="12" fill="#AEBBB5">#1D2623</text><text x="270" y="96" font-family="Consolas, monospace" font-size="12" fill="#AEBBB5">#27322E</text><text x="400" y="96" font-family="Consolas, monospace" font-size="12" fill="#AEBBB5">#303C37</text>
+      <rect y="116" width="118" height="44" rx="8" fill="#EDF4F0"/><rect x="130" y="116" width="118" height="44" rx="8" fill="#AEBBB5"/><rect x="260" y="116" width="118" height="44" rx="8" fill="#6FA58C"/><rect x="390" y="116" width="54" height="44" rx="8" fill="#7FA8D9"/><rect x="454" y="116" width="54" height="44" rx="8" fill="#E27878"/>
+    </g>
+  </g>
+
+  <g transform="translate(662 430)">
+    <rect width="570" height="274" rx="18" fill="#111820" stroke="#394958"/>
+    <text x="28" y="42" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="23" font-weight="600" fill="#F0F4F7">靛夜琥珀 · Ink Night</text>
+    <text x="28" y="68" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" fill="#AAB7C2">深蓝灰底配琥珀强调，适合长时间夜间播放</text>
+    <g transform="translate(28 94)">
+      <rect width="118" height="74" rx="8" fill="#111820" stroke="#394958"/><rect x="130" width="118" height="74" rx="8" fill="#18232E"/><rect x="260" width="118" height="74" rx="8" fill="#21303D"/><rect x="390" width="118" height="74" rx="8" fill="#2B3A48"/>
+      <text x="10" y="96" font-family="Consolas, monospace" font-size="12" fill="#AAB7C2">#111820</text><text x="140" y="96" font-family="Consolas, monospace" font-size="12" fill="#AAB7C2">#18232E</text><text x="270" y="96" font-family="Consolas, monospace" font-size="12" fill="#AAB7C2">#21303D</text><text x="400" y="96" font-family="Consolas, monospace" font-size="12" fill="#AAB7C2">#2B3A48</text>
+      <rect y="116" width="118" height="44" rx="8" fill="#F0F4F7"/><rect x="130" y="116" width="118" height="44" rx="8" fill="#AAB7C2"/><rect x="260" y="116" width="118" height="44" rx="8" fill="#E4A94F"/><rect x="390" y="116" width="54" height="44" rx="8" fill="#7FB1E3"/><rect x="454" y="116" width="54" height="44" rx="8" fill="#E27972"/>
+    </g>
+  </g>
+</svg>

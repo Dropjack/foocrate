@@ -10,6 +10,7 @@
 #include <array>
 #include <cwctype>
 #include <mutex>
+#include <optional>
 
 namespace refrain {
 namespace {
@@ -32,6 +33,10 @@ constexpr GUID kRightHeaderPermilleGuid{
     0x6434bf69, 0x3e63, 0x4f17, {0x86, 0x44, 0xa1, 0xd1, 0xe3, 0x20, 0xf1, 0x4c}};
 constexpr GUID kRightColumnPermilleGuid{
     0x522cd19f, 0x70dc, 0x4b8b, {0x9b, 0x65, 0x28, 0xe2, 0xd2, 0x3d, 0xf7, 0xa1}};
+constexpr GUID kThemePresetGuid{
+    0xb2c4668f, 0x124c, 0x4f8b, {0xa0, 0x28, 0x6a, 0xea, 0xbb, 0xc3, 0xde, 0xe7}};
+constexpr GUID kColourModeGuid{
+    0xac92cbe4, 0xd155, 0x486e, {0x8b, 0x7f, 0xd6, 0x1d, 0x7c, 0xa1, 0x65, 0xc5}};
 constexpr GUID kPlaylistViewSettingsGuid{
     0xd8a6f36a, 0x474c, 0x4fd6, {0x89, 0x3f, 0x08, 0x8e, 0xcc, 0x83, 0xa4, 0xa2}};
 constexpr GUID kAlbumSourceKindGuid{
@@ -58,6 +63,10 @@ cfg_int g_lowerRightView(kLowerRightViewGuid, static_cast<std::int64_t>(LowerRig
 cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
 cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
 cfg_int g_rightColumnPermille(kRightColumnPermilleGuid, 230);
+cfg_int g_themePreset(kThemePresetGuid, static_cast<std::int64_t>(ThemePreset::mist));
+// Zero is the version-4 Refrain value. First-run version-0 migration rewrites it to
+// the version-5 Refrain preset value without ever selecting Windows accidentally.
+cfg_int g_colourMode(kColourModeGuid, 0);
 cfg_string g_playlistViewSettings(kPlaylistViewSettingsGuid, "");
 cfg_bool g_albumSourceLibrary(kAlbumSourceKindGuid, false);
 cfg_guid g_albumSourcePlaylist(kAlbumSourcePlaylistGuid, GUID{});
@@ -69,6 +78,8 @@ cfg_int g_playlistBrowserSplit(kPlaylistBrowserSplitGuid, 150);
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
+std::mutex g_previewMutex;
+std::optional<std::pair<HWND, SettingsValues>> g_settingsPreview;
 
 [[nodiscard]] std::wstring utf8ToWide(const char* text) {
     if (text == nullptr || *text == '\0') {
@@ -103,7 +114,8 @@ void notifySettingsWindows() {
 SettingsValues readSettings() {
     const StoredSettings stored{g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(),
         g_showSettingsButton.get(), g_lyricsAutoSwitch.get(), g_lowerRightView.get(),
-        g_showReplayGain.get(), g_rightHeaderPermille.get(), g_rightColumnPermille.get()};
+        g_showReplayGain.get(), g_rightHeaderPermille.get(), g_rightColumnPermille.get(),
+        g_themePreset.get(), g_colourMode.get()};
     const auto migration = migrateSettings(stored);
     if (migration.rewriteKnownValues) {
         g_timeDisplay = static_cast<t_int32>(migration.values.timeDisplay);
@@ -114,16 +126,28 @@ SettingsValues readSettings() {
         g_showReplayGain = migration.values.showReplayGain;
         g_rightHeaderPermille = static_cast<t_int32>(migration.values.rightHeaderPermille);
         g_rightColumnPermille = static_cast<t_int32>(migration.values.rightColumnPermille);
+        g_themePreset = static_cast<t_int32>(migration.values.themePreset);
+        g_colourMode = static_cast<t_int32>(migration.values.colourMode);
         g_configVersion = static_cast<t_int32>(migration.versionToKeep);
     }
     return migration.values;
+}
+
+SettingsValues readEffectiveSettings() {
+    {
+        std::scoped_lock lock(g_previewMutex);
+        if (g_settingsPreview && IsWindow(g_settingsPreview->first)) return g_settingsPreview->second;
+        if (g_settingsPreview) g_settingsPreview.reset();
+    }
+    return readSettings();
 }
 
 void writeSettings(const SettingsValues& values) {
     const auto normalized = migrateSettings({kCurrentSettingsVersion,
         static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
         values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView),
-        values.showReplayGain, values.rightHeaderPermille, values.rightColumnPermille});
+        values.showReplayGain, values.rightHeaderPermille, values.rightColumnPermille,
+        static_cast<std::int64_t>(values.themePreset), static_cast<std::int64_t>(values.colourMode)});
     g_timeDisplay = static_cast<t_int32>(normalized.values.timeDisplay);
     g_showTooltips = normalized.values.showTooltips;
     g_showSettingsButton = normalized.values.showSettingsButton;
@@ -132,8 +156,36 @@ void writeSettings(const SettingsValues& values) {
     g_showReplayGain = normalized.values.showReplayGain;
     g_rightHeaderPermille = static_cast<t_int32>(normalized.values.rightHeaderPermille);
     g_rightColumnPermille = static_cast<t_int32>(normalized.values.rightColumnPermille);
+    g_themePreset = static_cast<t_int32>(normalized.values.themePreset);
+    g_colourMode = static_cast<t_int32>(normalized.values.colourMode);
     g_configVersion = static_cast<t_int32>(std::max<std::int64_t>(g_configVersion.get(), kCurrentSettingsVersion));
     notifySettingsWindows();
+}
+
+void setSettingsPreview(HWND owner, const SettingsValues& values) {
+    if (!owner || !IsWindow(owner)) return;
+    const auto normalized = migrateSettings({kCurrentSettingsVersion,
+        static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
+        values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView), values.showReplayGain,
+        values.rightHeaderPermille, values.rightColumnPermille, static_cast<std::int64_t>(values.themePreset),
+        static_cast<std::int64_t>(values.colourMode)}).values;
+    {
+        std::scoped_lock lock(g_previewMutex);
+        g_settingsPreview = std::pair{owner, normalized};
+    }
+    notifySettingsWindows();
+}
+
+void clearSettingsPreview(HWND owner) noexcept {
+    bool changed{};
+    {
+        std::scoped_lock lock(g_previewMutex);
+        if (g_settingsPreview && g_settingsPreview->first == owner) {
+            g_settingsPreview.reset();
+            changed = true;
+        }
+    }
+    if (changed) notifySettingsWindows();
 }
 
 PlaylistViewSettings readPlaylistViewSettings() {
