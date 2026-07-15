@@ -1999,9 +1999,8 @@ private:
             beginOutgoingPlaylistDrag(wnd);
             return;
         }
-        if (!playlistCanReorder()) {
-            cancelInteraction();
-            showStatus(L"This playlist does not allow item reordering.");
+        if (playlistDragStartMode(playlistCanReorder()) == PlaylistDragStartMode::outgoingCopy) {
+            beginOutgoingPlaylistDrag(wnd);
             return;
         }
         m_playlistInsertion = playlistInsertionAt(wnd, point);
@@ -2660,7 +2659,7 @@ private:
     }
 
     bool createAutoplaylist(const std::wstring& requestedName, const char* query) {
-        constexpr const char* sort = "%album% | %discnumber% | %tracknumber% | %title%";
+        constexpr const char* sort = kAlbumArtistYearAlbumSort;
         try {
             (void)search_filter_manager::get()->create(query);
             const auto name = uniqueBrowserName(requestedName);
@@ -2849,7 +2848,10 @@ private:
         const auto client = clientPointFromScreen(point);
         const auto layout = calculateLayout(get_wnd());
         const auto queueTarget = m_queueMode && contains(layout.queuePanel, client) && m_externalDropNative;
-        const auto playlistTarget = contains(layout.playlistArea, client) && playlistCanAdd(m_activePlaylist);
+        const auto sameSourcePlaylist = m_oleDragFromThisPanel
+            && InlineIsEqualGUID(activePlaylistGuid(), m_playlistDragGuid);
+        const auto playlistTarget = contains(layout.playlistArea, client) && playlistCanAdd(m_activePlaylist)
+            && (!sameSourcePlaylist || playlistCanReorder());
         bool browserTarget{};
         m_externalDropBrowserBlank = false;
         m_externalDropBrowserGuid = GUID{};
@@ -3096,7 +3098,12 @@ private:
         DWORD outEffect = DROPEFFECT_NONE;
         m_oleDropHandledByThisPanel = false;
         m_oleDragFromThisPanel = true;
-        const auto status = DoDragDrop(object.get_ptr(), source.get_ptr(), DROPEFFECT_COPY | DROPEFFECT_MOVE, &outEffect);
+        const auto sourcePlaylist = playlistByGuid(sourceGuid);
+        const auto sourceIsAutoplaylist = sourcePlaylist != SIZE_MAX
+            && autoplaylist_manager::get()->is_client_present(sourcePlaylist);
+        const auto allowedEffects = DROPEFFECT_COPY
+            | (!sourceIsAutoplaylist && playlistCanRemove(sourcePlaylist) ? DROPEFFECT_MOVE : DROPEFFECT_NONE);
+        const auto status = DoDragDrop(object.get_ptr(), source.get_ptr(), allowedEffects, &outEffect);
         m_oleDragFromThisPanel = false;
         if (!m_oleDropHandledByThisPanel && status == DRAGDROP_S_DROP && outEffect == DROPEFFECT_MOVE) {
             const auto playlist = playlistByGuid(sourceGuid);
@@ -3279,7 +3286,8 @@ private:
         if (index >= m_playlistSettings.groups.size()) return;
         const auto& group = m_playlistSettings.groups[index];
         if (group.id == m_playlistSettings.activeGroupId) return;
-        if (!sortActivePlaylist(group.sortFormat)) return;
+        if (shouldPhysicallySortForGroupChange(true, playlistCanReorder(), m_playlistItems.get_count())
+            && !sortActivePlaylist(group.sortFormat)) return;
         m_sortColumnId.clear();
         m_sortDescending = false;
         m_playlistSettings.activeGroupId = group.id;
@@ -3800,6 +3808,7 @@ private:
         const auto height = static_cast<float>(client.bottom - client.top) / dpiScale();
         using PlaybackBarMetrics = layout::PlaybackBarVerticalMetrics;
         const auto top = PlaybackBarMetrics::surfaceTop(height);
+        const auto contentBottom = layout::InteriorChromeMetrics::contentBottom(top);
         const auto seekY = top + PlaybackBarMetrics::seekCenterOffset;
         const auto buttonY = top + PlaybackBarMetrics::buttonTopOffset;
         const auto center = width * 0.5F;
@@ -3984,11 +3993,11 @@ private:
             const auto minBrowser = std::min(180.0F, maxBrowser);
             const auto storedBrowser = width * static_cast<float>(m_playlistBrowserSplitPermille) / 1000.0F;
             const auto browserWidth = std::clamp(storedBrowser, minBrowser, maxBrowser);
-            layout.playlistBrowser = D2D1::RectF(0.0F, 0.0F, browserWidth, top);
+            layout.playlistBrowser = D2D1::RectF(0.0F, 0.0F, browserWidth, contentBottom);
             layout.playlistBrowserHeader = D2D1::RectF(0.0F, 0.0F, browserWidth, headerHeight);
-            layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight, browserWidth, top);
+            layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight, browserWidth, contentBottom);
             layout.playlistBrowserScrollTrack = D2D1::RectF(browserWidth - scrollbarWidth,
-                headerHeight, browserWidth, top);
+                headerHeight, browserWidth, contentBottom);
             const auto browserCapacity = visibleRowCapacity(layout.playlistBrowserBody.bottom
                 - layout.playlistBrowserBody.top, 30.0F);
             const auto browserMaximum = maximumTopRow(m_playlistBrowserRows.size(), browserCapacity);
@@ -4004,16 +4013,16 @@ private:
                     browserThumbTop + browserThumbHeight);
             }
             layout.playlistBrowserDivider = D2D1::RectF(browserWidth - browserDividerHalf, 0.0F,
-                browserWidth + browserDividerHalf, top);
+                browserWidth + browserDividerHalf, contentBottom);
             const auto playlistLeft = browserWidth;
-            layout.playlistArea = D2D1::RectF(playlistLeft, 0.0F, playlistRight, top);
+            layout.playlistArea = D2D1::RectF(playlistLeft, 0.0F, playlistRight, contentBottom);
             layout.playlistHeader = D2D1::RectF(playlistLeft, 0.0F, playlistRight, headerHeight);
             layout.playlistHeaderScrollbarGutter = D2D1::RectF(playlistRight - scrollbarWidth,
                 0.0F, playlistRight, headerHeight);
             layout.playlistBody = D2D1::RectF(playlistLeft, headerHeight,
-                playlistRight - scrollbarWidth, top);
+                playlistRight - scrollbarWidth, contentBottom);
             layout.playlistScrollTrack = D2D1::RectF(playlistRight - scrollbarWidth,
-                headerHeight, playlistRight, top);
+                headerHeight, playlistRight, contentBottom);
             const auto rowHeight = playlistRowHeight();
             const auto capacity = visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, rowHeight);
             const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);

@@ -30,6 +30,8 @@ int main()
     static_assert(Chrome::scrollbarVisualWidth < Chrome::scrollbarHitWidth);
     static_assert(Chrome::scrollbarHideDelayMs == 1000);
     static_assert(Chrome::rightPanelMinWidth < Chrome::rightPanelMaxWidth);
+    static_assert(Chrome::contentBottom(432.0F) == 431.0F);
+    static_assert(Chrome::contentBottom(0.5F) == 0.0F);
 
     static_assert(Header::artworkSize(280.0F, 400.0F) == 280.0F);
     static_assert(Header::artworkLeft(1000.0F, 280.0F, 280.0F) == 1000.0F);

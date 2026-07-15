@@ -3,14 +3,14 @@
 int main() {
     using namespace refrain;
 
-    if (visibleRowCapacity(100.0F, 25.0F) != 5) return 1;
+    if (visibleRowCapacity(100.0F, 25.0F) != 4) return 1;
     if (visibleRowCapacity(0.0F, 25.0F) != 0) return 2;
     if (maximumTopRow(100, 10) != 90) return 3;
     if (maximumTopRow(5, 10) != 0) return 4;
     if (clampTopRow(99, 100, 10) != 90) return 5;
 
     const auto rows = visibleRows(10, 100, 100.0F, 25.0F);
-    if (rows.first != 9 || rows.end != 16) return 6;
+    if (rows.first != 9 || rows.end != 15) return 6;
     if (ensureRowVisible(10, 9, 100, 5) != 9) return 7;
     if (ensureRowVisible(10, 14, 100, 5) != 10) return 8;
     if (ensureRowVisible(10, 15, 100, 5) != 11) return 9;

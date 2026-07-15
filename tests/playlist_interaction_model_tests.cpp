@@ -19,6 +19,11 @@ void expect(bool value, const char* message) {
 int main() {
     using namespace refrain;
 
+    expect(playlistDragStartMode(true) == PlaylistDragStartMode::internalReorder,
+        "a reorderable playlist must begin with internal drag handling");
+    expect(playlistDragStartMode(false) == PlaylistDragStartMode::outgoingCopy,
+        "a locked autoplaylist must begin an outgoing copy drag instead of cancelling");
+
     const auto contiguous = planPlaylistMove(6, {1, 2}, 5);
     expect(contiguous.order == std::vector<std::size_t>({0, 3, 4, 1, 2, 5}),
         "contiguous selection must preserve relative order");

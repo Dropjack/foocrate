@@ -57,6 +57,12 @@ struct InteriorChromeMetrics {
     static constexpr unsigned scrollbarHideDelayMs = 1000;
     static constexpr float rightPanelMinWidth = 280.0F;
     static constexpr float rightPanelMaxWidth = 440.0F;
+
+    [[nodiscard]] static constexpr float contentBottom(float playbackSurfaceTop) noexcept
+    {
+        return playbackSurfaceTop > dividerVisualWidth
+            ? playbackSurfaceTop - dividerVisualWidth : 0.0F;
+    }
 };
 
 struct NowPlayingHeaderMetrics {

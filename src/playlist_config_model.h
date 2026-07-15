@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -14,6 +15,16 @@ enum class GroupArtworkSource : std::int32_t { front = 0, artist = 1, placeholde
 enum class ColumnAlignment : std::int32_t { leading = 0, center = 1, trailing = 2 };
 enum class TrackRowLayout : std::int32_t { compact = 0, standard = 1, twoLine = 2 };
 enum class GroupHeaderStyle : std::int32_t { detailed = 0, compactLine = 1 };
+
+inline constexpr char kAlbumArtistYearAlbumSort[] =
+    "%album artist% | $if(%album%,%date%,'9999') | %album% | %discnumber% | %tracknumber% | %title%";
+
+// Group selection is always a valid visual operation. Physical sorting is only an
+// optional preparation step for playlists whose owner permits item reordering.
+[[nodiscard]] constexpr bool shouldPhysicallySortForGroupChange(
+    bool groupChanged, bool canReorder, std::size_t itemCount) noexcept {
+    return groupChanged && canReorder && itemCount > 1;
+}
 
 struct GroupDefinition {
     std::string id;
@@ -92,12 +103,12 @@ inline constexpr std::int32_t kPlaylistViewSettingsVersion = 2;
             GroupArtworkSource::front, true},
         {"builtin.album.disc", "Album Artist / Album / Disc",
             "$if2(%album artist%,'Unknown artist')|$if2(%album%,'Single')|$if2(%discnumber%,1)",
-            "%album artist% | $if(%album%,%date%,'9999') | %album% | %discnumber% | %tracknumber% | %title%",
+            kAlbumArtistYearAlbumSort,
             "$if2(%album%,'Single')$ifgreater(%totaldiscs%,1,' - Disc '$if2(%discnumber%,1),)",
             "$if(%year%,%year%,' ')", "$if2(%album artist%,'Unknown artist')", "$if2(%genre%,' ')",
             GroupArtworkSource::front, true},
         {"builtin.albumartist", "Album Artist", "$if2(%album artist%,'Unknown artist')",
-            "%album artist% | $if(%album%,%date%,'9999') | %album% | %discnumber% | %tracknumber% | %title%",
+            kAlbumArtistYearAlbumSort,
             "$if2(%album artist%,'Unknown artist')", "$if2(%genre%,' ')", "", "",
             GroupArtworkSource::artist, true},
         {"builtin.artist", "Artist", "$if2(%artist%,'Unknown artist')",

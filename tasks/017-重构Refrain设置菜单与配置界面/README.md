@@ -1,6 +1,6 @@
 # 017-重构 Refrain 设置菜单与配置界面
 
-- 状态：已验收
+- 状态：实现中（验收后回归修复）
 - 对应规格：[`../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md`](../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md) 0.4（已批准）
 - 前置任务：[`../016-实现深浅主题与强调色系统/README.md`](../016-实现深浅主题与强调色系统/README.md)（已提交为 `bfcd5a4 实现深浅主题与强调色系统`）
 - Fork 提交标题：`重构 Refrain 设置菜单与配置界面`
@@ -118,6 +118,14 @@
 - 2026-07-15：用户验收清单第 1、2 项仍不通过：Now Playing 的 Playback statistics 越界，Groups 单行过厚；Layout profiles 使用下拉框导致排序结果不可见，删除与页面下滚冲突。规格升级到 0.4：详情区段改为 3+2 两行；Groups 使用更紧凑的 34 DIP 行节距；Profile 改为最多显示 5 行、可独立滚轮滚动的真实列表，并增加独立名称编辑框；整个设置页在高度不足时仍可外层滚动。Group 系统行为问题另行复现，本轮不猜测修复。
 - 2026-07-15：完成上述界面收敛。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新 Release 包写入 `dist/Refrain-0.1.0.fb2k-component`，SHA-256 为 `F40B95F33E2AF19CC41037C284C9F1E7E25CF3EF04254180B819E8D67A46E727`。等待用户实机检查两层滚动、五行 Profile 列表和紧凑 Groups 页面；Group 系统行为仍按用户决定留待后续单独复现。
 - 2026-07-15：用户完成最终实机检查，确认越界、Profile 五行列表与双层滚动、Move/Delete、Groups 紧凑布局及本任务其余功能均无问题，并明确宣布任务 17 验收通过。任务状态划为已验收，等待用户以 `重构 Refrain 设置菜单与配置界面` 提交 Fork。
+- 2026-07-15：用户提交 `e529b8d 重构 Refrain 设置菜单与配置界面` 后发现验收遗漏：Auto Playlist 切换 Group 会弹出“不允许重排”并拒绝应用。任务 17 暂时重新打开。根因是设置页 Apply 与 Playlist View 表头菜单都把 Group 切换错误地绑定为必须物理排序；修正规则为普通列表继续物理排序，只读/自动列表保留来源顺序并直接视觉分组。
+- 2026-07-15：上述两条入口均已修复，并新增模型回归检查，保证锁定 Auto Playlist 跳过物理排序但不阻止视觉 Group。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包为 `dist/Refrain-0.1.0.fb2k-component`，SHA-256 `A731521AD5D991209F00B78B4B873AFFB685094EF0B1C65FE9040F68718595CD`。等待用户复验 Auto Playlist 表头 Group、Preferences Apply、自动更新保持以及普通列表排序回归。
+- 2026-07-15：用户确认 Auto Playlist 分组修复通过，随后发现同一锁判断会在指针仍位于 Playlist View 内时取消整次拖拽。批准边界为 Auto Playlist 可作为只复制的拖拽来源，可拖到 Queue、其他普通列表或外部目标；只禁止同一 Auto Playlist 内部重排以及向 Auto Playlist 写入。
+- 2026-07-15：拖拽启动逻辑已拆分：可重排来源保持内部拖动，Auto Playlist 达到拖拽阈值后直接启动 OLE Copy；同源 Auto Playlist 目标被拒绝，外部 Move 也不再暴露。新增交互模型回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `4A1EC9304093711889EE4CBA4A12CA7711E4B9021B524B3EA75FC9F1589572B2`，等待用户复验 Queue、其他普通列表、同源禁止与普通列表内部重排。
+- 2026-07-15：用户进一步核对 Group 与排序语义。确认内置 `Album Artist / Album / Disc` 已按 Album Artist → Date/Year → Album → Disc → Track 排序，但 Refrain 新建 Auto Playlist 仍使用 Album → Disc → Track。两处现统一复用同一默认排序常量；已有 Auto Playlist 保持来源配置，由用户在 Properties 中按需修改，禁止静默迁移。
+- 2026-07-15：默认排序统一完成并加入回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `CF479C7B92ACCAE10E8E7EB4F8542EEC9B1987CB26D022188F43610800058082`。等待用户验证新建 Auto Playlist 的默认顺序，并在现有 Auto Playlist Properties 中按相同表达式调整一次。
+- 2026-07-15：用户截图发现 Playlist View 最后一行与底部播放控制栏重合。根因是可见容量额外计入一行部分行，且 Playlist Body 与播放栏分隔线共用同一底边。修正规则为只计算完整行，并在 1 DIP 播放栏分隔线上方结束 Playlist View、Playlist Browser 与其滚动轨道。
+- 2026-07-15：底边与完整行容量修复完成，并为 1 DIP 内容底边和整行容量增加回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `EE7E1456A0626E0BCB9C2B067BAB1F58653EA2706AAF71CAA46DB5635B16BE9A`，等待用户在 Two-line、Standard/Compact 和窗口缩放下复验最底行。
 
 ## 改动文件
 

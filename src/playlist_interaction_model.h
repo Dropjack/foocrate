@@ -8,6 +8,13 @@
 
 namespace refrain {
 
+enum class PlaylistDragStartMode { internalReorder, outgoingCopy };
+
+[[nodiscard]] constexpr PlaylistDragStartMode playlistDragStartMode(bool sourceCanReorder) noexcept {
+    return sourceCanReorder ? PlaylistDragStartMode::internalReorder
+                            : PlaylistDragStartMode::outgoingCopy;
+}
+
 [[nodiscard]] inline std::vector<std::size_t> selectedIndexes(
     const std::vector<bool>& selected, std::size_t count) {
     std::vector<std::size_t> result;

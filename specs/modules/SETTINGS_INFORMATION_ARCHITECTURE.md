@@ -1,7 +1,7 @@
 # Refrain 设置项与信息架构规格草案
 
-- 状态：已验收
-- 版本：0.4
+- 状态：实现中（验收后回归修复）
+- 版本：0.8
 - 最后更新：2026-07-15
 - 对应任务：`17 重构 Refrain 设置菜单与配置界面`
 
@@ -292,3 +292,7 @@ Playlist View / Groups 与 Columns 使用已批准的完整管理操作和宽编
 20. Artwork View 右键提供 Front Cover / Back Cover / Disc / Artist 与 `Pin current artwork`；缺失来源禁用。取消固定后恢复 Preferences 中的轮播开关、来源掩码和间隔。
 21. Now Playing & Details 的五个 Track Details 区段按 3+2 两行排列，长文案不得越过页面右边界；页面高度不足时提供整体纵向滚动。
 22. Groups 编辑行压缩为约 34 DIP 节距、25 DIP 输入框，保留完整标签和编辑宽度；Playlist View 外层在高度不足时纵向滚动，Layout profile 的五行列表仍保持自己的独立滚动。
+23. 切换 Group 不得以播放列表允许物理重排为前提。普通可重排播放列表继续使用 Group 的 `Sort` 整理曲目；Auto Playlist 或其他禁止重排的列表保留来源自身顺序，只切换视觉分组，不修改自动列表查询、排序配置或锁状态，也不显示“无法重排”错误。
+24. Auto Playlist 允许作为拖拽来源：选中曲目可拖到 Playback Queue、其他普通播放列表或外部兼容目标。由于来源由查询自动维护，拖拽只提供 Copy，不从 Auto Playlist 删除项目；拖回同一个 Auto Playlist 的内部重排和向任何 Auto Playlist 写入仍然禁止。
+25. `Album Artist / Album / Disc` 的默认 Sort 为 Album Artist → Date/Year → Album → Disc → Track → Title；Refrain 新建 Auto Playlist 使用同一默认 Sort。已有 Auto Playlist 的来源规则不静默迁移，用户通过该列表 Properties 修改一次 Sort，避免组件擅自改写查询配置。
+26. Playlist View 与底部播放控制栏之间保留严格 1 DIP 分隔边界；可见行容量只计算完整行，不能把被底边裁掉的部分行当作可见行。Two-line 等任意密度的最后一行必须完整显示，否则留到后续滚动位置。

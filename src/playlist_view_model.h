@@ -13,7 +13,7 @@ struct VisibleRows {
 
 [[nodiscard]] constexpr std::size_t visibleRowCapacity(float viewportHeight, float rowHeight) noexcept {
     if (viewportHeight <= 0.0F || rowHeight <= 0.0F) return 0;
-    return static_cast<std::size_t>(viewportHeight / rowHeight) + 1;
+    return std::max<std::size_t>(1, static_cast<std::size_t>(viewportHeight / rowHeight));
 }
 
 [[nodiscard]] constexpr std::size_t maximumTopRow(

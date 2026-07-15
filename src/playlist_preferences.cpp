@@ -106,16 +106,13 @@ public:
         const auto groupingChanged = newGroup != m_draft.groups.end()
             && (oldGroup == m_initial.groups.end() || oldGroup->id != newGroup->id
                 || oldGroup->keyFormat != newGroup->keyFormat || oldGroup->sortFormat != newGroup->sortFormat);
-        if (groupingChanged) {
+        if (groupingChanged && newGroup != m_draft.groups.end()) {
             auto api = playlist_manager::get();
             const auto playlist = api->get_active_playlist();
-            if (playlist != SIZE_MAX && api->playlist_get_item_count(playlist) > 1) {
-                if (api->playlist_lock_is_present(playlist)
-                    && (api->playlist_lock_get_filter_mask(playlist) & playlist_lock::filter_reorder) != 0) {
-                    MessageBoxW(m_window, L"The active playlist does not allow reordering, so the grouping change was not applied.",
-                        L"Refrain", MB_OK | MB_ICONINFORMATION);
-                    return;
-                }
+            const auto itemCount = playlist == SIZE_MAX ? 0 : api->playlist_get_item_count(playlist);
+            const auto canReorder = playlist != SIZE_MAX && (!api->playlist_lock_is_present(playlist)
+                || (api->playlist_lock_get_filter_mask(playlist) & playlist_lock::filter_reorder) == 0);
+            if (shouldPhysicallySortForGroupChange(true, canReorder, itemCount)) {
                 api->playlist_undo_backup(playlist);
                 if (!api->playlist_sort_by_format(playlist, newGroup->sortFormat.c_str(), false)) {
                     MessageBoxW(m_window, L"foobar2000 could not sort the active playlist, so the grouping change was not applied.",
