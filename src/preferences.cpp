@@ -27,6 +27,7 @@ enum ControlId : int {
     themePreset = 1008,
     dependencyStatusBase = 1100,
     dependencyButtonBase = 1200,
+    trackActivation = 1300,
 };
 
 class SettingsPageInstance : public preferences_page_instance {
@@ -75,14 +76,21 @@ public:
 
     void apply() override {
         m_draft = readDraftFromControls();
-        writeSettings(m_draft);
+        auto merged = readSettings();
+        merged.timeDisplay = m_draft.timeDisplay; merged.showTooltips = m_draft.showTooltips;
+        merged.showSettingsButton = m_draft.showSettingsButton; merged.trackActivation = m_draft.trackActivation;
+        merged.colourMode = m_draft.colourMode; merged.themePreset = m_draft.themePreset;
+        writeSettings(merged); m_draft = merged;
         clearSettingsPreview(m_window);
         m_initial = m_draft;
         notifyChanged();
     }
 
     void reset() override {
-        m_draft = defaultSettings();
+        const auto defaults = defaultSettings();
+        m_draft.timeDisplay = defaults.timeDisplay; m_draft.showTooltips = defaults.showTooltips;
+        m_draft.showSettingsButton = defaults.showSettingsButton; m_draft.trackActivation = defaults.trackActivation;
+        m_draft.colourMode = defaults.colourMode; m_draft.themePreset = defaults.themePreset;
         writeDraftToControls();
         previewDraft();
         notifyChanged();
@@ -160,6 +168,11 @@ private:
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showTooltips);
         m_settingsButton = addControl(L"BUTTON", L"Show settings button",
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showSettingsButton);
+        m_trackActivationLabel = addControl(L"STATIC", L"Activate track (double-click or Enter):", SS_LEFT, 0);
+        m_trackActivation = addControl(L"COMBOBOX", nullptr,
+            CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::trackActivation);
+        for (const auto* value : {L"Play", L"Add to queue"})
+            SendMessageW(m_trackActivation, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
 
         m_lyricsGroup = addControl(L"BUTTON", L"Lyrics and track details", BS_GROUPBOX, 0);
         m_lyricsAutoSwitch = addControl(L"BUTTON", L"Automatically show lyrics while playing",
@@ -220,23 +233,29 @@ private:
         const auto margin16 = scaled(16);
         const auto margin24 = scaled(24);
         const auto contentWidth = (width > scaled(32)) ? width - scaled(32) : 1;
-        MoveWindow(m_generalGroup, margin8, margin8, width > margin16 ? width - margin16 : 1, scaled(130), TRUE);
+        MoveWindow(m_generalGroup, margin8, margin8, width > margin16 ? width - margin16 : 1, scaled(170), TRUE);
         MoveWindow(m_timeLabel, margin24, scaled(34), scaled(120), scaled(22), TRUE);
         MoveWindow(m_timeMode, scaled(150), scaled(30), scaled(170), scaled(200), TRUE);
         MoveWindow(m_tooltips, margin24, scaled(66), scaled(250), scaled(24), TRUE);
         MoveWindow(m_settingsButton, margin24, scaled(98), scaled(250), scaled(24), TRUE);
+        MoveWindow(m_trackActivationLabel, margin24, scaled(130), scaled(240), scaled(22), TRUE);
+        MoveWindow(m_trackActivation, scaled(270), scaled(126), scaled(150), scaled(180), TRUE);
 
+        for (const auto control : {m_lyricsGroup, m_lyricsAutoSwitch, m_lowerViewLabel, m_lowerRightView,
+                m_showReplayGain, m_dependenciesGroup, m_dependencyNote}) ShowWindow(control, SW_HIDE);
+        for (const auto control : m_dependencyLabels) ShowWindow(control, SW_HIDE);
+        for (const auto control : m_dependencyButtons) ShowWindow(control, SW_HIDE);
         MoveWindow(m_lyricsGroup, margin8, scaled(148), width > margin16 ? width - margin16 : 1, scaled(132), TRUE);
         MoveWindow(m_lyricsAutoSwitch, margin24, scaled(174), scaled(330), scaled(24), TRUE);
         MoveWindow(m_lowerViewLabel, margin24, scaled(208), scaled(130), scaled(22), TRUE);
         MoveWindow(m_lowerRightView, scaled(160), scaled(204), scaled(170), scaled(200), TRUE);
         MoveWindow(m_showReplayGain, margin24, scaled(240), scaled(340), scaled(24), TRUE);
 
-        MoveWindow(m_appearanceGroup, margin8, scaled(290), width > margin16 ? width - margin16 : 1, scaled(110), TRUE);
-        MoveWindow(m_colourModeLabel, margin24, scaled(318), scaled(128), scaled(22), TRUE);
-        MoveWindow(m_colourMode, scaled(160), scaled(314), scaled(220), scaled(200), TRUE);
-        MoveWindow(m_themeLabel, margin24, scaled(352), scaled(128), scaled(22), TRUE);
-        MoveWindow(m_themePreset, scaled(160), scaled(348), scaled(220), scaled(200), TRUE);
+        MoveWindow(m_appearanceGroup, margin8, scaled(188), width > margin16 ? width - margin16 : 1, scaled(110), TRUE);
+        MoveWindow(m_colourModeLabel, margin24, scaled(216), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_colourMode, scaled(160), scaled(212), scaled(220), scaled(200), TRUE);
+        MoveWindow(m_themeLabel, margin24, scaled(250), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_themePreset, scaled(160), scaled(246), scaled(220), scaled(200), TRUE);
 
         MoveWindow(m_dependenciesGroup, margin8, scaled(410), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
         for (std::size_t index = 0; index < m_dependencyLabels.size(); ++index) {
@@ -260,6 +279,7 @@ private:
         }
         if ((id == ControlId::timeMode && notification == CBN_SELCHANGE)
             || (id == ControlId::lowerRightView && notification == CBN_SELCHANGE)
+            || (id == ControlId::trackActivation && notification == CBN_SELCHANGE)
             || ((id == ControlId::colourMode || id == ControlId::themePreset)
                 && notification == CBN_SELCHANGE)
             || ((id == ControlId::showTooltips || id == ControlId::showSettingsButton
@@ -274,7 +294,7 @@ private:
     }
 
     [[nodiscard]] SettingsValues readDraftFromControls() const {
-        SettingsValues values;
+        auto values = m_draft;
         const auto selection = SendMessageW(m_timeMode, CB_GETCURSEL, 0, 0);
         values.timeDisplay = selection == 1 ? TimeDisplayMode::remaining : TimeDisplayMode::total;
         values.showTooltips = SendMessageW(m_tooltips, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -283,6 +303,9 @@ private:
         values.lowerRightView = SendMessageW(m_lowerRightView, CB_GETCURSEL, 0, 0) == 1
             ? LowerRightView::trackDetails : LowerRightView::lyrics;
         values.showReplayGain = SendMessageW(m_showReplayGain, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        values.detailsReplayGain = values.showReplayGain;
+        values.trackActivation = SendMessageW(m_trackActivation, CB_GETCURSEL, 0, 0) == 1
+            ? TrackActivationAction::addToQueue : TrackActivationAction::play;
         values.rightHeaderPermille = m_draft.rightHeaderPermille;
         values.rightColumnPermille = m_draft.rightColumnPermille;
         const auto colourMode = SendMessageW(m_colourMode, CB_GETCURSEL, 0, 0);
@@ -306,6 +329,8 @@ private:
             m_draft.lowerRightView == LowerRightView::trackDetails ? 1 : 0, 0);
         SendMessageW(m_showReplayGain, BM_SETCHECK,
             m_draft.showReplayGain ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(m_trackActivation, CB_SETCURSEL,
+            m_draft.trackActivation == TrackActivationAction::addToQueue ? 1 : 0, 0);
         SendMessageW(m_colourMode, CB_SETCURSEL,
             static_cast<WPARAM>(static_cast<std::int64_t>(m_draft.colourMode)), 0);
         SendMessageW(m_themePreset, CB_SETCURSEL,
@@ -344,6 +369,8 @@ private:
     HWND m_timeMode{};
     HWND m_tooltips{};
     HWND m_settingsButton{};
+    HWND m_trackActivationLabel{};
+    HWND m_trackActivation{};
     HWND m_lyricsGroup{};
     HWND m_lyricsAutoSwitch{};
     HWND m_lowerViewLabel{};

@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include <windows.h>
+#include <windowsx.h>
 #include <mmsystem.h>
 #include <objbase.h>
 #include <ole2.h>
@@ -16,10 +17,11 @@ namespace refrain {
 namespace {
 
 enum ControlId : int {
-    groupPreset = 4001, autoCollapse, collapseDefault, copyGroup, deleteGroup,
+    groupPreset = 4001, autoCollapse, collapseDefault, newGroup, copyGroup, groupUp, groupDown, deleteGroup,
     groupKey, groupSort, groupLeftPrimary, groupRightPrimary, groupLeftSecondary,
-    groupRightSecondary, groupArtwork, columnList, columnUp, columnDown, copyColumn,
-    deleteColumn, columnLabel, columnDisplay, columnSort, columnAlignment, columnWidth,
+    groupRightSecondary, groupArtwork, columnList, newColumn, columnUp, columnDown, copyColumn,
+    deleteColumn, columnLabel, columnDisplay, columnSecondary, columnSort, columnAlignment, columnWidth,
+    profilePreset, profileName, newProfile, copyProfile, profileUp, profileDown, deleteProfile, trackRows, headerStyle, tabs,
 };
 
 [[nodiscard]] std::wstring utf8ToWide(const std::string& value) {
@@ -51,7 +53,7 @@ public:
         INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_LISTVIEW_CLASSES};
         InitCommonControlsEx(&controls);
         m_window = CreateWindowExW(0, L"STATIC", nullptr,
-            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VSCROLL,
             0, 0, 0, 0, parent, nullptr, core_api::get_my_instance(), nullptr);
         if (!m_window) throw exception_win32(GetLastError());
         SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -60,6 +62,8 @@ public:
         m_dpi = GetDpiForWindow(m_window);
         createFont();
         createControls();
+        rebuildProfileCombo();
+        loadProfile(assignedProfileIndex());
         rebuildGroupCombo();
         rebuildColumnList();
         const auto active = std::find_if(m_draft.groups.begin(), m_draft.groups.end(), [&](const auto& group) {
@@ -126,7 +130,8 @@ public:
     }
     void reset() override {
         m_draft = defaultPlaylistViewSettings();
-        m_groupIndex = m_columnIndex = static_cast<std::size_t>(-1);
+        m_profileIndex = m_groupIndex = m_columnIndex = static_cast<std::size_t>(-1);
+        rebuildProfileCombo(); loadProfile(0);
         rebuildGroupCombo(); rebuildColumnList(); loadGroup(0); loadColumn(0);
         notifyChanged();
     }
@@ -136,6 +141,20 @@ private:
         auto* self = reinterpret_cast<PlaylistSettingsPageInstance*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (!self || !self->m_originalProc) return DefWindowProcW(window, message, wp, lp);
         if (message == WM_SIZE) { self->layoutControls(); return 0; }
+        if (message == WM_MOUSEWHEEL) {
+            const auto point = POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            if (const auto target = WindowFromPoint(point); target == self->m_profileList) {
+                SendMessageW(target, message, wp, lp); return 0;
+            }
+            self->scrollBy(-GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * self->scaled(48));
+            return 0;
+        }
+        if (message == WM_VSCROLL && lp == 0) { self->onVerticalScroll(LOWORD(wp)); return 0; }
+        if (message == WM_ERASEBKGND) {
+            RECT client{}; GetClientRect(window, &client);
+            FillRect(reinterpret_cast<HDC>(wp), &client, GetSysColorBrush(COLOR_WINDOW));
+            return 1;
+        }
         if (message == WM_COMMAND) { self->onCommand(LOWORD(wp), HIWORD(wp)); return 0; }
         if (message == WM_NOTIFY && self->onNotify(*reinterpret_cast<NMHDR*>(lp))) return 0;
         if (message == WM_NCDESTROY) {
@@ -166,7 +185,10 @@ private:
         m_groupCombo = add(L"COMBOBOX", nullptr, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP, groupPreset);
         m_autoCollapse = add(L"BUTTON", L"Auto-collapse", BS_AUTOCHECKBOX | WS_TABSTOP, autoCollapse);
         m_collapseDefault = add(L"BUTTON", L"Collapse groups by default", BS_AUTOCHECKBOX | WS_TABSTOP, collapseDefault);
-        m_copyGroup = add(L"BUTTON", L"Copy", BS_PUSHBUTTON | WS_TABSTOP, copyGroup);
+        m_newGroup = add(L"BUTTON", L"New", BS_PUSHBUTTON | WS_TABSTOP, newGroup);
+        m_copyGroup = add(L"BUTTON", L"Duplicate", BS_PUSHBUTTON | WS_TABSTOP, copyGroup);
+        m_groupUp = add(L"BUTTON", L"Move up", BS_PUSHBUTTON | WS_TABSTOP, groupUp);
+        m_groupDown = add(L"BUTTON", L"Move down", BS_PUSHBUTTON | WS_TABSTOP, groupDown);
         m_deleteGroup = add(L"BUTTON", L"Delete", BS_PUSHBUTTON | WS_TABSTOP, deleteGroup);
         constexpr std::array<const wchar_t*, 7> groupLabels{L"Group key", L"Sort", L"Title left", L"Title right", L"Subtitle left", L"Subtitle right", L"Artwork"};
         for (const auto* label : groupLabels) m_groupLabels.push_back(add(L"STATIC", label, SS_LEFT, 0));
@@ -187,46 +209,169 @@ private:
         LVCOLUMNW listColumn{LVCF_TEXT | LVCF_WIDTH}; listColumn.cx = scaled(180); listColumn.pszText = const_cast<wchar_t*>(L"Column");
         ListView_InsertColumn(m_columnList, 0, &listColumn); listColumn.cx = scaled(64); listColumn.pszText = const_cast<wchar_t*>(L"Width");
         ListView_InsertColumn(m_columnList, 1, &listColumn);
-        m_columnUp = add(L"BUTTON", L"Up", BS_PUSHBUTTON | WS_TABSTOP, columnUp);
-        m_columnDown = add(L"BUTTON", L"Down", BS_PUSHBUTTON | WS_TABSTOP, columnDown);
-        m_copyColumn = add(L"BUTTON", L"Copy", BS_PUSHBUTTON | WS_TABSTOP, copyColumn);
+        m_newColumn = add(L"BUTTON", L"New", BS_PUSHBUTTON | WS_TABSTOP, newColumn);
+        m_columnUp = add(L"BUTTON", L"Move up", BS_PUSHBUTTON | WS_TABSTOP, columnUp);
+        m_columnDown = add(L"BUTTON", L"Move down", BS_PUSHBUTTON | WS_TABSTOP, columnDown);
+        m_copyColumn = add(L"BUTTON", L"Duplicate", BS_PUSHBUTTON | WS_TABSTOP, copyColumn);
         m_deleteColumn = add(L"BUTTON", L"Delete", BS_PUSHBUTTON | WS_TABSTOP, deleteColumn);
-        constexpr std::array<const wchar_t*, 5> columnLabels{L"Label", L"Display format", L"Sort format", L"Alignment", L"Width weight"};
+        constexpr std::array<const wchar_t*, 6> columnLabels{L"Label", L"Display format", L"Secondary display format", L"Sort format", L"Alignment", L"Width weight"};
         for (const auto* label : columnLabels) m_columnLabels.push_back(add(L"STATIC", label, SS_LEFT, 0));
         m_columnLabel = add(L"EDIT", nullptr, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, columnLabel);
-        m_columnDisplay = add(L"EDIT", nullptr, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, columnDisplay);
-        m_columnSort = add(L"EDIT", nullptr, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, columnSort);
+        m_columnDisplay = add(L"EDIT", nullptr, WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, columnDisplay);
+        m_columnSecondary = add(L"EDIT", nullptr, WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, columnSecondary);
+        m_columnSort = add(L"EDIT", nullptr, WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, columnSort);
         m_columnAlignment = add(L"COMBOBOX", nullptr, CBS_DROPDOWNLIST | WS_TABSTOP, columnAlignment);
         for (const auto* text : {L"Left", L"Center", L"Right"}) SendMessageW(m_columnAlignment, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
         m_columnWidth = add(L"EDIT", nullptr, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, columnWidth);
+
+        m_tabs = add(WC_TABCONTROLW, nullptr, WS_TABSTOP, tabs);
+        for (const auto* text : {L"Layout profiles", L"Groups"}) {
+            TCITEMW item{TCIF_TEXT}; item.pszText = const_cast<wchar_t*>(text); TabCtrl_InsertItem(m_tabs, TabCtrl_GetItemCount(m_tabs), &item);
+        }
+        m_profilesBox = add(L"BUTTON", L"Layout profiles", BS_GROUPBOX, 0);
+        m_profileList = add(L"LISTBOX", nullptr,
+            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_BORDER | WS_VSCROLL | WS_TABSTOP, profilePreset);
+        SendMessageW(m_profileList, LB_SETITEMHEIGHT, 0, scaled(20));
+        m_profileNameLabel = add(L"STATIC", L"Profile name:", SS_LEFT, 0);
+        m_profileName = add(L"EDIT", nullptr, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, profileName);
+        m_newProfile = add(L"BUTTON", L"New", BS_PUSHBUTTON | WS_TABSTOP, newProfile);
+        m_copyProfile = add(L"BUTTON", L"Duplicate", BS_PUSHBUTTON | WS_TABSTOP, copyProfile);
+        m_profileUp = add(L"BUTTON", L"Move up", BS_PUSHBUTTON | WS_TABSTOP, profileUp);
+        m_profileDown = add(L"BUTTON", L"Move down", BS_PUSHBUTTON | WS_TABSTOP, profileDown);
+        m_deleteProfile = add(L"BUTTON", L"Delete", BS_PUSHBUTTON | WS_TABSTOP, deleteProfile);
+        m_trackRowsLabel = add(L"STATIC", L"Track row layout:", SS_LEFT, 0);
+        m_trackRows = add(L"COMBOBOX", nullptr, CBS_DROPDOWNLIST | WS_TABSTOP, trackRows);
+        for (const auto* text : {L"Compact", L"Standard", L"Two-line"}) SendMessageW(m_trackRows, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+        m_headerStyleLabel = add(L"STATIC", L"Group header style:", SS_LEFT, 0);
+        m_headerStyle = add(L"COMBOBOX", nullptr, CBS_DROPDOWNLIST | WS_TABSTOP, headerStyle);
+        for (const auto* text : {L"Detailed", L"Compact line"}) SendMessageW(m_headerStyle, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+        m_formatError = add(L"STATIC", L"", SS_LEFT, 0);
     }
 
-    void layoutControls() const {
+    void layoutControls() {
         if (!m_window) return; RECT client{}; GetClientRect(m_window, &client);
-        const auto width = static_cast<int>(client.right); const auto half = std::max(scaled(280), width / 2);
-        MoveWindow(m_groupBox, scaled(6), scaled(6), half - scaled(9), scaled(430), TRUE);
-        MoveWindow(m_groupCombo, scaled(18), scaled(28), half - scaled(166), scaled(220), TRUE);
-        MoveWindow(m_copyGroup, half - scaled(140), scaled(28), scaled(58), scaled(26), TRUE);
-        MoveWindow(m_deleteGroup, half - scaled(76), scaled(28), scaled(58), scaled(26), TRUE);
-        MoveWindow(m_autoCollapse, scaled(18), scaled(62), scaled(130), scaled(22), TRUE);
-        MoveWindow(m_collapseDefault, scaled(154), scaled(62), scaled(190), scaled(22), TRUE);
+        const auto width = std::max(1, static_cast<int>(client.right));
+        const auto left = scaled(18); const auto right = std::max(left + 1, width - scaled(18));
+        const auto innerWidth = std::max(1, right - left); const auto gap = scaled(6);
+        const auto buttonWidth = std::max(1, (innerWidth - gap * 2) / 3);
+        const auto placeButtons = [&](const std::array<HWND, 5>& buttons, int firstY) {
+            for (std::size_t index = 0; index < buttons.size(); ++index) {
+                const auto row = index / 3; const auto column = index % 3;
+                MoveWindow(buttons[index], left + static_cast<int>(column) * (buttonWidth + gap),
+                    firstY + static_cast<int>(row) * scaled(32), buttonWidth, scaled(26), TRUE);
+            }
+        };
+        const auto contentHeight = selectedTab() == 0 ? scaled(438) : scaled(426);
+        const auto viewportHeight = std::max(1, static_cast<int>(client.bottom));
+        SCROLLINFO info{sizeof(info), SIF_RANGE | SIF_PAGE | SIF_POS};
+        info.nMin = 0; info.nMax = std::max(0, contentHeight - 1);
+        info.nPage = static_cast<UINT>(viewportHeight); info.nPos = m_scrollY;
+        SetScrollInfo(m_window, SB_VERT, &info, TRUE);
+        m_scrollY = std::clamp(m_scrollY, 0, std::max(0, contentHeight - viewportHeight));
+        const auto y = [this](int value) { return scaled(value) - m_scrollY; };
+        MoveWindow(m_tabs, scaled(6), y(6), std::max(1, width - scaled(12)), scaled(28), TRUE);
+        const auto top = y(40);
+        const auto panelHeight = selectedTab() == 0 ? scaled(368) : scaled(356);
+        const auto errorY = selectedTab() == 0 ? y(412) : y(400);
+        MoveWindow(m_formatError, scaled(12), errorY, std::max(1, width - scaled(24)), scaled(22), TRUE);
+
+        MoveWindow(m_profilesBox, scaled(6), top, std::max(1, width - scaled(12)), panelHeight, TRUE);
+        MoveWindow(m_profileList, left, top + scaled(22), innerWidth, scaled(102), TRUE);
+        const std::array<HWND, 5> profileButtons{m_newProfile, m_copyProfile, m_profileUp, m_profileDown, m_deleteProfile};
+        placeButtons(profileButtons, top + scaled(130));
+        MoveWindow(m_profileNameLabel, left, top + scaled(200), scaled(104), scaled(22), TRUE);
+        MoveWindow(m_profileName, left + scaled(110), top + scaled(196), std::max(1, innerWidth - scaled(110)), scaled(26), TRUE);
+        MoveWindow(m_trackRowsLabel, left, top + scaled(232), scaled(132), scaled(22), TRUE);
+        MoveWindow(m_trackRows, left + scaled(138), top + scaled(228), std::max(1, innerWidth - scaled(138)), scaled(180), TRUE);
+        MoveWindow(m_headerStyleLabel, left, top + scaled(264), scaled(132), scaled(22), TRUE);
+        MoveWindow(m_headerStyle, left + scaled(138), top + scaled(260), std::max(1, innerWidth - scaled(138)), scaled(180), TRUE);
+        MoveWindow(m_autoCollapse, left, top + scaled(298), innerWidth, scaled(22), TRUE);
+        MoveWindow(m_collapseDefault, left, top + scaled(326), innerWidth, scaled(22), TRUE);
+
+        const auto panelTop = top;
+        MoveWindow(m_groupBox, scaled(6), panelTop, std::max(1, width - scaled(12)), panelHeight, TRUE);
+        MoveWindow(m_groupCombo, left, panelTop + scaled(20), innerWidth, scaled(220), TRUE);
+        const std::array<HWND, 5> groupButtons{m_newGroup, m_copyGroup, m_groupUp, m_groupDown, m_deleteGroup};
+        placeButtons(groupButtons, panelTop + scaled(50));
         for (std::size_t index = 0; index < m_groupLabels.size(); ++index) {
-            const auto y = scaled(94 + static_cast<int>(index) * 44);
-            MoveWindow(m_groupLabels[index], scaled(18), y, scaled(92), scaled(20), TRUE);
+            const auto fieldY = panelTop + scaled(114 + static_cast<int>(index) * 34);
+            MoveWindow(m_groupLabels[index], left, fieldY, scaled(112), scaled(20), TRUE);
             const auto control = index < m_groupEdits.size() ? m_groupEdits[index] : m_groupArtwork;
-            MoveWindow(control, scaled(112), y - scaled(3), half - scaled(130), index < m_groupEdits.size() ? scaled(25) : scaled(180), TRUE);
+            const auto controlLeft = left + scaled(118);
+            MoveWindow(control, controlLeft, fieldY - scaled(3), std::max(1, right - controlLeft),
+                index < m_groupEdits.size() ? scaled(25) : scaled(180), TRUE);
         }
-        const auto left = half + scaled(3); const auto rightWidth = std::max(scaled(280), width - left - scaled(6));
-        MoveWindow(m_columnsBox, left, scaled(6), rightWidth, scaled(430), TRUE);
-        MoveWindow(m_columnList, left + scaled(12), scaled(28), rightWidth - scaled(104), scaled(196), TRUE);
-        const auto buttonsX = left + rightWidth - scaled(84);
-        for (const auto [control, y] : std::array<std::pair<HWND, int>, 4>{{{m_columnUp, 28}, {m_columnDown, 62}, {m_copyColumn, 116}, {m_deleteColumn, 150}}})
-            MoveWindow(control, buttonsX, scaled(y), scaled(70), scaled(27), TRUE);
-        const std::array<HWND, 5> fields{m_columnLabel, m_columnDisplay, m_columnSort, m_columnAlignment, m_columnWidth};
+        MoveWindow(m_columnsBox, scaled(6), panelTop, std::max(1, width - scaled(12)), panelHeight, TRUE);
+        MoveWindow(m_columnList, left, panelTop + scaled(22), innerWidth, scaled(96), TRUE);
+        const std::array<HWND, 5> columnButtons{m_newColumn, m_copyColumn, m_columnUp, m_columnDown, m_deleteColumn};
+        placeButtons(columnButtons, panelTop + scaled(124));
+        const std::array<HWND, 6> fields{m_columnLabel, m_columnDisplay, m_columnSecondary, m_columnSort, m_columnAlignment, m_columnWidth};
+        const std::array<int, 6> labelY{190, 226, 292, 358, 424, 460};
         for (std::size_t index = 0; index < fields.size(); ++index) {
-            const auto y = scaled(238 + static_cast<int>(index) * 36);
-            MoveWindow(m_columnLabels[index], left + scaled(12), y, scaled(100), scaled(20), TRUE);
-            MoveWindow(fields[index], left + scaled(116), y - scaled(3), rightWidth - scaled(130), index == 3 ? scaled(160) : scaled(25), TRUE);
+            const auto fieldY = panelTop + scaled(labelY[index]);
+            if (index == 0 || index >= 4) {
+                MoveWindow(m_columnLabels[index], left, fieldY, scaled(170), scaled(20), TRUE);
+                const auto fieldLeft = left + scaled(176);
+                MoveWindow(fields[index], fieldLeft, fieldY - scaled(3), std::max(1, right - fieldLeft),
+                    index == 4 ? scaled(160) : scaled(25), TRUE);
+            } else {
+                MoveWindow(m_columnLabels[index], left, fieldY, innerWidth, scaled(20), TRUE);
+                MoveWindow(fields[index], left, fieldY + scaled(20), innerWidth, scaled(42), TRUE);
+            }
+        }
+        updateTabVisibility();
+    }
+
+    void scrollBy(int delta) {
+        RECT client{}; GetClientRect(m_window, &client);
+        const auto contentHeight = selectedTab() == 0 ? scaled(438) : scaled(426);
+        const auto maximum = std::max(0, contentHeight - static_cast<int>(client.bottom));
+        const auto next = std::clamp(m_scrollY + delta, 0, maximum);
+        if (next == m_scrollY) return;
+        m_scrollY = next; layoutControls(); InvalidateRect(m_window, nullptr, TRUE);
+    }
+
+    void onVerticalScroll(int action) {
+        SCROLLINFO info{sizeof(info), SIF_ALL}; GetScrollInfo(m_window, SB_VERT, &info);
+        auto next = m_scrollY;
+        if (action == SB_LINEUP) next -= scaled(24);
+        else if (action == SB_LINEDOWN) next += scaled(24);
+        else if (action == SB_PAGEUP) next -= static_cast<int>(info.nPage);
+        else if (action == SB_PAGEDOWN) next += static_cast<int>(info.nPage);
+        else if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) next = info.nTrackPos;
+        scrollBy(next - m_scrollY);
+    }
+
+    [[nodiscard]] std::size_t selectedTab() const noexcept {
+        const auto selected = TabCtrl_GetCurSel(m_tabs);
+        return static_cast<std::size_t>(std::clamp(selected, 0, 1));
+    }
+
+    void updateTabVisibility() const {
+        const auto selected = selectedTab();
+        const auto setVisible = [](HWND control, bool visible) {
+            SetWindowPos(control, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+                | SWP_NOACTIVATE | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        };
+        const auto profileControls = {m_profilesBox, m_profileList, m_profileNameLabel, m_profileName,
+            m_newProfile, m_copyProfile, m_profileUp, m_profileDown, m_deleteProfile, m_trackRowsLabel, m_trackRows,
+            m_headerStyleLabel, m_headerStyle, m_autoCollapse, m_collapseDefault};
+        const auto groupControls = {m_groupBox, m_groupCombo, m_newGroup, m_copyGroup, m_groupUp,
+            m_groupDown, m_deleteGroup, m_groupArtwork};
+        const auto columnControls = {m_columnsBox, m_columnList, m_newColumn, m_columnUp,
+            m_columnDown, m_copyColumn, m_deleteColumn, m_columnLabel, m_columnDisplay,
+            m_columnSecondary, m_columnSort, m_columnAlignment, m_columnWidth};
+        for (const auto control : profileControls) setVisible(control, false);
+        for (const auto control : groupControls) setVisible(control, false);
+        for (const auto control : m_groupLabels) setVisible(control, false);
+        for (const auto control : m_groupEdits) setVisible(control, false);
+        for (const auto control : columnControls) setVisible(control, false);
+        for (const auto control : m_columnLabels) setVisible(control, false);
+        if (selected == 0) for (const auto control : profileControls) setVisible(control, true);
+        if (selected == 1) {
+            for (const auto control : groupControls) setVisible(control, true);
+            for (const auto control : m_groupLabels) setVisible(control, true);
+            for (const auto control : m_groupEdits) setVisible(control, true);
         }
     }
 
@@ -245,6 +390,57 @@ private:
             const auto label = utf8ToWide(group.label); SendMessageW(m_groupCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         }
     }
+    [[nodiscard]] std::string activePlaylistGuid() const {
+        const auto api = playlist_manager_v5::get(); const auto playlist = api->get_active_playlist();
+        if (playlist == SIZE_MAX) return {};
+        wchar_t text[40]{}; if (!StringFromGUID2(api->playlist_get_guid(playlist), text, 40)) return {};
+        return wideToUtf8(text);
+    }
+    [[nodiscard]] std::size_t assignedProfileIndex() const {
+        const auto guid = activePlaylistGuid();
+        const auto assignment = std::find_if(m_draft.assignments.begin(), m_draft.assignments.end(), [&](const auto& value) { return value.playlistGuid == guid; });
+        const auto id = assignment == m_draft.assignments.end() ? std::string{"builtin.default"} : assignment->profileId;
+        const auto profile = std::find_if(m_draft.profiles.begin(), m_draft.profiles.end(), [&](const auto& value) { return value.id == id; });
+        return profile == m_draft.profiles.end() ? 0 : static_cast<std::size_t>(profile - m_draft.profiles.begin());
+    }
+    void rebuildProfileCombo() {
+        m_updating = true; SendMessageW(m_profileList, LB_RESETCONTENT, 0, 0);
+        for (const auto& profile : m_draft.profiles) {
+            const auto label = utf8ToWide(profile.label);
+            SendMessageW(m_profileList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+        m_updating = false;
+    }
+    void storeProfile() {
+        if (m_updating || m_profileIndex >= m_draft.profiles.size()) return;
+        auto& profile = m_draft.profiles[m_profileIndex];
+        if (!profile.builtIn) profile.label = wideToUtf8(editText(m_profileName));
+        profile.groupId = m_draft.activeGroupId; profile.autoCollapse = m_draft.autoCollapse;
+        profile.collapseByDefault = m_draft.collapseByDefault;
+        const auto rows = SendMessageW(m_trackRows, CB_GETCURSEL, 0, 0);
+        profile.trackRowLayout = rows >= 0 && rows <= 2 ? static_cast<TrackRowLayout>(rows) : TrackRowLayout::standard;
+        profile.groupHeaderStyle = SendMessageW(m_headerStyle, CB_GETCURSEL, 0, 0) == 1
+            ? GroupHeaderStyle::compactLine : GroupHeaderStyle::detailed;
+        profile.columns.clear(); for (const auto& column : m_draft.columns)
+            profile.columns.push_back({column.id, column.visible, column.widthWeight});
+        const auto guid = activePlaylistGuid(); if (!guid.empty()) {
+            std::erase_if(m_draft.assignments, [&](const auto& value) { return value.playlistGuid == guid; });
+            if (profile.id != "builtin.default") m_draft.assignments.push_back({guid, profile.id});
+        }
+    }
+    void loadProfile(std::size_t index) {
+        if (index >= m_draft.profiles.size()) return; m_updating = true; m_profileIndex = index;
+        SendMessageW(m_profileList, LB_SETCURSEL, static_cast<WPARAM>(index), 0);
+        const auto& profile = m_draft.profiles[index];
+        SetWindowTextW(m_profileName, utf8ToWide(profile.label).c_str());
+        SendMessageW(m_profileName, EM_SETREADONLY, profile.builtIn, 0);
+        const auto effective = applyLayoutProfile(m_draft, profile.id);
+        m_draft.activeGroupId = effective.activeGroupId; m_draft.autoCollapse = effective.autoCollapse;
+        m_draft.collapseByDefault = effective.collapseByDefault; m_draft.columns = effective.columns;
+        SendMessageW(m_trackRows, CB_SETCURSEL, static_cast<WPARAM>(profile.trackRowLayout), 0);
+        SendMessageW(m_headerStyle, CB_SETCURSEL, static_cast<WPARAM>(profile.groupHeaderStyle), 0);
+        EnableWindow(m_deleteProfile, !profile.builtIn); m_updating = false;
+    }
     void rebuildColumnList() {
         m_updating = true; ListView_DeleteAllItems(m_columnList);
         for (std::size_t index = 0; index < m_draft.columns.size(); ++index) {
@@ -261,6 +457,7 @@ private:
         m_draft.collapseByDefault = SendMessageW(m_collapseDefault, BM_GETCHECK, 0, 0) == BST_CHECKED;
         for (std::size_t index = 0; index < m_draft.columns.size(); ++index)
             m_draft.columns[index].visible = ListView_GetCheckState(m_columnList, static_cast<int>(index)) != FALSE;
+        storeProfile();
     }
     void storeGroup() {
         if (m_updating || m_groupIndex >= m_draft.groups.size()) return; auto& group = m_draft.groups[m_groupIndex];
@@ -285,6 +482,7 @@ private:
         if (m_updating || m_columnIndex >= m_draft.columns.size()) return; auto& column = m_draft.columns[m_columnIndex];
         if (!column.builtIn) {
             column.label = wideToUtf8(editText(m_columnLabel)); column.displayFormat = wideToUtf8(editText(m_columnDisplay));
+            column.secondaryDisplayFormat = wideToUtf8(editText(m_columnSecondary));
             column.sortFormat = wideToUtf8(editText(m_columnSort)); column.alignment = static_cast<ColumnAlignment>(std::max<LRESULT>(0, SendMessageW(m_columnAlignment, CB_GETCURSEL, 0, 0)));
         }
         const auto width = _wtoi(editText(m_columnWidth).c_str()); if (width > 0) column.widthWeight = width;
@@ -292,52 +490,74 @@ private:
     void loadColumn(std::size_t index) {
         if (index >= m_draft.columns.size()) return; m_updating = true; m_columnIndex = index; const auto& column = m_draft.columns[index];
         ListView_SetItemState(m_columnList, static_cast<int>(index), LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-        setEdit(m_columnLabel, column.label); setEdit(m_columnDisplay, column.displayFormat); setEdit(m_columnSort, column.sortFormat); SetWindowTextW(m_columnWidth, std::to_wstring(column.widthWeight).c_str());
+        setEdit(m_columnLabel, column.label); setEdit(m_columnDisplay, column.displayFormat);
+        setEdit(m_columnSecondary, column.secondaryDisplayFormat); setEdit(m_columnSort, column.sortFormat); SetWindowTextW(m_columnWidth, std::to_wstring(column.widthWeight).c_str());
         SendMessageW(m_columnAlignment, CB_SETCURSEL, static_cast<int>(column.alignment), 0);
-        for (const auto edit : {m_columnLabel, m_columnDisplay, m_columnSort}) SendMessageW(edit, EM_SETREADONLY, column.builtIn, 0);
+        for (const auto edit : {m_columnLabel, m_columnDisplay, m_columnSecondary, m_columnSort}) SendMessageW(edit, EM_SETREADONLY, column.builtIn, 0);
         EnableWindow(m_columnAlignment, !column.builtIn); EnableWindow(m_deleteColumn, !column.builtIn && !column.cover); m_updating = false;
     }
 
-    [[nodiscard]] bool validateFormats() const {
+    [[nodiscard]] bool validateFormats() {
+        SetWindowTextW(m_formatError, L"");
         auto compiler = titleformat_compiler::get(); titleformat_object::ptr script;
         auto valid = [&](const std::string& text, bool allowEmpty) { return (allowEmpty && text.empty()) || compiler->compile(script, text.c_str()); };
         for (const auto& group : m_draft.groups) {
             if (group.label.empty()) {
-                MessageBoxW(m_window, L"A grouping preset name is empty.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
+                SetWindowTextW(m_formatError, L"Group error: a preset name is empty."); return false;
             }
             if (!valid(group.keyFormat, false) || !valid(group.sortFormat, false) || !valid(group.leftPrimary, true)
                 || !valid(group.rightPrimary, true) || !valid(group.leftSecondary, true) || !valid(group.rightSecondary, true)) {
-                MessageBoxW(m_window, L"A grouping title-format expression is invalid. Fix it before applying.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
+                SetWindowTextW(m_formatError, L"Group error: a title-format expression is invalid."); TabCtrl_SetCurSel(m_tabs, 1); updateTabVisibility(); return false;
             }
         }
         for (const auto& column : m_draft.columns) {
             if (column.label.empty()) {
-                MessageBoxW(m_window, L"A column label is empty.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
+                SetWindowTextW(m_formatError, L"Column error: a label is empty."); return false;
             }
             if ((!column.cover && column.id != "builtin.state" && !valid(column.displayFormat, false))
-                || !valid(column.sortFormat, true)) {
-                MessageBoxW(m_window, L"A column title-format expression is invalid. Fix it before applying.", L"Refrain", MB_OK | MB_ICONWARNING); return false;
+                || !valid(column.secondaryDisplayFormat, true) || !valid(column.sortFormat, true)) {
+                SetWindowTextW(m_formatError, L"Stored column format is invalid; reset the page to repair it."); return false;
             }
         }
         return true;
     }
     void onCommand(int id, int notification) {
         if (m_updating) return;
-        if (id == groupPreset && notification == CBN_SELCHANGE) { storeGroup(); const auto index = static_cast<std::size_t>(SendMessageW(m_groupCombo, CB_GETCURSEL, 0, 0)); m_draft.activeGroupId = m_draft.groups[index].id; loadGroup(index); }
+        if (id == profilePreset && notification == LBN_SELCHANGE) {
+            const auto selected = SendMessageW(m_profileList, LB_GETCURSEL, 0, 0);
+            if (selected != LB_ERR) {
+                storeProfile(); rebuildProfileCombo(); loadProfile(static_cast<std::size_t>(selected));
+                rebuildGroupCombo(); rebuildColumnList(); loadGroup(0); loadColumn(0);
+            }
+        }
+        else if (id == profileName && notification == EN_CHANGE) notifyChanged();
+        else if (id == newProfile && notification == BN_CLICKED) { storeProfile(); LayoutProfile profile; profile.id = "custom.profile." + std::to_string(GetTickCount64()); profile.label = "New profile"; profile.groupId = m_draft.activeGroupId; for (const auto& column : m_draft.columns) profile.columns.push_back({column.id, column.visible, column.widthWeight}); m_draft.profiles.push_back(std::move(profile)); rebuildProfileCombo(); loadProfile(m_draft.profiles.size() - 1); }
+        else if (id == copyProfile && notification == BN_CLICKED && m_profileIndex < m_draft.profiles.size()) { storeProfile(); auto copy = m_draft.profiles[m_profileIndex]; copy.id = "custom.profile." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; m_draft.profiles.push_back(std::move(copy)); rebuildProfileCombo(); loadProfile(m_draft.profiles.size() - 1); }
+        else if ((id == profileUp || id == profileDown) && m_profileIndex < m_draft.profiles.size()) { storeProfile(); const auto target = static_cast<std::ptrdiff_t>(m_profileIndex) + (id == profileUp ? -1 : 1); if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.profiles.size())) { std::swap(m_draft.profiles[m_profileIndex], m_draft.profiles[static_cast<std::size_t>(target)]); m_profileIndex = static_cast<std::size_t>(target); rebuildProfileCombo(); loadProfile(m_profileIndex); } }
+        else if (id == deleteProfile && notification == BN_CLICKED && m_profileIndex < m_draft.profiles.size() && !m_draft.profiles[m_profileIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this layout profile? Assigned playlists will use Default.", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.profiles[m_profileIndex].id; std::erase_if(m_draft.assignments, [&](const auto& a){ return a.profileId == removed; }); m_draft.profiles.erase(m_draft.profiles.begin() + static_cast<std::ptrdiff_t>(m_profileIndex)); rebuildProfileCombo(); loadProfile(0); } }
+        else if (id == groupPreset && notification == CBN_SELCHANGE) { storeGroup(); const auto index = static_cast<std::size_t>(SendMessageW(m_groupCombo, CB_GETCURSEL, 0, 0)); m_draft.activeGroupId = m_draft.groups[index].id; loadGroup(index); }
+        else if (id == newGroup && notification == BN_CLICKED) { auto group = defaultGroupDefinitions().front(); group.id = "custom.group." + std::to_string(GetTickCount64()); group.label = "New group"; group.builtIn = false; m_draft.groups.push_back(std::move(group)); rebuildGroupCombo(); loadGroup(m_draft.groups.size() - 1); }
         else if (id == copyGroup && notification == BN_CLICKED) { storeGroup(); auto copy = m_draft.groups[m_groupIndex]; copy.id = "custom.group." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; m_draft.groups.push_back(std::move(copy)); m_draft.activeGroupId = m_draft.groups.back().id; rebuildGroupCombo(); loadGroup(m_draft.groups.size() - 1); }
-        else if (id == deleteGroup && notification == BN_CLICKED && m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn) { const auto removed = m_draft.groups[m_groupIndex].id; m_draft.groups.erase(m_draft.groups.begin() + static_cast<std::ptrdiff_t>(m_groupIndex)); if (m_draft.activeGroupId == removed) m_draft.activeGroupId = "builtin.album.simple"; rebuildGroupCombo(); loadGroup(0); }
+        else if ((id == groupUp || id == groupDown) && m_groupIndex < m_draft.groups.size()) { storeGroup(); const auto target = static_cast<std::ptrdiff_t>(m_groupIndex) + (id == groupUp ? -1 : 1); if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.groups.size())) { std::swap(m_draft.groups[m_groupIndex], m_draft.groups[static_cast<std::size_t>(target)]); m_groupIndex = static_cast<std::size_t>(target); rebuildGroupCombo(); loadGroup(m_groupIndex); } }
+        else if (id == deleteGroup && notification == BN_CLICKED && m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this group definition?", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.groups[m_groupIndex].id; m_draft.groups.erase(m_draft.groups.begin() + static_cast<std::ptrdiff_t>(m_groupIndex)); if (m_draft.activeGroupId == removed) m_draft.activeGroupId = "builtin.album.simple"; for (auto& p : m_draft.profiles) if (p.groupId == removed) p.groupId = "builtin.album.simple"; rebuildGroupCombo(); loadGroup(0); } }
         else if ((id == autoCollapse || id == collapseDefault) && notification == BN_CLICKED) notifyChanged();
         else if (id == groupPreset && notification == CBN_EDITCHANGE) {
             if (m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn)
                 m_draft.groups[m_groupIndex].label = wideToUtf8(editText(m_groupCombo));
             notifyChanged();
         }
+        else if (id == newColumn && notification == BN_CLICKED) { ColumnDefinition column{"custom.column." + std::to_string(GetTickCount64()), "New column", "$if2(%title%,$filename_ext(%path%))", "", "", ColumnAlignment::leading, true, 800, false, false}; m_draft.columns.push_back(std::move(column)); rebuildColumnList(); loadColumn(m_draft.columns.size() - 1); }
         else if (id == columnUp || id == columnDown) { storeColumn(); const auto direction = id == columnUp ? -1 : 1; const auto target = static_cast<std::ptrdiff_t>(m_columnIndex) + direction; if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.columns.size()) && !m_draft.columns[m_columnIndex].cover && !m_draft.columns[static_cast<std::size_t>(target)].cover) { std::swap(m_draft.columns[m_columnIndex], m_draft.columns[static_cast<std::size_t>(target)]); m_columnIndex = static_cast<std::size_t>(target); rebuildColumnList(); loadColumn(m_columnIndex); } }
         else if (id == copyColumn && notification == BN_CLICKED) { storeColumn(); auto copy = m_draft.columns[m_columnIndex]; copy.id = "custom.column." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; copy.cover = false; m_draft.columns.push_back(std::move(copy)); rebuildColumnList(); loadColumn(m_draft.columns.size() - 1); }
-        else if (id == deleteColumn && notification == BN_CLICKED && m_columnIndex < m_draft.columns.size() && !m_draft.columns[m_columnIndex].builtIn) { m_draft.columns.erase(m_draft.columns.begin() + static_cast<std::ptrdiff_t>(m_columnIndex)); rebuildColumnList(); loadColumn(0); }
+        else if (id == deleteColumn && notification == BN_CLICKED && m_columnIndex < m_draft.columns.size() && !m_draft.columns[m_columnIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this column definition?", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.columns[m_columnIndex].id; m_draft.columns.erase(m_draft.columns.begin() + static_cast<std::ptrdiff_t>(m_columnIndex)); for (auto& p : m_draft.profiles) std::erase_if(p.columns, [&](const auto& c){ return c.columnId == removed; }); rebuildColumnList(); loadColumn(0); } }
         else if (notification == EN_CHANGE || notification == CBN_SELCHANGE) notifyChanged();
     }
     bool onNotify(const NMHDR& header) {
+        if (header.hwndFrom == m_tabs && header.code == TCN_SELCHANGE) {
+            m_scrollY = 0; updateTabVisibility(); layoutControls();
+            RedrawWindow(m_window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+            return true;
+        }
         if (header.hwndFrom != m_columnList || m_updating || header.code != LVN_ITEMCHANGED) return false;
         const auto* change = reinterpret_cast<const NMLISTVIEW*>(&header);
         if ((change->uNewState & LVIS_SELECTED) != 0 && change->iItem >= 0 && static_cast<std::size_t>(change->iItem) != m_columnIndex) { storeColumn(); loadColumn(static_cast<std::size_t>(change->iItem)); }
@@ -347,11 +567,16 @@ private:
 
     preferences_page_callback::ptr m_callback; PlaylistViewSettings m_initial, m_draft;
     HWND m_window{}; WNDPROC m_originalProc{}; HFONT m_font{}, m_ownedFont{}; UINT m_dpi{96}; bool m_updating{};
-    std::size_t m_groupIndex{static_cast<std::size_t>(-1)}, m_columnIndex{static_cast<std::size_t>(-1)};
-    HWND m_groupBox{}, m_groupCombo{}, m_autoCollapse{}, m_collapseDefault{}, m_copyGroup{}, m_deleteGroup{}, m_groupArtwork{};
+    std::size_t m_profileIndex{static_cast<std::size_t>(-1)}, m_groupIndex{static_cast<std::size_t>(-1)}, m_columnIndex{static_cast<std::size_t>(-1)};
+    HWND m_profilesBox{}, m_profileList{}, m_profileNameLabel{}, m_profileName{}, m_newProfile{}, m_copyProfile{}, m_profileUp{}, m_profileDown{}, m_deleteProfile{};
+    HWND m_tabs{};
+    HWND m_formatError{};
+    HWND m_trackRowsLabel{}, m_trackRows{}, m_headerStyleLabel{}, m_headerStyle{};
+    HWND m_groupBox{}, m_groupCombo{}, m_autoCollapse{}, m_collapseDefault{}, m_newGroup{}, m_copyGroup{}, m_groupUp{}, m_groupDown{}, m_deleteGroup{}, m_groupArtwork{};
     std::vector<HWND> m_groupLabels; std::array<HWND, 6> m_groupEdits{};
-    HWND m_columnsBox{}, m_columnList{}, m_columnUp{}, m_columnDown{}, m_copyColumn{}, m_deleteColumn{};
-    std::vector<HWND> m_columnLabels; HWND m_columnLabel{}, m_columnDisplay{}, m_columnSort{}, m_columnAlignment{}, m_columnWidth{};
+    HWND m_columnsBox{}, m_columnList{}, m_newColumn{}, m_columnUp{}, m_columnDown{}, m_copyColumn{}, m_deleteColumn{};
+    std::vector<HWND> m_columnLabels; HWND m_columnLabel{}, m_columnDisplay{}, m_columnSecondary{}, m_columnSort{}, m_columnAlignment{}, m_columnWidth{};
+    int m_scrollY{};
 };
 
 class PlaylistSettingsPage : public preferences_page_v3 {

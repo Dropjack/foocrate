@@ -3,6 +3,8 @@
 #include "theme_model.h"
 
 #include <cstdint>
+#include <string>
+#include <utility>
 
 namespace refrain {
 
@@ -16,6 +18,17 @@ enum class LowerRightView : std::int64_t {
     trackDetails = 1,
 };
 
+enum class TrackActivationAction : std::int64_t { play = 0, addToQueue = 1 };
+enum class RightPanelFollow : std::int64_t { playingTrack = 0, playlistSelection = 1 };
+enum class AlbumTileSize : std::int64_t { smallTile = 0, medium = 1, largeTile = 2 };
+
+inline constexpr std::int64_t kArtworkFront = 1 << 0;
+inline constexpr std::int64_t kArtworkBack = 1 << 1;
+inline constexpr std::int64_t kArtworkDisc = 1 << 2;
+inline constexpr std::int64_t kArtworkArtist = 1 << 3;
+inline constexpr std::int64_t kAllArtworkSources =
+    kArtworkFront | kArtworkBack | kArtworkDisc | kArtworkArtist;
+
 struct SettingsValues {
     TimeDisplayMode timeDisplay{TimeDisplayMode::total};
     bool showTooltips{true};
@@ -27,6 +40,18 @@ struct SettingsValues {
     std::int64_t rightColumnPermille{230};
     ThemePreset themePreset{ThemePreset::mist};
     ColourMode colourMode{ColourMode::refrainPreset};
+    TrackActivationAction trackActivation{TrackActivationAction::play};
+    RightPanelFollow rightPanelFollow{RightPanelFollow::playingTrack};
+    bool detailsMetadata{true};
+    bool detailsLocation{true};
+    bool detailsTechnical{true};
+    bool detailsPlaybackStatistics{true};
+    bool detailsReplayGain{};
+    bool artworkRotationEnabled{true};
+    std::int64_t artworkSourceMask{kAllArtworkSources};
+    std::int64_t artworkRotationSeconds{20};
+    AlbumTileSize albumTileSize{AlbumTileSize::medium};
+    std::string nowPlayingSummaryFormat{"$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')"};
 
     bool operator==(const SettingsValues&) const = default;
 };
@@ -43,6 +68,18 @@ struct StoredSettings {
     std::int64_t rightColumnPermille{230};
     std::int64_t themePreset{};
     std::int64_t colourMode{};
+    std::int64_t trackActivation{};
+    std::int64_t rightPanelFollow{};
+    bool detailsMetadata{true};
+    bool detailsLocation{true};
+    bool detailsTechnical{true};
+    bool detailsPlaybackStatistics{true};
+    bool detailsReplayGain{};
+    bool artworkRotationEnabled{true};
+    std::int64_t artworkSourceMask{kAllArtworkSources};
+    std::int64_t artworkRotationSeconds{20};
+    std::int64_t albumTileSize{static_cast<std::int64_t>(AlbumTileSize::medium)};
+    std::string nowPlayingSummaryFormat{"$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')"};
 };
 
 struct SettingsMigration {
@@ -51,10 +88,30 @@ struct SettingsMigration {
     bool rewriteKnownValues{};
 };
 
-inline constexpr std::int64_t kCurrentSettingsVersion = 5;
+inline constexpr std::int64_t kCurrentSettingsVersion = 6;
 
-[[nodiscard]] constexpr SettingsValues defaultSettings() noexcept {
+[[nodiscard]] inline SettingsValues defaultSettings() {
     return {};
+}
+
+[[nodiscard]] constexpr bool isValidTrackActivation(std::int64_t value) noexcept {
+    return value >= 0 && value <= 1;
+}
+
+[[nodiscard]] constexpr bool isValidRightPanelFollow(std::int64_t value) noexcept {
+    return value >= 0 && value <= 1;
+}
+
+[[nodiscard]] constexpr bool isValidAlbumTileSize(std::int64_t value) noexcept {
+    return value >= 0 && value <= 2;
+}
+
+[[nodiscard]] constexpr bool isValidArtworkSourceMask(std::int64_t value) noexcept {
+    return value > 0 && (value & ~kAllArtworkSources) == 0;
+}
+
+[[nodiscard]] constexpr bool isValidArtworkRotationSeconds(std::int64_t value) noexcept {
+    return value == 10 || value == 20 || value == 30 || value == 60;
 }
 
 [[nodiscard]] constexpr bool isValidTimeDisplay(std::int64_t value) noexcept {
@@ -75,7 +132,7 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 5;
     return value >= 100 && value <= 800;
 }
 
-[[nodiscard]] constexpr SettingsMigration migrateSettings(StoredSettings stored) noexcept {
+[[nodiscard]] inline SettingsMigration migrateSettings(StoredSettings stored) {
     SettingsMigration result;
     result.values.timeDisplay = isValidTimeDisplay(stored.timeDisplay)
         ? static_cast<TimeDisplayMode>(stored.timeDisplay)
@@ -102,6 +159,27 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 5;
         result.values.colourMode = isValidColourMode(stored.colourMode)
             ? static_cast<ColourMode>(stored.colourMode) : ColourMode::refrainPreset;
     }
+    result.values.trackActivation = isValidTrackActivation(stored.trackActivation)
+        ? static_cast<TrackActivationAction>(stored.trackActivation) : TrackActivationAction::play;
+    result.values.rightPanelFollow = isValidRightPanelFollow(stored.rightPanelFollow)
+        ? static_cast<RightPanelFollow>(stored.rightPanelFollow) : RightPanelFollow::playingTrack;
+    result.values.detailsMetadata = stored.detailsMetadata;
+    result.values.detailsLocation = stored.detailsLocation;
+    result.values.detailsTechnical = stored.detailsTechnical;
+    result.values.detailsPlaybackStatistics = stored.detailsPlaybackStatistics;
+    // Version 5 only exposed ReplayGain. Preserve that value during the section migration.
+    result.values.detailsReplayGain = stored.version <= 5 ? stored.showReplayGain : stored.detailsReplayGain;
+    result.values.showReplayGain = result.values.detailsReplayGain;
+    result.values.artworkRotationEnabled = stored.artworkRotationEnabled;
+    result.values.artworkSourceMask = isValidArtworkSourceMask(stored.artworkSourceMask)
+        ? stored.artworkSourceMask : kAllArtworkSources;
+    result.values.artworkRotationSeconds = isValidArtworkRotationSeconds(stored.artworkRotationSeconds)
+        ? stored.artworkRotationSeconds : 20;
+    result.values.albumTileSize = isValidAlbumTileSize(stored.albumTileSize)
+        ? static_cast<AlbumTileSize>(stored.albumTileSize) : AlbumTileSize::medium;
+    result.values.nowPlayingSummaryFormat = stored.nowPlayingSummaryFormat.empty()
+        ? "$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')"
+        : stored.nowPlayingSummaryFormat;
 
     if (stored.version <= kCurrentSettingsVersion) {
         result.versionToKeep = kCurrentSettingsVersion;
@@ -111,7 +189,13 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 5;
             || !isValidRightHeaderPermille(stored.rightHeaderPermille)
             || !isValidRightColumnPermille(stored.rightColumnPermille)
             || !isValidThemePreset(stored.themePreset)
-            || (stored.version >= 5 && !isValidColourMode(stored.colourMode));
+            || (stored.version >= 5 && !isValidColourMode(stored.colourMode))
+            || !isValidTrackActivation(stored.trackActivation)
+            || !isValidRightPanelFollow(stored.rightPanelFollow)
+            || !isValidArtworkSourceMask(stored.artworkSourceMask)
+            || !isValidArtworkRotationSeconds(stored.artworkRotationSeconds)
+            || !isValidAlbumTileSize(stored.albumTileSize)
+            || stored.nowPlayingSummaryFormat.empty();
     } else {
         result.versionToKeep = stored.version;
         result.rewriteKnownValues = false;

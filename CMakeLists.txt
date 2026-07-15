@@ -40,11 +40,12 @@ add_library(foo_refrain MODULE
   src/playlist_interaction_model.h
   src/playlist_browser_model.h
   src/playlist_preferences.cpp
-  src/playlist_browser_preferences.cpp
   src/playlist_view_model.h
   src/now_playing_state.h
   src/playback_layout.h
   src/now_playing_toolbar.cpp
+  src/now_playing_preferences.cpp
+  src/dependencies_preferences.cpp
   src/preferences.cpp
   src/settings.cpp
   src/settings.h

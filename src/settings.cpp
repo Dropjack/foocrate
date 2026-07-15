@@ -37,6 +37,17 @@ constexpr GUID kThemePresetGuid{
     0xb2c4668f, 0x124c, 0x4f8b, {0xa0, 0x28, 0x6a, 0xea, 0xbb, 0xc3, 0xde, 0xe7}};
 constexpr GUID kColourModeGuid{
     0xac92cbe4, 0xd155, 0x486e, {0x8b, 0x7f, 0xd6, 0x1d, 0x7c, 0xa1, 0x65, 0xc5}};
+constexpr GUID kTrackActivationGuid{0x52c7b43b, 0xf0cd, 0x4660, {0x92, 0x70, 0x29, 0xd6, 0xd2, 0xac, 0x7f, 0xf7}};
+constexpr GUID kRightPanelFollowGuid{0xc380723d, 0xd36c, 0x4cca, {0x85, 0xe7, 0x7d, 0xb0, 0xd1, 0xef, 0x31, 0x93}};
+constexpr GUID kDetailsMetadataGuid{0x36c68ed2, 0x4d94, 0x4315, {0x93, 0xea, 0xea, 0x0d, 0x38, 0xd0, 0x17, 0x1a}};
+constexpr GUID kDetailsLocationGuid{0x8f6effc0, 0x0c6c, 0x4a29, {0xa2, 0x90, 0x4c, 0x29, 0x41, 0x90, 0xa2, 0x31}};
+constexpr GUID kDetailsTechnicalGuid{0x80f59694, 0xaf9d, 0x44c1, {0xb2, 0xbc, 0xd7, 0x17, 0xb4, 0x5d, 0x21, 0xf3}};
+constexpr GUID kDetailsStatisticsGuid{0xa2cd8fb4, 0x486b, 0x4c5b, {0x9e, 0x58, 0xa9, 0x74, 0xd5, 0x1d, 0x81, 0x4a}};
+constexpr GUID kArtworkRotationEnabledGuid{0xdfcf21fa, 0xcdce, 0x4f8d, {0xa3, 0x3d, 0x70, 0xe5, 0x8f, 0x89, 0xb9, 0x56}};
+constexpr GUID kArtworkSourcesGuid{0xbb6b7810, 0xda38, 0x4c68, {0xa0, 0x64, 0x60, 0x50, 0x7d, 0x5c, 0x1a, 0x06}};
+constexpr GUID kArtworkIntervalGuid{0x659edc79, 0x3dc1, 0x446d, {0xb0, 0xd5, 0x9b, 0x61, 0x1d, 0x8f, 0xe8, 0xd7}};
+constexpr GUID kAlbumTileSizeGuid{0x14da9817, 0xc551, 0x41ca, {0xbc, 0x2c, 0x8d, 0xf0, 0x08, 0x1a, 0xe9, 0xca}};
+constexpr GUID kNowPlayingSummaryGuid{0x82d6553c, 0x1cdf, 0x4899, {0xa9, 0xf1, 0x78, 0x87, 0x2a, 0xbd, 0xcb, 0x79}};
 constexpr GUID kPlaylistViewSettingsGuid{
     0xd8a6f36a, 0x474c, 0x4fd6, {0x89, 0x3f, 0x08, 0x8e, 0xcc, 0x83, 0xa4, 0xa2}};
 constexpr GUID kAlbumSourceKindGuid{
@@ -67,6 +78,18 @@ cfg_int g_themePreset(kThemePresetGuid, static_cast<std::int64_t>(ThemePreset::m
 // Zero is the version-4 Refrain value. First-run version-0 migration rewrites it to
 // the version-5 Refrain preset value without ever selecting Windows accidentally.
 cfg_int g_colourMode(kColourModeGuid, 0);
+cfg_int g_trackActivation(kTrackActivationGuid, 0);
+cfg_int g_rightPanelFollow(kRightPanelFollowGuid, 0);
+cfg_bool g_detailsMetadata(kDetailsMetadataGuid, true);
+cfg_bool g_detailsLocation(kDetailsLocationGuid, true);
+cfg_bool g_detailsTechnical(kDetailsTechnicalGuid, true);
+cfg_bool g_detailsStatistics(kDetailsStatisticsGuid, true);
+cfg_bool g_artworkRotationEnabled(kArtworkRotationEnabledGuid, true);
+cfg_int g_artworkSources(kArtworkSourcesGuid, kAllArtworkSources);
+cfg_int g_artworkInterval(kArtworkIntervalGuid, 20);
+cfg_int g_albumTileSize(kAlbumTileSizeGuid, static_cast<std::int64_t>(AlbumTileSize::medium));
+cfg_string g_nowPlayingSummary(kNowPlayingSummaryGuid,
+    "$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')");
 cfg_string g_playlistViewSettings(kPlaylistViewSettingsGuid, "");
 cfg_bool g_albumSourceLibrary(kAlbumSourceKindGuid, false);
 cfg_guid g_albumSourcePlaylist(kAlbumSourcePlaylistGuid, GUID{});
@@ -112,10 +135,22 @@ void notifySettingsWindows() {
 } // namespace
 
 SettingsValues readSettings() {
-    const StoredSettings stored{g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(),
+    StoredSettings stored{g_configVersion.get(), g_timeDisplay.get(), g_showTooltips.get(),
         g_showSettingsButton.get(), g_lyricsAutoSwitch.get(), g_lowerRightView.get(),
         g_showReplayGain.get(), g_rightHeaderPermille.get(), g_rightColumnPermille.get(),
         g_themePreset.get(), g_colourMode.get()};
+    stored.trackActivation = g_trackActivation.get();
+    stored.rightPanelFollow = g_rightPanelFollow.get();
+    stored.detailsMetadata = g_detailsMetadata.get();
+    stored.detailsLocation = g_detailsLocation.get();
+    stored.detailsTechnical = g_detailsTechnical.get();
+    stored.detailsPlaybackStatistics = g_detailsStatistics.get();
+    stored.detailsReplayGain = g_showReplayGain.get();
+    stored.artworkRotationEnabled = g_artworkRotationEnabled.get();
+    stored.artworkSourceMask = g_artworkSources.get();
+    stored.artworkRotationSeconds = g_artworkInterval.get();
+    stored.albumTileSize = g_albumTileSize.get();
+    stored.nowPlayingSummaryFormat = g_nowPlayingSummary.get().c_str();
     const auto migration = migrateSettings(stored);
     if (migration.rewriteKnownValues) {
         g_timeDisplay = static_cast<t_int32>(migration.values.timeDisplay);
@@ -128,6 +163,18 @@ SettingsValues readSettings() {
         g_rightColumnPermille = static_cast<t_int32>(migration.values.rightColumnPermille);
         g_themePreset = static_cast<t_int32>(migration.values.themePreset);
         g_colourMode = static_cast<t_int32>(migration.values.colourMode);
+        g_trackActivation = static_cast<t_int32>(migration.values.trackActivation);
+        g_rightPanelFollow = static_cast<t_int32>(migration.values.rightPanelFollow);
+        g_detailsMetadata = migration.values.detailsMetadata;
+        g_detailsLocation = migration.values.detailsLocation;
+        g_detailsTechnical = migration.values.detailsTechnical;
+        g_detailsStatistics = migration.values.detailsPlaybackStatistics;
+        g_showReplayGain = migration.values.detailsReplayGain;
+        g_artworkRotationEnabled = migration.values.artworkRotationEnabled;
+        g_artworkSources = static_cast<t_int32>(migration.values.artworkSourceMask);
+        g_artworkInterval = static_cast<t_int32>(migration.values.artworkRotationSeconds);
+        g_albumTileSize = static_cast<t_int32>(migration.values.albumTileSize);
+        g_nowPlayingSummary.set(migration.values.nowPlayingSummaryFormat.c_str());
         g_configVersion = static_cast<t_int32>(migration.versionToKeep);
     }
     return migration.values;
@@ -143,11 +190,24 @@ SettingsValues readEffectiveSettings() {
 }
 
 void writeSettings(const SettingsValues& values) {
-    const auto normalized = migrateSettings({kCurrentSettingsVersion,
+    StoredSettings stored{kCurrentSettingsVersion,
         static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
         values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView),
         values.showReplayGain, values.rightHeaderPermille, values.rightColumnPermille,
-        static_cast<std::int64_t>(values.themePreset), static_cast<std::int64_t>(values.colourMode)});
+        static_cast<std::int64_t>(values.themePreset), static_cast<std::int64_t>(values.colourMode)};
+    stored.trackActivation = static_cast<std::int64_t>(values.trackActivation);
+    stored.rightPanelFollow = static_cast<std::int64_t>(values.rightPanelFollow);
+    stored.detailsMetadata = values.detailsMetadata;
+    stored.detailsLocation = values.detailsLocation;
+    stored.detailsTechnical = values.detailsTechnical;
+    stored.detailsPlaybackStatistics = values.detailsPlaybackStatistics;
+    stored.detailsReplayGain = values.detailsReplayGain;
+    stored.artworkRotationEnabled = values.artworkRotationEnabled;
+    stored.artworkSourceMask = values.artworkSourceMask;
+    stored.artworkRotationSeconds = values.artworkRotationSeconds;
+    stored.albumTileSize = static_cast<std::int64_t>(values.albumTileSize);
+    stored.nowPlayingSummaryFormat = values.nowPlayingSummaryFormat;
+    const auto normalized = migrateSettings(std::move(stored));
     g_timeDisplay = static_cast<t_int32>(normalized.values.timeDisplay);
     g_showTooltips = normalized.values.showTooltips;
     g_showSettingsButton = normalized.values.showSettingsButton;
@@ -158,17 +218,31 @@ void writeSettings(const SettingsValues& values) {
     g_rightColumnPermille = static_cast<t_int32>(normalized.values.rightColumnPermille);
     g_themePreset = static_cast<t_int32>(normalized.values.themePreset);
     g_colourMode = static_cast<t_int32>(normalized.values.colourMode);
+    g_trackActivation = static_cast<t_int32>(normalized.values.trackActivation);
+    g_rightPanelFollow = static_cast<t_int32>(normalized.values.rightPanelFollow);
+    g_detailsMetadata = normalized.values.detailsMetadata;
+    g_detailsLocation = normalized.values.detailsLocation;
+    g_detailsTechnical = normalized.values.detailsTechnical;
+    g_detailsStatistics = normalized.values.detailsPlaybackStatistics;
+    g_showReplayGain = normalized.values.detailsReplayGain;
+    g_artworkRotationEnabled = normalized.values.artworkRotationEnabled;
+    g_artworkSources = static_cast<t_int32>(normalized.values.artworkSourceMask);
+    g_artworkInterval = static_cast<t_int32>(normalized.values.artworkRotationSeconds);
+    g_albumTileSize = static_cast<t_int32>(normalized.values.albumTileSize);
+    g_nowPlayingSummary.set(normalized.values.nowPlayingSummaryFormat.c_str());
     g_configVersion = static_cast<t_int32>(std::max<std::int64_t>(g_configVersion.get(), kCurrentSettingsVersion));
     notifySettingsWindows();
 }
 
 void setSettingsPreview(HWND owner, const SettingsValues& values) {
     if (!owner || !IsWindow(owner)) return;
-    const auto normalized = migrateSettings({kCurrentSettingsVersion,
-        static_cast<std::int64_t>(values.timeDisplay), values.showTooltips, values.showSettingsButton,
-        values.lyricsAutoSwitch, static_cast<std::int64_t>(values.lowerRightView), values.showReplayGain,
-        values.rightHeaderPermille, values.rightColumnPermille, static_cast<std::int64_t>(values.themePreset),
-        static_cast<std::int64_t>(values.colourMode)}).values;
+    auto normalized = values;
+    normalized.artworkSourceMask = isValidArtworkSourceMask(values.artworkSourceMask)
+        ? values.artworkSourceMask : kAllArtworkSources;
+    normalized.artworkRotationSeconds = isValidArtworkRotationSeconds(values.artworkRotationSeconds)
+        ? values.artworkRotationSeconds : 20;
+    if (normalized.nowPlayingSummaryFormat.empty()) normalized.nowPlayingSummaryFormat =
+        "$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')";
     {
         std::scoped_lock lock(g_previewMutex);
         g_settingsPreview = std::pair{owner, normalized};

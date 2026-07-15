@@ -35,6 +35,15 @@ int main() {
     settings.activeGroupId = "custom.percent";
     const auto restored = deserializePlaylistViewSettings(serializePlaylistViewSettings(settings));
     expect(restored == normalizePlaylistViewSettings(settings), "playlist settings must round trip arbitrary delimiters");
+    auto profiled = defaultPlaylistViewSettings();
+    auto profile = profiled.profiles.front(); profile.id = "custom.profile.test"; profile.label = "Test";
+    profile.trackRowLayout = TrackRowLayout::twoLine; profile.groupHeaderStyle = GroupHeaderStyle::compactLine;
+    profile.columns[1].visible = false; profiled.profiles.push_back(profile);
+    profiled.assignments.push_back({"{00000000-0000-0000-0000-000000000001}", profile.id});
+    const auto profiledRestored = deserializePlaylistViewSettings(serializePlaylistViewSettings(profiled));
+    expect(profiledRestored == normalizePlaylistViewSettings(profiled), "RPV2 profiles and assignments must round trip");
+    const auto effective = applyLayoutProfile(profiledRestored, profile.id);
+    expect(!effective.columns[1].visible, "profile column visibility must be applied");
     auto broken = defaultPlaylistViewSettings();
     broken.columns.clear();
     broken.activeGroupId = "missing";

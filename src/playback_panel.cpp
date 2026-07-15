@@ -89,6 +89,7 @@ constexpr UINT kRestoreAlbumSourceMessage = WM_APP + 0x428;
 constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
 constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
+constexpr UINT_PTR kArtworkRotationTimer = 0x5272;
 constexpr UINT_PTR kStatusTimer = 0x5272;
 constexpr UINT_PTR kScrollbarVisibilityTimer = 0x5275;
 
@@ -164,6 +165,8 @@ enum class ControlId {
     queueBody,
     queueScrollbar,
     albumSource,
+    albumDefaultPlaylist,
+    albumTileSize,
     albumGrid,
     albumTrackList,
     albumDivider,
@@ -230,6 +233,9 @@ struct Layout {
     D2D1_RECT_F queueScrollTrack{};
     D2D1_RECT_F queueScrollThumb{};
     D2D1_RECT_F albumSource{};
+    D2D1_RECT_F albumSourceChoice{};
+    D2D1_RECT_F albumDefaultPlaylist{};
+    D2D1_RECT_F albumTileSize{};
     D2D1_RECT_F albumGrid{};
     D2D1_RECT_F albumDivider{};
     D2D1_RECT_F albumHeader{};
@@ -251,6 +257,7 @@ struct DetailRow {
 
 struct PlaylistRowText {
     std::vector<std::wstring> columns;
+    std::vector<std::wstring> secondaryColumns;
 };
 
 struct QueueRowText {
@@ -270,7 +277,9 @@ struct ArtworkAsyncState {
 
 struct ArtworkCompletion {
     std::uint64_t generation{};
-    ArtworkPixels pixels;
+    std::vector<ArtworkPixels> frames;
+    std::vector<std::wstring> labels;
+    std::vector<std::int64_t> sourceBits;
     std::optional<ThemePalette> artworkTheme;
 };
 
@@ -565,6 +574,10 @@ public:
                 updateScrollbarVisibility(wnd);
                 return 0;
             }
+            if (wp == kArtworkRotationTimer) {
+                rotateArtworkFrame();
+                return 0;
+            }
             break;
         case WM_SETFOCUS:
             if (m_focus == ControlId::none) {
@@ -715,7 +728,10 @@ public:
         refreshQueueSnapshot();
     }
     void on_items_selection_change(t_size playlist, const bit_array&, const bit_array&) override {
-        if (playlist == m_activePlaylist) refreshPlaylistSelection();
+        if (playlist == m_activePlaylist) {
+            refreshPlaylistSelection();
+            if (readSettings().rightPanelFollow == RightPanelFollow::playlistSelection) requestRefresh();
+        }
     }
     void on_item_focus_change(t_size playlist, t_size, t_size to) override {
         if (playlist == m_activePlaylist) {
@@ -725,7 +741,8 @@ public:
             ensurePlaylistRowVisible(to);
             invalidate();
         }
-        if (!playback_control::get()->is_playing()) requestRefresh();
+        if (!playback_control::get()->is_playing()
+            || readSettings().rightPanelFollow == RightPanelFollow::playlistSelection) requestRefresh();
     }
     void on_playlist_activate(t_size, t_size) override {
         refreshPlaylistBrowserSnapshot();
@@ -1116,8 +1133,30 @@ private:
         return m_playlistSettings.groups.front();
     }
 
+    [[nodiscard]] float playlistRowHeight() const noexcept {
+        return m_trackRowLayout == TrackRowLayout::compact ? 22.0F
+            : m_trackRowLayout == TrackRowLayout::twoLine ? 42.0F : 26.0F;
+    }
+
     void reloadPlaylistViewSettings() {
-        m_playlistSettings = readPlaylistViewSettings();
+        auto stored = readPlaylistViewSettings();
+        std::string profileId{"builtin.default"};
+        if (m_activePlaylist != SIZE_MAX) {
+            wchar_t guidText[40]{};
+            if (StringFromGUID2(playlist_manager_v5::get()->playlist_get_guid(m_activePlaylist), guidText, 40)) {
+                const auto guid = wideToUtf8(guidText);
+                const auto assignment = std::find_if(stored.assignments.begin(), stored.assignments.end(),
+                    [&](const auto& value) { return value.playlistGuid == guid; });
+                if (assignment != stored.assignments.end()) profileId = assignment->profileId;
+            }
+        }
+        const auto profile = std::find_if(stored.profiles.begin(), stored.profiles.end(),
+            [&](const auto& value) { return value.id == profileId; });
+        if (profile != stored.profiles.end()) {
+            m_trackRowLayout = profile->trackRowLayout;
+            m_groupHeaderStyle = profile->groupHeaderStyle;
+        } else { m_trackRowLayout = TrackRowLayout::standard; m_groupHeaderStyle = GroupHeaderStyle::detailed; }
+        m_playlistSettings = applyLayoutProfile(std::move(stored), profileId);
         auto compiler = titleformat_compiler::get();
         const auto& group = activeGroupDefinition();
         const std::array<const std::string*, 5> groupFormats{
@@ -1131,7 +1170,9 @@ private:
             }
         }
         m_playlistColumnScripts.clear();
+        m_playlistSecondaryColumnScripts.clear();
         m_playlistColumnScripts.reserve(m_playlistSettings.columns.size());
+        m_playlistSecondaryColumnScripts.reserve(m_playlistSettings.columns.size());
         for (const auto& column : m_playlistSettings.columns) {
             titleformat_object::ptr script;
             if (!column.cover && column.id != "builtin.state"
@@ -1139,8 +1180,44 @@ private:
                 compiler->compile_safe(script, "$if2(%title%,$filename_ext(%path%))");
             }
             m_playlistColumnScripts.push_back(std::move(script));
+            titleformat_object::ptr secondary;
+            if (!column.secondaryDisplayFormat.empty())
+                compiler->compile(secondary, column.secondaryDisplayFormat.c_str());
+            m_playlistSecondaryColumnScripts.push_back(std::move(secondary));
         }
         m_playlistTextCache.clear();
+    }
+
+    void persistEffectivePlaylistSettings() {
+        auto stored = readPlaylistViewSettings();
+        std::string profileId{"builtin.default"};
+        if (m_activePlaylist != SIZE_MAX) {
+            wchar_t guidText[40]{};
+            if (StringFromGUID2(playlist_manager_v5::get()->playlist_get_guid(m_activePlaylist), guidText, 40)) {
+                const auto guid = wideToUtf8(guidText);
+                const auto assignment = std::find_if(stored.assignments.begin(), stored.assignments.end(),
+                    [&](const auto& value) { return value.playlistGuid == guid; });
+                if (assignment != stored.assignments.end()) profileId = assignment->profileId;
+            }
+        }
+        for (const auto& effective : m_playlistSettings.groups) {
+            const auto found = std::find_if(stored.groups.begin(), stored.groups.end(), [&](const auto& value) { return value.id == effective.id; });
+            if (found != stored.groups.end()) *found = effective;
+        }
+        for (const auto& effective : m_playlistSettings.columns) {
+            const auto found = std::find_if(stored.columns.begin(), stored.columns.end(), [&](const auto& value) { return value.id == effective.id; });
+            if (found != stored.columns.end()) {
+                const auto builtIn = found->builtIn; *found = effective; found->builtIn = builtIn;
+            }
+        }
+        const auto profile = std::find_if(stored.profiles.begin(), stored.profiles.end(), [&](const auto& value) { return value.id == profileId; });
+        if (profile != stored.profiles.end()) {
+            profile->groupId = m_playlistSettings.activeGroupId; profile->autoCollapse = m_playlistSettings.autoCollapse;
+            profile->collapseByDefault = m_playlistSettings.collapseByDefault; profile->trackRowLayout = m_trackRowLayout;
+            profile->groupHeaderStyle = m_groupHeaderStyle; profile->columns.clear();
+            for (const auto& column : m_playlistSettings.columns) profile->columns.push_back({column.id, column.visible, column.widthWeight});
+        }
+        writePlaylistViewSettings(stored);
     }
 
     [[nodiscard]] std::string formatPlaylistItemUtf8(
@@ -1618,7 +1695,7 @@ private:
             return;
         }
         const auto body = calculateLayout(wnd).playlistBody;
-        const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
+        const auto capacity = visibleRowCapacity(body.bottom - body.top, playlistRowHeight());
         m_playlistTopRow = clampTopRow(m_playlistTopRow, m_playlistDisplayRows.size(), capacity);
     }
 
@@ -1633,7 +1710,7 @@ private:
         const auto displayRow = displayRowForTrack(m_playlistDisplayRows, row);
         if (displayRow == SIZE_MAX) return;
         const auto body = calculateLayout(wnd).playlistBody;
-        const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
+        const auto capacity = visibleRowCapacity(body.bottom - body.top, playlistRowHeight());
         const auto priorTopRow = m_playlistTopRow;
         m_playlistTopRow = ensureRowVisible(m_playlistTopRow, displayRow, m_playlistDisplayRows.size(), capacity);
         if (m_playlistTopRow != priorTopRow && maximumTopRow(m_playlistDisplayRows.size(), capacity) > 0) {
@@ -1645,7 +1722,7 @@ private:
     [[nodiscard]] std::optional<std::size_t> playlistRowAt(HWND wnd, D2D1_POINT_2F point) const {
         const auto body = calculateLayout(wnd).playlistBody;
         if (!contains(body, point)) return std::nullopt;
-        constexpr float rowHeight = 26.0F;
+        const auto rowHeight = playlistRowHeight();
         const auto relative = std::max(0.0F, point.y - body.top);
         const auto row = m_playlistTopRow + static_cast<std::size_t>(relative / rowHeight);
         return row < m_playlistDisplayRows.size() ? std::optional<std::size_t>{row} : std::nullopt;
@@ -1655,7 +1732,7 @@ private:
         const auto wnd = get_wnd();
         if (!wnd) return;
         const auto body = calculateLayout(wnd).playlistBody;
-        const auto capacity = visibleRowCapacity(body.bottom - body.top, 26.0F);
+        const auto capacity = visibleRowCapacity(body.bottom - body.top, playlistRowHeight());
         const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
         const auto candidate = static_cast<long long>(m_playlistTopRow) + delta;
         m_playlistTopRow = static_cast<std::size_t>(std::clamp(candidate, 0LL,
@@ -1717,7 +1794,7 @@ private:
     void updatePlaylistScrollbar(HWND wnd, float pointerY) {
         const auto layout = calculateLayout(wnd);
         const auto bodyHeight = layout.playlistBody.bottom - layout.playlistBody.top;
-        const auto capacity = visibleRowCapacity(bodyHeight, 26.0F);
+        const auto capacity = visibleRowCapacity(bodyHeight, playlistRowHeight());
         const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
         const auto trackHeight = layout.playlistScrollTrack.bottom - layout.playlistScrollTrack.top;
         const auto thumbHeight = layout.playlistScrollThumb.bottom - layout.playlistScrollThumb.top;
@@ -1862,10 +1939,10 @@ private:
             ? m_playlistDisplayRows[m_playlistTopRow].track : 0;
         if (point.y >= body.bottom) return m_playlistItems.get_count();
         const auto displayIndex = m_playlistTopRow
-            + static_cast<std::size_t>((point.y - body.top) / 26.0F);
+            + static_cast<std::size_t>((point.y - body.top) / playlistRowHeight());
         if (displayIndex >= m_playlistDisplayRows.size()) return m_playlistItems.get_count();
         const auto& display = m_playlistDisplayRows[displayIndex];
-        const auto lower = std::fmod(point.y - body.top, 26.0F) >= 13.0F;
+        const auto lower = std::fmod(point.y - body.top, playlistRowHeight()) >= playlistRowHeight() * 0.5F;
         if (display.kind == PlaylistDisplayRowKind::groupHeader) {
             const auto& group = m_playlistGroups[display.group];
             return lower ? group.start + group.count : group.start;
@@ -1882,9 +1959,9 @@ private:
         if (point.y <= body.top) return m_playlistTopRow;
         if (point.y >= body.bottom) return m_playlistDisplayRows.size();
         const auto displayIndex = m_playlistTopRow
-            + static_cast<std::size_t>((point.y - body.top) / 26.0F);
+            + static_cast<std::size_t>((point.y - body.top) / playlistRowHeight());
         if (displayIndex >= m_playlistDisplayRows.size()) return m_playlistDisplayRows.size();
-        const auto lower = std::fmod(point.y - body.top, 26.0F) >= 13.0F;
+        const auto lower = std::fmod(point.y - body.top, playlistRowHeight()) >= playlistRowHeight() * 0.5F;
         const auto& display = m_playlistDisplayRows[displayIndex];
         if (display.kind == PlaylistDisplayRowKind::groupHeader && lower) {
             const auto& group = m_playlistGroups[display.group];
@@ -2694,8 +2771,6 @@ private:
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(add), L"Add Playlist...");
         AppendMenuW(menu, MF_STRING, 102, L"Load Playlist...");
         AppendMenuW(menu, MF_STRING, 103, L"Save All Playlists...");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, 104, L"Playlist Browser preferences...");
         ClientToScreen(wnd, &clientPoint);
         const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
             clientPoint.x, clientPoint.y, 0, wnd, nullptr);
@@ -2721,7 +2796,6 @@ private:
             }
         } else if (command == 102) standard_commands::main_load_playlist();
         else if (command == 103) standard_commands::main_save_all_playlists();
-        else if (command == 104) ui_control::get()->show_preferences(kPlaylistBrowserPreferencesPageGuid);
         else if (command >= 200 && command < 211) {
             constexpr std::array<const char*, 11> queries{
                 "ALL", "%play_count% IS 0",
@@ -3073,7 +3147,10 @@ private:
                 rebuildPlaylistDisplayRows();
             } else if (display.kind == PlaylistDisplayRowKind::track) {
                 selectPlaylistRow(display.track, false, false);
-                playlist_manager::get()->playlist_execute_default_action(m_activePlaylist, display.track);
+                const auto settings = readSettings();
+                if (settings.trackActivation == TrackActivationAction::addToQueue)
+                    playlist_manager::get()->queue_add_item_playlist(m_activePlaylist, display.track);
+                else playlist_manager::get()->playlist_execute_default_action(m_activePlaylist, display.track);
             }
         }
     }
@@ -3132,7 +3209,10 @@ private:
         for (std::size_t index = 0; index < m_playlistSettings.columns.size(); ++index) {
             const auto& column = m_playlistSettings.columns[index];
             if (!column.visible) continue;
-            if (previous && std::abs(pointerX - x) <= 4.0F) return std::pair{*previous, index};
+            if (previous && std::abs(pointerX - x) <= 4.0F) {
+                if (m_playlistSettings.columns[*previous].cover || column.cover) return std::nullopt;
+                return std::pair{*previous, index};
+            }
             x += (layout.playlistBody.right - layout.playlistBody.left)
                 * static_cast<float>(column.widthWeight) / static_cast<float>(std::max(1, totalWeight));
             previous = index;
@@ -3203,7 +3283,7 @@ private:
         m_sortColumnId.clear();
         m_sortDescending = false;
         m_playlistSettings.activeGroupId = group.id;
-        writePlaylistViewSettings(m_playlistSettings);
+        persistEffectivePlaylistSettings();
     }
 
     void showPlaylistHeaderMenu(HWND wnd, POINT clientPoint) {
@@ -3248,14 +3328,14 @@ private:
             auto& column = m_playlistSettings.columns[command - columnBase];
             column.visible = !column.visible;
             m_playlistSettings = normalizePlaylistViewSettings(m_playlistSettings);
-            writePlaylistViewSettings(m_playlistSettings);
+            persistEffectivePlaylistSettings();
         } else if (command == 3001 || command == 3002) {
             for (auto& group : m_playlistGroups) group.collapsed = command == 3001;
             rebuildPlaylistDisplayRows();
         } else if (command == 3003 || command == 3004) {
             if (command == 3003) m_playlistSettings.autoCollapse = !m_playlistSettings.autoCollapse;
             else m_playlistSettings.collapseByDefault = !m_playlistSettings.collapseByDefault;
-            writePlaylistViewSettings(m_playlistSettings);
+            persistEffectivePlaylistSettings();
         } else if (command == 3005) {
             ++m_groupArtworkGeneration;
             {
@@ -3268,7 +3348,7 @@ private:
             invalidate();
         } else if (command == 3006) {
             m_playlistSettings = defaultPlaylistViewSettings();
-            writePlaylistViewSettings(m_playlistSettings);
+            persistEffectivePlaylistSettings();
         } else if (command == 3007) {
             ui_control::get()->show_preferences(kPlaylistPreferencesPageGuid);
         }
@@ -3340,6 +3420,10 @@ private:
                 }
                 invalidate();
             }
+            return;
+        }
+        if (!m_queueMode && contains(layout.artwork, point)) {
+            showArtworkMenu(wnd, clientPoint);
             return;
         }
         if (m_queueMode && contains(layout.queuePanel, point)) {
@@ -3440,12 +3524,14 @@ private:
             return true;
         }
         if (key == VK_RETURN) {
-            api->playlist_execute_default_action(m_activePlaylist, focus);
+            if (readSettings().trackActivation == TrackActivationAction::addToQueue)
+                api->queue_add_item_playlist(m_activePlaylist, focus);
+            else api->playlist_execute_default_action(m_activePlaylist, focus);
             return true;
         }
         const auto layout = calculateLayout(wnd);
         const auto page = std::max<std::size_t>(1,
-            visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, 26.0F) - 1);
+            visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, playlistRowHeight()) - 1);
         auto target = focus;
         if (key == VK_UP) target = focus > 0 ? focus - 1 : 0;
         else if (key == VK_DOWN) target = std::min(count - 1, focus + 1);
@@ -3630,8 +3716,14 @@ private:
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"", m_titleFormat.ReleaseAndGetAddressOf());
         m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0F, L"", m_secondaryFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 17.0F, L"", m_compactGroupPrimaryFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"", m_compactGroupSecondaryFormat.ReleaseAndGetAddressOf());
         configureTextFormat(m_titleFormat.Get());
         configureTextFormat(m_secondaryFormat.Get());
+        configureTextFormat(m_compactGroupPrimaryFormat.Get());
+        configureTextFormat(m_compactGroupSecondaryFormat.Get());
     }
 
     bool createDeviceResources(HWND wnd) {
@@ -3677,6 +3769,8 @@ private:
     }
 
     void releaseTextResources() noexcept {
+        m_compactGroupSecondaryFormat.Reset();
+        m_compactGroupPrimaryFormat.Reset();
         m_secondaryFormat.Reset();
         m_titleFormat.Reset();
         m_textFormat.Reset();
@@ -3770,6 +3864,15 @@ private:
             const auto split = std::clamp(width * static_cast<float>(m_albumSplitPermille) / 1000.0F,
                 240.0F, std::max(241.0F, width - 280.0F));
             layout.albumSource = D2D1::RectF(0.0F, 0.0F, split, 42.0F);
+            constexpr auto defaultPlaylistWidth = 196.0F;
+            constexpr auto tileSizeWidth = 136.0F;
+            const auto selectorWidth = std::min(split, defaultPlaylistWidth + tileSizeWidth);
+            const auto selectorLeft = split - selectorWidth;
+            const auto tileWidth = std::min(tileSizeWidth, selectorWidth);
+            layout.albumSourceChoice = D2D1::RectF(0.0F, 0.0F, selectorLeft, 42.0F);
+            layout.albumDefaultPlaylist = D2D1::RectF(selectorLeft, 0.0F,
+                split - tileWidth, 42.0F);
+            layout.albumTileSize = D2D1::RectF(split - tileWidth, 0.0F, split, 42.0F);
             layout.albumGrid = D2D1::RectF(0.0F, 42.0F, split, top);
             layout.albumGridScrollTrack = D2D1::RectF(split - scrollbarHitWidth, 42.0F, split, top);
             layout.albumDivider = D2D1::RectF(split - dividerHalfHit, 0.0F, split + dividerHalfHit, top);
@@ -3911,7 +4014,7 @@ private:
                 playlistRight - scrollbarWidth, top);
             layout.playlistScrollTrack = D2D1::RectF(playlistRight - scrollbarWidth,
                 headerHeight, playlistRight, top);
-            constexpr float rowHeight = 26.0F;
+            const auto rowHeight = playlistRowHeight();
             const auto capacity = visibleRowCapacity(layout.playlistBody.bottom - layout.playlistBody.top, rowHeight);
             const auto maximum = maximumTopRow(m_playlistDisplayRows.size(), capacity);
             if (maximum > 0) {
@@ -3930,7 +4033,9 @@ private:
         const auto layout = calculateLayout(wnd);
         if (m_workspace == Workspace::album) {
             if (contains(layout.albumDivider, point)) return ControlId::albumDivider;
-            if (contains(layout.albumSource, point)) return ControlId::albumSource;
+            if (contains(layout.albumDefaultPlaylist, point)) return ControlId::albumDefaultPlaylist;
+            if (contains(layout.albumTileSize, point)) return ControlId::albumTileSize;
+            if (contains(layout.albumSourceChoice, point)) return ControlId::albumSource;
             if (layout.albumGridScrollThumb.bottom > layout.albumGridScrollThumb.top
                 && contains(layout.albumGridScrollTrack, point)) return ControlId::albumGridScrollbar;
             if (layout.albumTrackScrollThumb.bottom > layout.albumTrackScrollThumb.top
@@ -4011,6 +4116,8 @@ private:
         case ControlId::albumWorkspace:
         case ControlId::albumList:
         case ControlId::albumSource:
+        case ControlId::albumDefaultPlaylist:
+        case ControlId::albumTileSize:
         case ControlId::albumGrid:
         case ControlId::albumTrackList:
         case ControlId::albumDivider: return true;
@@ -4153,10 +4260,14 @@ private:
         }
         PlaylistRowText row;
         row.columns.reserve(m_playlistSettings.columns.size());
+        row.secondaryColumns.reserve(m_playlistSettings.columns.size());
         for (std::size_t column = 0; column < m_playlistSettings.columns.size(); ++column) {
             row.columns.push_back(!m_playlistSettings.columns[column].visible
                     || m_playlistSettings.columns[column].cover
                 ? std::wstring{} : utf8ToWide(formatPlaylistItemUtf8(index, m_playlistColumnScripts[column]).c_str()));
+            row.secondaryColumns.push_back(m_trackRowLayout != TrackRowLayout::twoLine
+                    || column >= m_playlistSecondaryColumnScripts.size()
+                ? std::wstring{} : utf8ToWide(formatPlaylistItemUtf8(index, m_playlistSecondaryColumnScripts[column]).c_str()));
         }
         if (m_playlistTextCache.size() >= 512) m_playlistTextCache.clear();
         m_playlistTextCache.emplace(index, row);
@@ -4164,13 +4275,30 @@ private:
     }
 
     [[nodiscard]] std::size_t albumGridColumns(const Layout& layout) const noexcept {
-        return layout::AlbumCoverWallMetrics::columns(
-            std::max(0.0F, layout.albumGrid.right - layout.albumGrid.left));
+        const auto width = std::max(0.0F, layout.albumGrid.right - layout.albumGrid.left);
+        const auto setting = readSettings().albumTileSize;
+        const auto preferred = setting == AlbumTileSize::smallTile ? 144.0F
+            : setting == AlbumTileSize::largeTile ? 240.0F : 184.0F;
+        return width >= preferred ? static_cast<std::size_t>(width / preferred) : 1;
     }
 
     [[nodiscard]] float albumGridCellSize(const Layout& layout) const noexcept {
-        return layout::AlbumCoverWallMetrics::cellSize(
-            std::max(0.0F, layout.albumGrid.right - layout.albumGrid.left));
+        const auto width = std::max(0.0F, layout.albumGrid.right - layout.albumGrid.left);
+        return width > 0.0F ? width / static_cast<float>(albumGridColumns(layout)) : 0.0F;
+    }
+
+    [[nodiscard]] std::wstring defaultPlaylistName() const {
+        const auto playlist = playlistByGuid(readPlaylistBrowserSettings().defaultPlaylistGuid);
+        if (playlist == SIZE_MAX) return L"Not set";
+        pfc::string8 name;
+        return playlist_manager::get()->playlist_get_name(playlist, name)
+            ? utf8ToWide(name.c_str()) : L"Not set";
+    }
+
+    [[nodiscard]] static const wchar_t* albumTileSizeName(AlbumTileSize value) noexcept {
+        if (value == AlbumTileSize::smallTile) return L"Small";
+        if (value == AlbumTileSize::largeTile) return L"Large";
+        return L"Medium";
     }
 
     [[nodiscard]] std::optional<std::size_t> albumAt(const Layout& layout, D2D1_POINT_2F point) const {
@@ -4199,9 +4327,23 @@ private:
         m_renderTarget->FillRectangle(layout.albumSource, m_panel.Get());
         m_renderTarget->DrawLine(D2D1::Point2F(layout.albumSource.left, layout.albumSource.bottom),
             D2D1::Point2F(layout.albumSource.right, layout.albumSource.bottom), m_border.Get());
-        drawTextWith(L"Current source: " + m_albumSourceName + L"  ▾",
-            D2D1::RectF(layout.albumSource.left + 14.0F, layout.albumSource.top,
-                layout.albumSource.right - 10.0F, layout.albumSource.bottom),
+        for (const auto x : {layout.albumDefaultPlaylist.left, layout.albumTileSize.left}) {
+            if (x > layout.albumSource.left) m_renderTarget->DrawLine(
+                D2D1::Point2F(x, layout.albumSource.top + 8.0F),
+                D2D1::Point2F(x, layout.albumSource.bottom - 8.0F), m_border.Get());
+        }
+        drawTextWith(L"Current source: " + m_albumSourceName + L"  ·  "
+                + std::to_wstring(m_albums.size()) + L" albums  ▾",
+            D2D1::RectF(layout.albumSourceChoice.left + 14.0F, layout.albumSourceChoice.top,
+                layout.albumSourceChoice.right - 8.0F, layout.albumSourceChoice.bottom),
+            m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+        drawTextWith(L"Default: " + defaultPlaylistName() + L"  ▾",
+            D2D1::RectF(layout.albumDefaultPlaylist.left + 12.0F, layout.albumDefaultPlaylist.top,
+                layout.albumDefaultPlaylist.right - 8.0F, layout.albumDefaultPlaylist.bottom),
+            m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
+        drawTextWith(std::wstring(L"Tiles: ") + albumTileSizeName(readSettings().albumTileSize) + L"  ▾",
+            D2D1::RectF(layout.albumTileSize.left + 12.0F, layout.albumTileSize.top,
+                layout.albumTileSize.right - 8.0F, layout.albumTileSize.bottom),
             m_textFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_foreground.Get());
         const auto albumDividerX = (layout.albumDivider.left + layout.albumDivider.right) * 0.5F;
         m_renderTarget->DrawLine(D2D1::Point2F(albumDividerX, layout.albumDivider.top),
@@ -4450,6 +4592,12 @@ private:
             columns.push_back({index, D2D1::RectF(x, layout.playlistHeader.top, std::min(next, contentRight), layout.playlistHeader.bottom)});
             x = next;
         }
+        const auto coverColumn = std::find_if(columns.begin(), columns.end(), [&](const DrawColumn& column) {
+            return m_playlistSettings.columns[column.index].cover;
+        });
+        const auto hasLeadingCover = coverColumn != columns.end()
+            && coverColumn->rect.left <= layout.playlistBody.left + 0.5F;
+        const auto contentLeft = hasLeadingCover ? coverColumn->rect.right : layout.playlistBody.left;
         auto alignment = [](ColumnAlignment value) {
             if (value == ColumnAlignment::center) return DWRITE_TEXT_ALIGNMENT_CENTER;
             if (value == ColumnAlignment::trailing) return DWRITE_TEXT_ALIGNMENT_TRAILING;
@@ -4462,11 +4610,13 @@ private:
             if (definition.id == m_sortColumnId) label += m_sortDescending ? L"  \x2193" : L"  \x2191";
             drawTextWith(label, rect, m_secondaryFormat.Get(),
                 alignment(definition.alignment), m_foreground.Get());
-            m_renderTarget->DrawLine(D2D1::Point2F(column.rect.right, column.rect.top + 5.0F),
-                D2D1::Point2F(column.rect.right, column.rect.bottom - 5.0F), m_disabled.Get(), 0.5F);
+            if (!definition.cover) {
+                m_renderTarget->DrawLine(D2D1::Point2F(column.rect.right, column.rect.top + 5.0F),
+                    D2D1::Point2F(column.rect.right, column.rect.bottom - 5.0F), m_disabled.Get(), 0.5F);
+            }
         }
         m_renderTarget->FillRectangle(layout.playlistHeaderScrollbarGutter, m_panel.Get());
-        m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistHeader.left, layout.playlistHeader.bottom),
+        m_renderTarget->DrawLine(D2D1::Point2F(contentLeft, layout.playlistHeader.bottom),
             D2D1::Point2F(layout.playlistHeader.right, layout.playlistHeader.bottom), m_border.Get(), 1.0F);
 
         if (m_activePlaylist == SIZE_MAX) {
@@ -4480,7 +4630,7 @@ private:
             return;
         }
 
-        constexpr float rowHeight = 26.0F;
+        const auto rowHeight = playlistRowHeight();
         std::vector<std::pair<std::size_t, float>> visibleGroupCovers;
         const auto visible = visibleRows(m_playlistTopRow, m_playlistDisplayRows.size(),
             layout.playlistBody.bottom - layout.playlistBody.top, rowHeight, 0);
@@ -4489,35 +4639,80 @@ private:
             const auto y = layout.playlistBody.top
                 + static_cast<float>(displayIndex - m_playlistTopRow) * rowHeight;
             const auto rowRect = D2D1::RectF(layout.playlistBody.left, y, contentRight, y + rowHeight);
+            const auto contentRect = D2D1::RectF(contentLeft, y, contentRight, y + rowHeight);
             const auto& display = m_playlistDisplayRows[displayIndex];
             if (display.kind == PlaylistDisplayRowKind::groupHeader) {
                 const auto& group = m_playlistGroups[display.group];
                 if (!group.collapsed) visibleGroupCovers.emplace_back(display.group, y + rowHeight);
                 const auto groupPlaying = m_playingPlaylist == m_activePlaylist
                     && m_playingItem >= group.start && m_playingItem < group.start + group.count;
-                m_renderTarget->FillRectangle(rowRect, m_surface.Get());
+                if (m_groupHeaderStyle == GroupHeaderStyle::detailed)
+                    m_renderTarget->FillRectangle(rowRect, m_surface.Get());
                 const auto triangleX = rowRect.left + 11.0F;
                 const auto triangleY = rowRect.top + rowHeight * 0.5F;
                 if (group.collapsed) drawTriangle(D2D1::Point2F(triangleX - 3.0F, triangleY - 5.0F),
                     D2D1::Point2F(triangleX + 4.0F, triangleY), D2D1::Point2F(triangleX - 3.0F, triangleY + 5.0F), m_foreground.Get());
                 else drawTriangle(D2D1::Point2F(triangleX - 5.0F, triangleY - 3.0F),
                     D2D1::Point2F(triangleX + 5.0F, triangleY - 3.0F), D2D1::Point2F(triangleX, triangleY + 4.0F), m_foreground.Get());
-                auto leftText = utf8ToWide(group.leftPrimary.c_str());
+                const auto leftPrimary = utf8ToWide(group.leftPrimary.c_str());
                 const auto leftSecondary = utf8ToWide(group.leftSecondary.c_str());
-                if (!leftSecondary.empty()) leftText += L"  |  " + leftSecondary;
                 auto rightText = utf8ToWide(group.rightPrimary.c_str());
                 const auto rightSecondary = utf8ToWide(group.rightSecondary.c_str());
                 if (!rightSecondary.empty()) rightText = rightSecondary + L"  |  " + rightText;
                 if (groupPlaying) drawTriangle(D2D1::Point2F(rowRect.right - 16.0F, triangleY - 5.0F),
                     D2D1::Point2F(rowRect.right - 8.0F, triangleY),
                     D2D1::Point2F(rowRect.right - 16.0F, triangleY + 5.0F), m_foreground.Get());
-                drawTextWith(leftText,
-                    D2D1::RectF(rowRect.left + 24.0F, y, rowRect.right * 0.72F, y + rowHeight),
-                    m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
-                    groupPlaying ? m_accent.Get() : m_foreground.Get());
-                drawTextWith(rightText,
-                    D2D1::RectF(rowRect.right * 0.72F, y, rowRect.right - (groupPlaying ? 22.0F : 8.0F), y + rowHeight),
-                    m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_disabled.Get());
+                if (m_groupHeaderStyle == GroupHeaderStyle::compactLine) {
+                    constexpr auto textGap = 10.0F;
+                    const auto leftEdge = rowRect.left + 24.0F;
+                    const auto rightEdge = rowRect.right - (groupPlaying ? 22.0F : 10.0F);
+                    const auto usableWidth = std::max(0.0F, rightEdge - leftEdge);
+                    const auto rightWidth = std::min(measureTextWidth(rightText, m_secondaryFormat.Get()),
+                        usableWidth * 0.18F);
+                    const auto rightLeft = rightText.empty() ? rightEdge : rightEdge - rightWidth;
+                    const auto leftLimit = rightText.empty() ? rightEdge : rightLeft - textGap;
+                    const auto leftWidth = std::max(0.0F, leftLimit - leftEdge);
+                    const auto primaryWidth = measureTextWidth(leftPrimary, m_compactGroupPrimaryFormat.Get());
+                    const auto secondaryText = leftSecondary.empty() ? std::wstring{} : L"  |  " + leftSecondary;
+                    const auto secondaryWidth = measureTextWidth(secondaryText, m_compactGroupSecondaryFormat.Get());
+                    const auto primaryDrawWidth = std::min(primaryWidth, leftWidth);
+
+                    drawTextWith(leftPrimary, D2D1::RectF(leftEdge, y,
+                            leftEdge + primaryDrawWidth, y + rowHeight),
+                        m_compactGroupPrimaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
+                        groupPlaying ? m_accent.Get() : m_foreground.Get());
+                    auto leftTextEnd = leftEdge + primaryDrawWidth;
+                    if (primaryWidth <= leftWidth && !secondaryText.empty()) {
+                        const auto secondaryDrawWidth = std::min(secondaryWidth,
+                            std::min(std::max(0.0F, leftLimit - leftTextEnd), usableWidth * 0.22F));
+                        drawTextWith(secondaryText, D2D1::RectF(leftTextEnd, y,
+                                leftTextEnd + secondaryDrawWidth, y + rowHeight),
+                            m_compactGroupSecondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING, m_disabled.Get());
+                        leftTextEnd += secondaryDrawWidth;
+                    }
+                    if (!rightText.empty()) {
+                        drawTextWith(rightText, D2D1::RectF(rightLeft, y, rightEdge, y + rowHeight),
+                            m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_disabled.Get());
+                    }
+                    const auto lineStart = leftTextEnd + textGap;
+                    const auto lineEnd = (rightText.empty() ? rightEdge : rightLeft) - textGap;
+                    if (lineEnd - lineStart >= 12.0F) {
+                        m_renderTarget->FillRectangle(D2D1::RectF(lineStart, triangleY - 0.5F,
+                            lineEnd, triangleY + 0.5F), m_accent.Get());
+                    }
+                } else {
+                    auto leftText = leftPrimary;
+                    if (!leftSecondary.empty()) leftText += L"  |  " + leftSecondary;
+                    drawTextWith(leftText,
+                        D2D1::RectF(rowRect.left + 24.0F, y,
+                            rowRect.left + (rowRect.right - rowRect.left) * 0.72F, y + rowHeight),
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_LEADING,
+                        groupPlaying ? m_accent.Get() : m_foreground.Get());
+                    drawTextWith(rightText,
+                        D2D1::RectF(rowRect.left + (rowRect.right - rowRect.left) * 0.72F, y,
+                            rowRect.right - (groupPlaying ? 22.0F : 8.0F), y + rowHeight),
+                        m_secondaryFormat.Get(), DWRITE_TEXT_ALIGNMENT_TRAILING, m_disabled.Get());
+                }
                 continue;
             }
             if (display.kind == PlaylistDisplayRowKind::spacer) continue;
@@ -4525,14 +4720,14 @@ private:
             const auto selected = m_playlistSelection.get(index);
             const auto focused = index == m_playlistFocus;
             const auto playing = m_playingPlaylist == m_activePlaylist && index == m_playingItem;
-            if (selected) m_renderTarget->FillRectangle(rowRect, m_surface.Get());
+            if (selected) m_renderTarget->FillRectangle(contentRect, m_surface.Get());
             if (playing) {
-                m_renderTarget->FillRectangle(D2D1::RectF(rowRect.left, rowRect.top,
-                    rowRect.left + 4.0F, rowRect.bottom), m_accent.Get());
+                m_renderTarget->FillRectangle(D2D1::RectF(contentRect.left, contentRect.top,
+                    contentRect.left + 4.0F, contentRect.bottom), m_accent.Get());
             }
             if (focused) {
-                const auto focusRect = D2D1::RectF(rowRect.left + 1.0F, rowRect.top + 1.0F,
-                    rowRect.right - 1.0F, rowRect.bottom - 1.0F);
+                const auto focusRect = D2D1::RectF(contentRect.left + 1.0F, contentRect.top + 1.0F,
+                    contentRect.right - 1.0F, contentRect.bottom - 1.0F);
                 m_renderTarget->DrawRectangle(focusRect, m_focusBrush.Get(), 1.0F);
             }
             const auto row = formatPlaylistRow(index);
@@ -4540,7 +4735,8 @@ private:
             for (const auto& column : columns) {
                 const auto& definition = m_playlistSettings.columns[column.index];
                 if (definition.cover || column.index >= row.columns.size()) continue;
-                auto rect = D2D1::RectF(column.rect.left + 6.0F, y, column.rect.right - 6.0F, y + rowHeight);
+                auto rect = D2D1::RectF(column.rect.left + 6.0F, y, column.rect.right - 6.0F,
+                    y + (m_trackRowLayout == TrackRowLayout::twoLine ? rowHeight * 0.58F : rowHeight));
                 auto text = row.columns[column.index];
                 if (definition.id == "builtin.state") {
                     text = compactQueuePositions(queuePositionsForTrack(index));
@@ -4553,8 +4749,15 @@ private:
                 }
                 drawTextWith(text, rect, m_secondaryFormat.Get(),
                     alignment(definition.alignment), textBrush);
+                if (m_trackRowLayout == TrackRowLayout::twoLine && column.index < row.secondaryColumns.size()
+                    && !row.secondaryColumns[column.index].empty()) {
+                    drawTextWith(row.secondaryColumns[column.index],
+                        D2D1::RectF(column.rect.left + 6.0F, y + rowHeight * 0.48F,
+                            column.rect.right - 6.0F, y + rowHeight),
+                        m_secondaryFormat.Get(), alignment(definition.alignment), m_disabled.Get());
+                }
             }
-            m_renderTarget->DrawLine(D2D1::Point2F(rowRect.left, rowRect.bottom),
+            m_renderTarget->DrawLine(D2D1::Point2F(contentLeft, rowRect.bottom),
                 D2D1::Point2F(rowRect.right, rowRect.bottom), m_surface.Get(), 1.0F);
         }
         if ((m_playlistDragging || (m_externalDropActive
@@ -4566,19 +4769,15 @@ private:
                 const auto lineY = layout.playlistBody.top
                     + static_cast<float>(displayBoundary - m_playlistTopRow) * rowHeight;
                 if (lineY >= layout.playlistBody.top && lineY <= layout.playlistBody.bottom) {
-                    m_renderTarget->DrawLine(D2D1::Point2F(layout.playlistBody.left, lineY),
+                    m_renderTarget->DrawLine(D2D1::Point2F(contentLeft, lineY),
                         D2D1::Point2F(layout.playlistBody.right, lineY), m_accent.Get(), 2.0F);
                 }
             }
         }
-        const auto coverColumn = std::find_if(columns.begin(), columns.end(), [&](const DrawColumn& column) {
-            return m_playlistSettings.columns[column.index].cover;
-        });
         if (coverColumn != columns.end()) {
             for (const auto& [groupIndex, top] : visibleGroupCovers) {
                 auto rect = D2D1::RectF(coverColumn->rect.left + 4.0F, top + 4.0F,
                     coverColumn->rect.right - 4.0F, top + rowHeight * 4.0F - 4.0F);
-                m_renderTarget->FillRectangle(rect, m_surface.Get());
                 auto& artwork = requestGroupArtwork(groupIndex);
                 createGroupArtworkBitmap(artwork);
                 if (artwork.bitmap) {
@@ -4587,11 +4786,12 @@ private:
                         (rect.bottom - rect.top) / bitmapSize.height);
                     const auto width = bitmapSize.width * scale;
                     const auto height = bitmapSize.height * scale;
-                    const auto target = D2D1::RectF(rect.left + (rect.right - rect.left - width) * 0.5F,
-                        rect.top + (rect.bottom - rect.top - height) * 0.5F,
-                        rect.left + (rect.right - rect.left + width) * 0.5F,
-                        rect.top + (rect.bottom - rect.top + height) * 0.5F);
-                    m_renderTarget->DrawBitmap(artwork.bitmap.Get(), target, 1.0F,
+                    const auto destination = D2D1::RectF(
+                        (rect.left + rect.right - width) * 0.5F,
+                        rect.top,
+                        (rect.left + rect.right + width) * 0.5F,
+                        rect.top + height);
+                    m_renderTarget->DrawBitmap(artwork.bitmap.Get(), destination, 1.0F,
                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 } else {
                     m_renderTarget->DrawRectangle(rect, m_disabled.Get(), 1.0F);
@@ -4637,15 +4837,18 @@ private:
         if (!contains(layout.header, D2D1::Point2F(layout.header.left + 1.0F, layout.header.top + 1.0F))) return;
         createArtworkBitmap();
         if (m_artworkBitmap) {
+            m_renderTarget->FillRectangle(layout.artwork, m_surface.Get());
             const auto bitmapSize = m_artworkBitmap->GetSize();
-            const auto scale = std::min((layout.artwork.right - layout.artwork.left) / bitmapSize.width,
+            const auto scale = std::max((layout.artwork.right - layout.artwork.left) / bitmapSize.width,
                 (layout.artwork.bottom - layout.artwork.top) / bitmapSize.height);
-            const auto drawWidth = bitmapSize.width * scale;
-            const auto drawHeight = bitmapSize.height * scale;
-            const auto left = (layout.artwork.left + layout.artwork.right - drawWidth) * 0.5F;
-            const auto top = (layout.artwork.top + layout.artwork.bottom - drawHeight) * 0.5F;
-            m_renderTarget->DrawBitmap(m_artworkBitmap.Get(), D2D1::RectF(left, top, left + drawWidth, top + drawHeight),
-                1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            const auto sourceWidth = (layout.artwork.right - layout.artwork.left) / scale;
+            const auto sourceHeight = (layout.artwork.bottom - layout.artwork.top) / scale;
+            const auto source = D2D1::RectF((bitmapSize.width - sourceWidth) * 0.5F,
+                (bitmapSize.height - sourceHeight) * 0.5F,
+                (bitmapSize.width + sourceWidth) * 0.5F,
+                (bitmapSize.height + sourceHeight) * 0.5F);
+            m_renderTarget->DrawBitmap(m_artworkBitmap.Get(), layout.artwork, 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, source);
         } else {
             m_renderTarget->FillRectangle(layout.artwork, m_surface.Get());
             m_renderTarget->DrawRectangle(layout.artwork, m_border.Get(), 1.0F);
@@ -4814,6 +5017,16 @@ private:
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
+    [[nodiscard]] float measureTextWidth(const std::wstring& text, IDWriteTextFormat* format) const {
+        if (text.empty() || !format || !m_dwriteFactory) return 0.0F;
+        ComPtr<IDWriteTextLayout> layout;
+        if (FAILED(m_dwriteFactory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()),
+                format, 16384.0F, 256.0F, layout.ReleaseAndGetAddressOf()))) return 0.0F;
+        DWRITE_TEXT_METRICS metrics{};
+        return SUCCEEDED(layout->GetMetrics(&metrics))
+            ? std::ceil(metrics.widthIncludingTrailingWhitespace + 3.0F) : 0.0F;
+    }
+
     [[nodiscard]] std::wstring formatTargetField(const titleformat_object::ptr& script,
         const wchar_t* fallback) const {
         if (m_target.is_empty() || script.is_empty()) return fallback;
@@ -4854,9 +5067,11 @@ private:
         const auto container = m_target->get_info_ref();
         if (container.is_empty()) return;
         const auto& info = container->info();
+        const auto settings = readSettings();
 
-        addDetailSection(L"Metadata");
-        for (t_size index = 0; index < info.meta_get_count(); ++index) {
+        if (settings.detailsMetadata) {
+            addDetailSection(L"Metadata");
+            for (t_size index = 0; index < info.meta_get_count(); ++index) {
             const auto name = utf8ToWide(info.meta_enum_name(index));
             auto normalized = name;
             std::transform(normalized.begin(), normalized.end(), normalized.begin(),
@@ -4869,40 +5084,46 @@ private:
                 if (!values.empty()) values += L"; ";
                 values += utf8ToWide(info.meta_enum_value(index, valueIndex));
             }
-            addDetailRow(name, std::move(values));
+                addDetailRow(name, std::move(values));
+            }
         }
 
-        addDetailSection(L"Location");
-        addDetailRow(L"File name", formatTargetExpression("%filename_ext%"));
-        addDetailRow(L"Folder", formatTargetExpression("$directory(%path%)"));
-        addDetailRow(L"Path", utf8ToWide(m_target->get_path()));
-        addDetailRow(L"Subsong", std::to_wstring(m_target->get_subsong_index()));
-        addDetailRow(L"File size", formatTargetExpression("%filesize_natural%"));
-        addDetailRow(L"Last modified", formatTargetExpression("%last_modified%"));
+        if (settings.detailsLocation) {
+            addDetailSection(L"Location");
+            addDetailRow(L"File name", formatTargetExpression("%filename_ext%"));
+            addDetailRow(L"Folder", formatTargetExpression("$directory(%path%)"));
+            addDetailRow(L"Path", utf8ToWide(m_target->get_path()));
+            addDetailRow(L"Subsong", std::to_wstring(m_target->get_subsong_index()));
+            addDetailRow(L"File size", formatTargetExpression("%filesize_natural%"));
+            addDetailRow(L"Last modified", formatTargetExpression("%last_modified%"));
+        }
 
-        addDetailSection(L"Technical");
-        addDetailRow(L"Duration", formatPlaybackTime(info.get_length(), info.get_length() > 0.0));
-        for (t_size index = 0; index < info.info_get_count(); ++index) {
+        if (settings.detailsTechnical) {
+            addDetailSection(L"Technical");
+            addDetailRow(L"Duration", formatPlaybackTime(info.get_length(), info.get_length() > 0.0));
+            for (t_size index = 0; index < info.info_get_count(); ++index) {
             const auto name = utf8ToWide(info.info_enum_name(index));
             auto normalized = name;
             std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                 [](wchar_t value) { return static_cast<wchar_t>(std::towupper(value)); });
             if (normalized == L"MD5") continue;
-            addDetailRow(name, utf8ToWide(info.info_enum_value(index)));
+                addDetailRow(name, utf8ToWide(info.info_enum_value(index)));
+            }
         }
 
-        addDetailSection(L"Playback Statistics");
-        const auto statisticsStart = m_detailRows.size();
-        addDetailRow(L"Rating", formatTargetExpression("[%rating%]"));
-        addDetailRow(L"Play count", formatTargetExpression("[%play_count%]"));
-        addDetailRow(L"First played", formatTargetExpression("[%first_played%]"));
-        addDetailRow(L"Last played", formatTargetExpression("[%last_played%]"));
-        addDetailRow(L"Added", formatTargetExpression("[%added%]"));
-        if (m_detailRows.size() == statisticsStart && !m_ratingAvailable) {
-            addDetailRow(L"Status", L"Playback Statistics unavailable");
+        if (settings.detailsPlaybackStatistics) {
+            addDetailSection(L"Playback Statistics");
+            const auto statisticsStart = m_detailRows.size();
+            addDetailRow(L"Rating", formatTargetExpression("[%rating%]"));
+            addDetailRow(L"Play count", formatTargetExpression("[%play_count%]"));
+            addDetailRow(L"First played", formatTargetExpression("[%first_played%]"));
+            addDetailRow(L"Last played", formatTargetExpression("[%last_played%]"));
+            addDetailRow(L"Added", formatTargetExpression("[%added%]"));
+            if (m_detailRows.size() == statisticsStart && !m_ratingAvailable)
+                addDetailRow(L"Status", L"Playback Statistics unavailable");
         }
 
-        if (readSettings().showReplayGain) {
+        if (settings.detailsReplayGain) {
             addDetailSection(L"ReplayGain");
             addDetailRow(L"Track gain", formatTargetExpression("[%replaygain_track_gain%]"));
             addDetailRow(L"Track peak", formatTargetExpression("[%replaygain_track_peak%]"));
@@ -4914,7 +5135,8 @@ private:
 
     void refreshNowPlayingTarget() {
         metadb_handle_ptr target;
-        if (m_state.playing) {
+        const auto settings = readSettings();
+        if (m_state.playing && settings.rightPanelFollow == RightPanelFollow::playingTrack) {
             playback_control::get()->get_now_playing(target);
         } else {
             playlist_manager::get()->activeplaylist_get_focus_item_handle(target);
@@ -4941,6 +5163,17 @@ private:
         m_trackTitle = formatTargetField(m_titleScript, L"Unknown title");
         m_artistAlbum = formatTargetField(m_artistScript, L"Unknown artist") + L" | "
             + formatTargetField(m_albumScript, L"Unknown album");
+        titleformat_object::ptr summaryScript;
+        const auto summaryFormat = readSettings().nowPlayingSummaryFormat;
+        if (titleformat_compiler::get()->compile(summaryScript, summaryFormat.c_str())) {
+            const auto summary = formatTargetField(summaryScript, L"");
+            const auto separator = summary.find(L'\n');
+            if (separator == std::wstring::npos) { if (!summary.empty()) m_artistAlbum = summary; }
+            else {
+                const auto second = summary.substr(separator + 1);
+                if (!second.empty()) m_artistAlbum = second;
+            }
+        }
         const auto codec = formatTargetField(m_codecScript, L"Unknown codec");
         auto bitrate = formatTargetField(m_bitrateScript, L"Unknown bitrate");
         if (bitrate != L"Unknown bitrate" && bitrate.find(L"kbps") == std::wstring::npos) bitrate += L" kbps";
@@ -5310,6 +5543,8 @@ private:
         }
         m_artworkBitmap.Reset();
         m_artworkPixels = {target.is_valid() ? ArtworkStatus::unavailable : ArtworkStatus::missing};
+        m_artworkFrames.clear(); m_artworkFrameLabels.clear(); m_artworkFrameSourceBits.clear(); m_artworkFrameIndex = 0;
+        if (const auto wnd = get_wnd()) KillTimer(wnd, kArtworkRotationTimer);
         m_artworkTheme.reset();
         m_artworkLoading = target.is_valid();
         if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
@@ -5317,14 +5552,39 @@ private:
         }
         if (target.is_empty()) return;
 
-        fb2k::splitTask([state, target, generation, aborter] {
-            auto pixels = loadFrontArtwork(target, *aborter);
-            if (pixels.status == ArtworkStatus::aborted) return;
-            const auto artworkTheme = pixels.status == ArtworkStatus::ready
-                ? extractArtworkTheme(pixels.bgra, pixels.width, pixels.height) : std::nullopt;
-            fb2k::inMainThread([state, generation, pixels = std::move(pixels), artworkTheme]() mutable {
+        metadb_handle_ptr themeTarget = target;
+        if (playback_control::get()->is_playing()) playback_control::get()->get_now_playing(themeTarget);
+        fb2k::splitTask([state, target, themeTarget, generation, aborter] {
+            struct Source { std::int64_t bit; GUID id; const wchar_t* label; };
+            const std::array sources{Source{kArtworkFront, album_art_ids::cover_front, L"Front Cover"},
+                Source{kArtworkBack, album_art_ids::cover_back, L"Back Cover"},
+                Source{kArtworkDisc, album_art_ids::disc, L"Disc"},
+                Source{kArtworkArtist, album_art_ids::artist, L"Artist"}};
+            std::vector<ArtworkPixels> frames; std::vector<std::wstring> labels;
+            std::vector<std::int64_t> sourceBits;
+            for (const auto& source : sources) {
+                auto pixels = loadArtwork(target, source.id, *aborter);
+                if (pixels.status == ArtworkStatus::aborted) return;
+                if (pixels.status == ArtworkStatus::ready) {
+                    frames.push_back(std::move(pixels)); labels.emplace_back(source.label);
+                    sourceBits.push_back(source.bit);
+                }
+            }
+            std::optional<ThemePalette> artworkTheme;
+            for (const auto id : {album_art_ids::cover_front, album_art_ids::cover_back,
+                    album_art_ids::disc, album_art_ids::artist}) {
+                auto themePixels = loadArtwork(themeTarget, id, *aborter);
+                if (themePixels.status == ArtworkStatus::aborted) return;
+                if (themePixels.status == ArtworkStatus::ready) {
+                    artworkTheme = extractArtworkTheme(themePixels.bgra, themePixels.width, themePixels.height);
+                    break;
+                }
+            }
+            fb2k::inMainThread([state, generation, frames = std::move(frames), labels = std::move(labels),
+                    sourceBits = std::move(sourceBits), artworkTheme]() mutable {
                 if (!state->alive.load() || state->generation.load() != generation || !IsWindow(state->window)) return;
-                ArtworkCompletion completion{generation, std::move(pixels), artworkTheme};
+                ArtworkCompletion completion{generation, std::move(frames), std::move(labels),
+                    std::move(sourceBits), artworkTheme};
                 SendMessage(state->window, kArtworkReadyMessage, 0, reinterpret_cast<LPARAM>(&completion));
             });
         });
@@ -5333,7 +5593,25 @@ private:
     void applyArtworkCompletion(ArtworkCompletion& completion) {
         if (!m_artworkAsync->alive.load() || completion.generation != m_artworkAsync->generation.load()) return;
         m_artworkLoading = false;
-        m_artworkPixels = std::move(completion.pixels);
+        m_artworkFrames = std::move(completion.frames); m_artworkFrameLabels = std::move(completion.labels);
+        m_artworkFrameSourceBits = std::move(completion.sourceBits);
+        const auto settings = readSettings();
+        auto selected = std::size_t{};
+        const auto preferredBit = m_artworkPinned ? m_pinnedArtworkSourceBit : 0;
+        const auto preferred = std::find(m_artworkFrameSourceBits.begin(), m_artworkFrameSourceBits.end(), preferredBit);
+        if (preferred != m_artworkFrameSourceBits.end()) {
+            selected = static_cast<std::size_t>(preferred - m_artworkFrameSourceBits.begin());
+        } else if (!m_artworkPinned) {
+            const auto enabled = std::find_if(m_artworkFrameSourceBits.begin(), m_artworkFrameSourceBits.end(),
+                [&](std::int64_t bit) { return (settings.artworkSourceMask & bit) != 0; });
+            if (enabled != m_artworkFrameSourceBits.end())
+                selected = static_cast<std::size_t>(enabled - m_artworkFrameSourceBits.begin());
+        }
+        m_artworkFrameIndex = selected;
+        m_artworkPixels = m_artworkFrames.empty() ? ArtworkPixels{ArtworkStatus::missing}
+            : std::move(m_artworkFrames[selected]);
+        if (m_artworkPinned && selected < m_artworkFrameSourceBits.size())
+            m_pinnedArtworkSourceBit = m_artworkFrameSourceBits[selected];
         m_artworkTheme = completion.artworkTheme;
         m_artworkBitmap.Reset();
         if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
@@ -5343,7 +5621,43 @@ private:
         updateTooltip(m_hover);
         rebuildTrackDetails();
         if (const auto wnd = get_wnd()) syncLyricsHost(wnd);
+        restartArtworkRotationTimer();
         invalidate();
+    }
+
+    void showArtworkFrame(std::size_t index) {
+        if (index >= m_artworkFrames.size() || index == m_artworkFrameIndex) return;
+        if (m_artworkFrameIndex < m_artworkFrames.size())
+            std::swap(m_artworkPixels, m_artworkFrames[m_artworkFrameIndex]);
+        m_artworkFrameIndex = index;
+        std::swap(m_artworkPixels, m_artworkFrames[m_artworkFrameIndex]);
+        if (m_artworkPinned && index < m_artworkFrameSourceBits.size())
+            m_pinnedArtworkSourceBit = m_artworkFrameSourceBits[index];
+        m_artworkBitmap.Reset(); createArtworkBitmap(); updateTooltip(m_hover); invalidate();
+    }
+
+    void restartArtworkRotationTimer() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        KillTimer(wnd, kArtworkRotationTimer);
+        const auto settings = readSettings();
+        if (m_artworkPinned || !settings.artworkRotationEnabled) return;
+        const auto eligible = std::count_if(m_artworkFrameSourceBits.begin(), m_artworkFrameSourceBits.end(),
+            [&](std::int64_t bit) { return (settings.artworkSourceMask & bit) != 0; });
+        if (eligible > 1) SetTimer(wnd, kArtworkRotationTimer,
+            static_cast<UINT>(settings.artworkRotationSeconds * 1000), nullptr);
+    }
+
+    void rotateArtworkFrame() {
+        const auto settings = readSettings();
+        if (m_artworkPinned || !settings.artworkRotationEnabled || m_artworkFrames.size() <= 1) return;
+        for (std::size_t offset = 1; offset <= m_artworkFrames.size(); ++offset) {
+            const auto candidate = (m_artworkFrameIndex + offset) % m_artworkFrames.size();
+            if ((settings.artworkSourceMask & m_artworkFrameSourceBits[candidate]) != 0) {
+                showArtworkFrame(candidate);
+                return;
+            }
+        }
     }
 
     void stopArtworkWork() noexcept {
@@ -5731,6 +6045,50 @@ private:
         CloseClipboard();
     }
 
+    void showArtworkMenu(HWND wnd, POINT clientPoint) {
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        constexpr std::array<std::pair<std::int64_t, const wchar_t*>, 4> sources{{
+            {kArtworkFront, L"Front Cover"}, {kArtworkBack, L"Back Cover"},
+            {kArtworkDisc, L"Disc"}, {kArtworkArtist, L"Artist"},
+        }};
+        const auto currentBit = m_artworkFrameIndex < m_artworkFrameSourceBits.size()
+            ? m_artworkFrameSourceBits[m_artworkFrameIndex] : 0;
+        for (std::size_t index = 0; index < sources.size(); ++index) {
+            const auto available = std::find(m_artworkFrameSourceBits.begin(),
+                m_artworkFrameSourceBits.end(), sources[index].first) != m_artworkFrameSourceBits.end();
+            auto flags = static_cast<UINT>(MF_STRING);
+            if (!available) flags |= MF_GRAYED;
+            if (currentBit == sources[index].first) flags |= MF_CHECKED;
+            AppendMenuW(menu, flags, 100 + static_cast<UINT>(index), sources[index].second);
+        }
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        auto pinFlags = static_cast<UINT>(MF_STRING);
+        if (m_artworkFrames.empty()) pinFlags |= MF_GRAYED;
+        if (m_artworkPinned) pinFlags |= MF_CHECKED;
+        AppendMenuW(menu, pinFlags, 200, L"Pin current artwork");
+        ClientToScreen(wnd, &clientPoint);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            clientPoint.x, clientPoint.y, 0, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command >= 100 && command < 100 + sources.size()) {
+            const auto bit = sources[command - 100].first;
+            const auto found = std::find(m_artworkFrameSourceBits.begin(), m_artworkFrameSourceBits.end(), bit);
+            if (found != m_artworkFrameSourceBits.end()) {
+                showArtworkFrame(static_cast<std::size_t>(found - m_artworkFrameSourceBits.begin()));
+                if (m_artworkPinned) m_pinnedArtworkSourceBit = bit;
+                restartArtworkRotationTimer();
+            }
+        } else if (command == 200 && !m_artworkFrames.empty()) {
+            m_artworkPinned = !m_artworkPinned;
+            if (m_artworkPinned && m_artworkFrameIndex < m_artworkFrameSourceBits.size())
+                m_pinnedArtworkSourceBit = m_artworkFrameSourceBits[m_artworkFrameIndex];
+            restartArtworkRotationTimer();
+            updateTooltip(m_hover);
+            invalidate();
+        }
+    }
+
     void showTrackDetailsMenu(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
         if (m_lowerRightView != LowerRightView::trackDetails
             || !contains(calculateLayout(wnd).lowerRight, point)) return;
@@ -6046,7 +6404,7 @@ private:
             m_playlistBrowserDragSnapshot.clear();
         } else if (active == ControlId::playlistHeader) {
             if (m_headerResizeColumns) {
-                writePlaylistViewSettings(m_playlistSettings);
+                persistEffectivePlaylistSettings();
             } else if (m_headerPressedColumn) {
                 const auto source = *m_headerPressedColumn;
                 if (m_headerMoved) {
@@ -6054,7 +6412,7 @@ private:
                         target && *target != source && !m_playlistSettings.columns[source].cover
                             && !m_playlistSettings.columns[*target].cover) {
                         std::swap(m_playlistSettings.columns[source], m_playlistSettings.columns[*target]);
-                        writePlaylistViewSettings(m_playlistSettings);
+                        persistEffectivePlaylistSettings();
                     }
                 } else {
                     const auto& definition = m_playlistSettings.columns[source];
@@ -6248,6 +6606,71 @@ private:
         }
     }
 
+    void showDefaultPlaylistMenu() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        const auto configured = readPlaylistBrowserSettings().defaultPlaylistGuid;
+        std::vector<GUID> playlistGuids;
+        auto api = playlist_manager_v5::get();
+        pfc::string8 name;
+        for (t_size index = 0; index < api->get_playlist_count(); ++index) {
+            const auto guid = api->playlist_get_guid(index);
+            if (isAlbumBridgeGuid(guid) || !api->playlist_get_name(index, name)) continue;
+            playlistGuids.push_back(guid);
+            const auto checked = sameGuid(configured, guid);
+            const auto label = utf8ToWide(name.c_str());
+            AppendMenuW(menu, MF_STRING | (checked ? MF_CHECKED : 0),
+                100 + static_cast<UINT>(playlistGuids.size() - 1), label.c_str());
+        }
+        if (playlistGuids.empty()) AppendMenuW(menu, MF_STRING | MF_DISABLED, 1, L"No playlist available");
+        const auto layout = calculateLayout(wnd);
+        POINT point{static_cast<LONG>(layout.albumDefaultPlaylist.left * dpiScale()),
+            static_cast<LONG>(layout.albumDefaultPlaylist.bottom * dpiScale())};
+        ClientToScreen(wnd, &point);
+        const auto command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x, point.y, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command >= 100 && command - 100 < playlistGuids.size()) {
+            auto settings = readPlaylistBrowserSettings();
+            settings.defaultPlaylistGuid = playlistGuids[command - 100];
+            writePlaylistBrowserSettings(settings);
+            invalidate();
+        }
+    }
+
+    void showAlbumTileSizeMenu() {
+        const auto wnd = get_wnd();
+        if (!wnd) return;
+        const auto menu = CreatePopupMenu();
+        if (!menu) return;
+        const auto selected = readSettings().albumTileSize;
+        constexpr std::array<std::pair<AlbumTileSize, const wchar_t*>, 3> choices{{
+            {AlbumTileSize::smallTile, L"Small (144 DIP)"},
+            {AlbumTileSize::medium, L"Medium (184 DIP)"},
+            {AlbumTileSize::largeTile, L"Large (240 DIP)"},
+        }};
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            AppendMenuW(menu, MF_STRING | (selected == choices[index].first ? MF_CHECKED : 0),
+                100 + static_cast<UINT>(index), choices[index].second);
+        }
+        const auto layout = calculateLayout(wnd);
+        POINT point{static_cast<LONG>(layout.albumTileSize.left * dpiScale()),
+            static_cast<LONG>(layout.albumTileSize.bottom * dpiScale())};
+        ClientToScreen(wnd, &point);
+        const auto command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x, point.y, wnd, nullptr);
+        DestroyMenu(menu);
+        if (command >= 100 && command - 100 < choices.size()) {
+            auto settings = readSettings();
+            settings.albumTileSize = choices[command - 100].first;
+            writeSettings(settings);
+            clampAlbumScroll();
+            invalidate();
+        }
+    }
+
     bool onKeyDown(HWND wnd, WPARAM key) {
         if (m_workspace == Workspace::album && (m_focus == ControlId::albumGrid
                 || m_focus == ControlId::albumTrackList)) {
@@ -6402,6 +6825,8 @@ private:
         case ControlId::albumWorkspace: setWorkspace(Workspace::album); break;
         case ControlId::albumList: openAlbumList(); break;
         case ControlId::albumSource: showAlbumSourceMenu(); break;
+        case ControlId::albumDefaultPlaylist: showDefaultPlaylistMenu(); break;
+        case ControlId::albumTileSize: showAlbumTileSizeMenu(); break;
         case ControlId::albumLibraryPreferences: library_manager::get()->show_preferences(); break;
         case ControlId::queueToggle: toggleQueueMode(); break;
         case ControlId::playbackOrder: showPlaybackOrderMenu(); break;
@@ -6536,6 +6961,8 @@ private:
             case ControlId::albumWorkspace: m_tooltipText = L"Album Workspace"; break;
             case ControlId::albumList: m_tooltipText = L"Open foobar2000 Album List"; break;
             case ControlId::albumSource: m_tooltipText = L"Choose album source"; break;
+            case ControlId::albumDefaultPlaylist: m_tooltipText = L"Choose the default playlist"; break;
+            case ControlId::albumTileSize: m_tooltipText = L"Choose album tile size"; break;
             case ControlId::albumLibraryPreferences: m_tooltipText = L"Open Media Library Preferences"; break;
             case ControlId::albumGrid: m_tooltipText.clear(); break;
             case ControlId::seek: m_tooltipText = L"Seek"; break;
@@ -6552,7 +6979,9 @@ private:
             case ControlId::outputDevice: m_tooltipText = L"Output Device: " + outputDeviceName(); break;
             case ControlId::artwork:
                 if (m_artworkLoading) m_tooltipText = L"Loading artwork...";
-                else if (m_artworkPixels.status == ArtworkStatus::ready) m_tooltipText = L"Front cover";
+                else if (m_artworkPixels.status == ArtworkStatus::ready) m_tooltipText =
+                    (m_artworkFrameIndex < m_artworkFrameLabels.size() ? m_artworkFrameLabels[m_artworkFrameIndex] : L"Artwork")
+                    + (m_artworkPinned ? L" (pinned)" : L"");
                 else if (m_artworkPixels.status == ArtworkStatus::missing) m_tooltipText = L"No artwork";
                 else m_tooltipText = L"Artwork unavailable";
                 break;
@@ -6587,6 +7016,9 @@ private:
         rebuildPlaylistGroups();
         clampPlaylistScroll();
         clampPlaylistBrowserScroll();
+        refreshNowPlayingTarget();
+        rebuildTrackDetails();
+        startArtworkWork(m_target);
         if (settings.lyricsAutoSwitch != m_autoSwitchEnabled) {
             m_autoSwitchEnabled = settings.lyricsAutoSwitch;
             m_lowerRightView = settings.lyricsAutoSwitch
@@ -6613,6 +7045,12 @@ private:
     int m_rating{};
     bool m_ratingAvailable{};
     ArtworkPixels m_artworkPixels{ArtworkStatus::missing};
+    std::vector<ArtworkPixels> m_artworkFrames;
+    std::vector<std::wstring> m_artworkFrameLabels;
+    std::vector<std::int64_t> m_artworkFrameSourceBits;
+    std::size_t m_artworkFrameIndex{};
+    std::int64_t m_pinnedArtworkSourceBit{};
+    bool m_artworkPinned{};
     std::optional<ThemePalette> m_artworkTheme;
     bool m_artworkLoading{};
     std::shared_ptr<ArtworkAsyncState> m_artworkAsync{std::make_shared<ArtworkAsyncState>()};
@@ -6745,6 +7183,9 @@ private:
     std::vector<PlaylistGroup> m_playlistGroups;
     std::vector<PlaylistDisplayRow> m_playlistDisplayRows;
     std::vector<titleformat_object::ptr> m_playlistColumnScripts;
+    std::vector<titleformat_object::ptr> m_playlistSecondaryColumnScripts;
+    TrackRowLayout m_trackRowLayout{TrackRowLayout::standard};
+    GroupHeaderStyle m_groupHeaderStyle{GroupHeaderStyle::detailed};
     std::array<titleformat_object::ptr, 5> m_playlistGroupScripts;
     std::uint64_t m_groupArtworkGeneration{};
     GroupArtworkSource m_groupArtworkSource{GroupArtworkSource::placeholder};
@@ -6775,6 +7216,8 @@ private:
     ComPtr<IDWriteTextFormat> m_textFormat;
     ComPtr<IDWriteTextFormat> m_titleFormat;
     ComPtr<IDWriteTextFormat> m_secondaryFormat;
+    ComPtr<IDWriteTextFormat> m_compactGroupPrimaryFormat;
+    ComPtr<IDWriteTextFormat> m_compactGroupSecondaryFormat;
     titleformat_object::ptr m_titleScript;
     titleformat_object::ptr m_artistScript;
     titleformat_object::ptr m_albumScript;

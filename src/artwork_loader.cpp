@@ -121,6 +121,10 @@ private:
 } // namespace
 
 ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept {
+    return loadArtwork(target, album_art_ids::cover_front, aborter);
+}
+
+ArtworkPixels loadArtwork(const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept {
     try {
         if (target.is_empty()) {
             return {ArtworkStatus::missing};
@@ -128,9 +132,9 @@ ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& 
         metadb_handle_list items;
         items.add_item(target);
         pfc::list_t<GUID> ids;
-        ids.add_item(album_art_ids::cover_front);
+        ids.add_item(artworkId);
         const auto extractor = album_art_manager_v2::get()->open(items, ids, aborter);
-        const auto data = extractor->query(album_art_ids::cover_front, aborter);
+        const auto data = extractor->query(artworkId, aborter);
         return decodeArtwork(data, aborter, 1024U);
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};

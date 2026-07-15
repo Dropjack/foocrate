@@ -27,6 +27,8 @@ struct ArtworkPixels {
 };
 
 [[nodiscard]] ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept;
+[[nodiscard]] ArtworkPixels loadArtwork(
+    const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept;
 [[nodiscard]] ArtworkPixels loadGroupArtwork(
     metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter,
     std::uint32_t maxDimension = 1024U) noexcept;
