@@ -37,6 +37,19 @@ int main() {
     std::vector<PlaylistGroup> emptyGroups;
     expect(!togglePlaylistGroupsCollapsed(emptyGroups), "empty playlists must not report a group toggle");
 
+    std::vector<PlaylistGroupInput> largeInput;
+    largeInput.reserve(100000);
+    for (std::size_t index = 0; index < 100000; ++index) {
+        const auto group = std::to_string(index / 10);
+        largeInput.push_back({group, "Album " + group, "2025", "Artist", "Genre"});
+    }
+    const auto largeGroups = buildPlaylistGroups(largeInput, false);
+    const auto largeRows = buildPlaylistDisplayRows(largeGroups, 4);
+    expect(largeGroups.size() == 10000 && largeRows.size() == 110000,
+        "large grouped playlists must preserve deterministic row counts");
+    expect(groupForTrack(largeGroups, 99999) == 9999,
+        "large grouped playlists must retain last-track lookup");
+
     auto settings = defaultPlaylistViewSettings();
     const auto albumDisc = std::find_if(settings.groups.begin(), settings.groups.end(),
         [](const auto& group) { return group.id == "builtin.album.disc"; });

@@ -1,6 +1,6 @@
 # 018-完善 DPI 无障碍与键盘操作
 
-- 状态：已验收，等待用户提交
+- 状态：已验收并提交
 - 对应规格：[`../../specs/modules/DPI_ACCESSIBILITY_AND_KEYBOARD.md`](../../specs/modules/DPI_ACCESSIBILITY_AND_KEYBOARD.md) 0.1（已验收）
 - 前置任务：[`../017-重构Refrain设置菜单与配置界面/README.md`](../017-重构Refrain设置菜单与配置界面/README.md)（已提交为 `52a96ca 任务17完成`）
 - Fork 提交标题：`完善 DPI 无障碍与键盘操作`
@@ -73,6 +73,7 @@
 - 2026-07-15：用户确认跨屏效果与 Foobox 对比无明显问题，全部设置页正常；Tab 无反应。代码复查确认 Columns UI 在 `WM_KEYDOWN` 前将 Tab 当作焦点导航，因为 Refrain 的 `WM_GETDLGCODE` 未声明接收 Tab。补充 `DLGC_WANTTAB`，普通 Tab 由 Playlist View 处理，Shift+Tab 仍交回 Columns UI 焦点链。
 - 2026-07-15：Tab 消息入口修复后重新完成 x64 Debug/Release 构建与两套各 11 项测试，并部署到 `foobar-dev`。源/目标 DLL SHA-256 均为 `3AED9CE6D00CAA38705CF3E9EC883463DBD79BB09CE552C206B8593957ECEA55`；最新安装包 SHA-256 为 `B523073F01697ED8A0C4B5A0BE4F6054B5C17BAACC32B6B30F214AC3C829671D`。
 - 2026-07-15：用户确认设置页无问题，跨屏效果与 Foobox 对比无明显异常；Tab 全部折叠/展开修复复验通过，并明确批准任务 18 结束。
+- 2026-07-15：用户已提交为 `d7a1dfe 完善 DPI 无障碍与键盘操作`，工作树核对干净后进入任务 19。
 
 ## 改动文件
 

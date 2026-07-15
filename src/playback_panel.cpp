@@ -90,8 +90,17 @@ constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
 constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kArtworkRotationTimer = 0x5272;
-constexpr UINT_PTR kStatusTimer = 0x5272;
+constexpr UINT_PTR kStatusTimer = 0x5273;
 constexpr UINT_PTR kScrollbarVisibilityTimer = 0x5275;
+constexpr std::size_t kMaximumGroupArtworkEntries = 64;
+constexpr std::size_t kMaximumAlbumArtworkEntries = 160;
+constexpr std::size_t kMaximumArtworkCacheBytes = 64U * 1024U * 1024U;
+static_assert(kPlaylistDragTimer != kArtworkRotationTimer
+    && kPlaylistDragTimer != kStatusTimer
+    && kPlaylistDragTimer != kScrollbarVisibilityTimer
+    && kArtworkRotationTimer != kStatusTimer
+    && kArtworkRotationTimer != kScrollbarVisibilityTimer
+    && kStatusTimer != kScrollbarVisibilityTimer);
 
 std::vector<HWND> g_queueWindows;
 std::atomic_bool g_defaultPlaylistApplied{};
@@ -5389,9 +5398,8 @@ private:
         const auto found = m_groupArtworkCache.find(completion->key);
         if (found == m_groupArtworkCache.end()) return;
         m_groupArtworkBytes -= std::min(m_groupArtworkBytes, found->second.pixels.bgra.size());
-        constexpr std::size_t maximumBytes = 64U * 1024U * 1024U;
         const auto incoming = completion->pixels.bgra.size();
-        while (m_groupArtworkBytes + incoming > maximumBytes) {
+        while (m_groupArtworkBytes + incoming > kMaximumArtworkCacheBytes) {
             const auto victim = std::find_if(m_groupArtworkCache.begin(), m_groupArtworkCache.end(), [&](const auto& item) {
                 return item.first != completion->key && !item.second.loading;
             });
@@ -5400,7 +5408,7 @@ private:
             m_groupArtworkCache.erase(victim);
         }
         found->second.loading = false;
-        if (m_groupArtworkBytes + incoming <= maximumBytes) {
+        if (m_groupArtworkBytes + incoming <= kMaximumArtworkCacheBytes) {
             found->second.pixels = std::move(completion->pixels);
             m_groupArtworkBytes += incoming;
         } else {
@@ -5415,9 +5423,8 @@ private:
         const auto found = m_albumArtworkCache.find(completion.key);
         if (found == m_albumArtworkCache.end()) return;
         m_albumArtworkBytes -= std::min(m_albumArtworkBytes, found->second.pixels.bgra.size());
-        constexpr std::size_t maximumBytes = 64U * 1024U * 1024U;
         const auto incoming = completion.pixels.bgra.size();
-        while (m_albumArtworkBytes + incoming > maximumBytes) {
+        while (m_albumArtworkBytes + incoming > kMaximumArtworkCacheBytes) {
             const auto victim = std::min_element(m_albumArtworkCache.begin(), m_albumArtworkCache.end(),
                 [&](const auto& left, const auto& right) {
                     const auto leftEligible = left.first != completion.key && !left.second.loading;
@@ -5432,7 +5439,7 @@ private:
             m_albumArtworkCache.erase(victim);
         }
         found->second.loading = false;
-        if (m_albumArtworkBytes + incoming <= maximumBytes) {
+        if (m_albumArtworkBytes + incoming <= kMaximumArtworkCacheBytes) {
             found->second.pixels = std::move(completion.pixels);
             m_albumArtworkBytes += incoming;
         } else {
@@ -5494,7 +5501,7 @@ private:
             found->second.lastUse = ++m_albumArtworkUseCounter;
             return found->second;
         }
-        while (m_albumArtworkCache.size() >= 160) {
+        while (m_albumArtworkCache.size() >= kMaximumAlbumArtworkEntries) {
             const auto victim = std::min_element(m_albumArtworkCache.begin(), m_albumArtworkCache.end(),
                 [](const auto& left, const auto& right) {
                     if (left.second.loading != right.second.loading) return !left.second.loading;
@@ -5504,6 +5511,9 @@ private:
             if (victim == m_albumArtworkCache.end() || victim->second.loading) break;
             m_albumArtworkBytes -= std::min(m_albumArtworkBytes, victim->second.pixels.bgra.size());
             m_albumArtworkCache.erase(victim);
+        }
+        if (m_albumArtworkCache.size() >= kMaximumAlbumArtworkEntries) {
+            return m_albumArtworkOverflowEntry;
         }
         auto [entry, inserted] = m_albumArtworkCache.emplace(album.key, GroupArtworkCacheEntry{});
         (void)inserted;
@@ -5532,8 +5542,10 @@ private:
     GroupArtworkCacheEntry& requestGroupArtwork(std::size_t groupIndex) {
         const auto key = groupArtworkKey(groupIndex);
         if (const auto found = m_groupArtworkCache.find(key); found != m_groupArtworkCache.end()) return found->second;
-        if (m_groupArtworkCache.size() >= 64) {
-            const auto victim = m_groupArtworkCache.begin();
+        if (m_groupArtworkCache.size() >= kMaximumGroupArtworkEntries) {
+            const auto victim = std::find_if(m_groupArtworkCache.begin(), m_groupArtworkCache.end(),
+                [](const auto& item) { return !item.second.loading; });
+            if (victim == m_groupArtworkCache.end()) return m_groupArtworkOverflowEntry;
             m_groupArtworkBytes -= std::min(m_groupArtworkBytes, victim->second.pixels.bgra.size());
             m_groupArtworkCache.erase(victim);
         }
@@ -7131,6 +7143,7 @@ private:
     std::size_t m_albumArtworkBytes{};
     std::uint64_t m_albumArtworkUseCounter{};
     std::unordered_map<std::string, GroupArtworkCacheEntry> m_albumArtworkCache;
+    GroupArtworkCacheEntry m_albumArtworkOverflowEntry;
     std::vector<GroupArtworkRequest> m_albumArtworkRequests;
     std::mutex m_albumArtworkMutex;
     std::condition_variable m_albumArtworkCondition;
@@ -7237,6 +7250,7 @@ private:
     GroupArtworkSource m_groupArtworkSource{GroupArtworkSource::placeholder};
     std::size_t m_groupArtworkBytes{};
     std::unordered_map<std::string, GroupArtworkCacheEntry> m_groupArtworkCache;
+    GroupArtworkCacheEntry m_groupArtworkOverflowEntry;
     std::vector<GroupArtworkRequest> m_groupArtworkRequests;
     std::mutex m_groupArtworkMutex;
     std::condition_variable m_groupArtworkCondition;

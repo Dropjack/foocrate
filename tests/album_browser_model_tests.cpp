@@ -32,5 +32,19 @@ int main() {
     const auto partial = refrain::buildAlbumBrowserAlbums(subset);
     assert(partial.size() == 1);
     assert((partial[0].sourceIndices == std::vector<std::size_t>{7, 9}));
+
+    std::vector<AlbumSourceTrack> large;
+    large.reserve(50000);
+    for (std::size_t index = 0; index < 50000; ++index) {
+        const auto album = index / 10;
+        large.push_back({index, "Album " + std::to_string(album), "Artist " + std::to_string(album % 100),
+            "Track " + std::to_string(index), "Artist", "2025", 1,
+            static_cast<unsigned>(index % 10 + 1)});
+    }
+    const auto largeAlbums = refrain::buildAlbumBrowserAlbums(large);
+    assert(largeAlbums.size() == 5000);
+    std::size_t largeTrackCount{};
+    for (const auto& album : largeAlbums) largeTrackCount += album.sourceIndices.size();
+    assert(largeTrackCount == large.size());
     return 0;
 }
