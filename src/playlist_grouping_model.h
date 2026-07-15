@@ -66,6 +66,14 @@ struct PlaylistDisplayRow {
     return rows;
 }
 
+[[nodiscard]] inline bool togglePlaylistGroupsCollapsed(std::vector<PlaylistGroup>& groups) noexcept {
+    if (groups.empty()) return false;
+    const auto collapse = std::any_of(groups.begin(), groups.end(),
+        [](const PlaylistGroup& group) { return !group.collapsed; });
+    for (auto& group : groups) group.collapsed = collapse;
+    return true;
+}
+
 [[nodiscard]] inline std::size_t groupForTrack(
     const std::vector<PlaylistGroup>& groups, std::size_t track) noexcept {
     const auto found = std::upper_bound(groups.begin(), groups.end(), track,

@@ -487,16 +487,35 @@ public:
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         case WM_DPICHANGED:
-            m_dpi = static_cast<float>(LOWORD(wp));
+        case WM_DPICHANGED_AFTERPARENT: {
+            const auto reportedDpi = msg == WM_DPICHANGED
+                ? static_cast<UINT>(LOWORD(wp)) : GetDpiForWindow(wnd);
+            m_dpi = static_cast<float>(reportedDpi ? reportedDpi : 96U);
             releaseTextResources();
             createTextResources();
             if (m_renderTarget) {
                 m_renderTarget->SetDpi(m_dpi, m_dpi);
+                RECT client{};
+                GetClientRect(wnd, &client);
+                m_renderTarget->Resize(D2D1::SizeU(
+                    static_cast<UINT32>(std::max<LONG>(0, client.right - client.left)),
+                    static_cast<UINT32>(std::max<LONG>(0, client.bottom - client.top))));
             }
+            clampPlaylistScroll();
+            clampAlbumScroll();
+            syncLyricsHost(wnd);
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
-        case WM_SYSCOLORCHANGE:
+        }
         case WM_SETTINGCHANGE:
+            releaseTextResources();
+            createTextResources();
+            refreshThemeResources();
+            clampPlaylistScroll();
+            clampAlbumScroll();
+            syncLyricsHost(wnd);
+            return 0;
+        case WM_SYSCOLORCHANGE:
         case WM_THEMECHANGED:
             refreshThemeResources();
             return 0;
@@ -590,7 +609,7 @@ public:
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         case WM_GETDLGCODE:
-            return DLGC_WANTARROWS | DLGC_WANTCHARS;
+            return DLGC_WANTARROWS | DLGC_WANTCHARS | DLGC_WANTTAB;
         case WM_KEYDOWN:
             if (onKeyDown(wnd, wp)) {
                 return 0;
@@ -3715,19 +3734,30 @@ private:
         if (!m_dwriteFactory || m_textFormat) {
             return;
         }
-        if (SUCCEEDED(m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0F, L"", m_textFormat.ReleaseAndGetAddressOf()))) {
+        NONCLIENTMETRICSW metrics{sizeof(metrics)};
+        const auto dpi = static_cast<UINT>(std::max(96.0F, m_dpi));
+        const auto haveMetrics = SystemParametersInfoForDpi(
+            SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi) != FALSE;
+        const auto* family = haveMetrics && metrics.lfMessageFont.lfFaceName[0] != L'\0'
+            ? metrics.lfMessageFont.lfFaceName : L"Segoe UI";
+        const auto messageSize = haveMetrics
+            ? std::clamp(static_cast<float>(std::abs(metrics.lfMessageFont.lfHeight)) * 96.0F
+                    / static_cast<float>(dpi), 9.0F, 24.0F)
+            : 12.0F;
+        const auto textScale = messageSize / 12.0F;
+        if (SUCCEEDED(m_dwriteFactory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0F * textScale, L"", m_textFormat.ReleaseAndGetAddressOf()))) {
             m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             m_textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
-        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"", m_titleFormat.ReleaseAndGetAddressOf());
-        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0F, L"", m_secondaryFormat.ReleaseAndGetAddressOf());
-        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 17.0F, L"", m_compactGroupPrimaryFormat.ReleaseAndGetAddressOf());
-        m_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"", m_compactGroupSecondaryFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F * textScale, L"", m_titleFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0F * textScale, L"", m_secondaryFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 17.0F * textScale, L"", m_compactGroupPrimaryFormat.ReleaseAndGetAddressOf());
+        m_dwriteFactory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F * textScale, L"", m_compactGroupSecondaryFormat.ReleaseAndGetAddressOf());
         configureTextFormat(m_titleFormat.Get());
         configureTextFormat(m_secondaryFormat.Get());
         configureTextFormat(m_compactGroupPrimaryFormat.Get());
@@ -6765,6 +6795,13 @@ private:
             }
         }
         if (key == VK_TAB) {
+            const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (m_workspace == Workspace::playlist && !shift) {
+                if (!m_playlistSettings.autoCollapse && !m_playlistGroups.empty()) {
+                    if (togglePlaylistGroupsCollapsed(m_playlistGroups)) rebuildPlaylistDisplayRows();
+                }
+                return true;
+            }
             uie::window::g_on_tab(wnd);
             return true;
         }

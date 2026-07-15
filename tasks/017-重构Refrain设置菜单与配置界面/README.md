@@ -1,6 +1,6 @@
 # 017-重构 Refrain 设置菜单与配置界面
 
-- 状态：实现中（验收后回归修复）
+- 状态：已验收
 - 对应规格：[`../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md`](../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md) 0.4（已批准）
 - 前置任务：[`../016-实现深浅主题与强调色系统/README.md`](../016-实现深浅主题与强调色系统/README.md)（已提交为 `bfcd5a4 实现深浅主题与强调色系统`）
 - Fork 提交标题：`重构 Refrain 设置菜单与配置界面`
@@ -126,6 +126,7 @@
 - 2026-07-15：默认排序统一完成并加入回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `CF479C7B92ACCAE10E8E7EB4F8542EEC9B1987CB26D022188F43610800058082`。等待用户验证新建 Auto Playlist 的默认顺序，并在现有 Auto Playlist Properties 中按相同表达式调整一次。
 - 2026-07-15：用户截图发现 Playlist View 最后一行与底部播放控制栏重合。根因是可见容量额外计入一行部分行，且 Playlist Body 与播放栏分隔线共用同一底边。修正规则为只计算完整行，并在 1 DIP 播放栏分隔线上方结束 Playlist View、Playlist Browser 与其滚动轨道。
 - 2026-07-15：底边与完整行容量修复完成，并为 1 DIP 内容底边和整行容量增加回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `EE7E1456A0626E0BCB9C2B067BAB1F58653EA2706AAF71CAA46DB5635B16BE9A`，等待用户在 Two-line、Standard/Compact 和窗口缩放下复验最底行。
+- 2026-07-15：用户确认任务 17 及随后发现的 Auto Playlist 分组、拖拽、默认排序和 Playlist View 底边回归均已提交。Git 核对为 `e529b8d 重构 Refrain 设置菜单与配置界面`、`db55518 修正一些不在任务17里的界面错误`、`52a96ca 任务17完成`，工作树干净。任务 17 正式恢复为已验收，路线推进到任务 18 待讨论。
 
 ## 改动文件
 

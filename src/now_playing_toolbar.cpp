@@ -67,6 +67,7 @@ public:
             m_text.clear();
             return 0;
         case WM_DPICHANGED:
+        case WM_DPICHANGED_AFTERPARENT:
         case WM_SETTINGCHANGE:
             releaseFont();
             createFont(wnd);
@@ -173,10 +174,8 @@ private:
 
     void createFont(HWND wnd) {
         NONCLIENTMETRICSW metrics{sizeof(metrics)};
-        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) {
-            const auto dpi = GetDpiForWindow(wnd);
-            metrics.lfMenuFont.lfHeight = MulDiv(metrics.lfMenuFont.lfHeight,
-                static_cast<int>(dpi), 96);
+        const auto dpi = GetDpiForWindow(wnd);
+        if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi)) {
             m_font = CreateFontIndirectW(&metrics.lfMenuFont);
         }
         if (!m_font) m_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));

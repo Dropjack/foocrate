@@ -108,6 +108,7 @@ private:
             return 0;
         case WM_DPICHANGED:
         case WM_DPICHANGED_AFTERPARENT:
+        case WM_SETTINGCHANGE:
             self->m_dpi = GetDpiForWindow(window);
             self->createFont();
             EnumChildWindows(window, [](HWND child, LPARAM parameter) -> BOOL {

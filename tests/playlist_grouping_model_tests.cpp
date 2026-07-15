@@ -28,6 +28,14 @@ int main() {
     rows = buildPlaylistDisplayRows(groups, 3);
     expect(rows.size() == 5 && displayRowForTrack(rows, 0) == static_cast<std::size_t>(-1),
         "collapsed tracks must be absent without changing real indexes");
+    expect(togglePlaylistGroupsCollapsed(groups)
+            && std::all_of(groups.begin(), groups.end(), [](const auto& group) { return group.collapsed; }),
+        "Tab-style toggle must collapse every group from a mixed state");
+    expect(togglePlaylistGroupsCollapsed(groups)
+            && std::none_of(groups.begin(), groups.end(), [](const auto& group) { return group.collapsed; }),
+        "Tab-style toggle must expand every group after all are collapsed");
+    std::vector<PlaylistGroup> emptyGroups;
+    expect(!togglePlaylistGroupsCollapsed(emptyGroups), "empty playlists must not report a group toggle");
 
     auto settings = defaultPlaylistViewSettings();
     const auto albumDisc = std::find_if(settings.groups.begin(), settings.groups.end(),

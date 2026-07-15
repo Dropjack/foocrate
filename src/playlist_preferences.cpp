@@ -138,6 +138,10 @@ private:
         auto* self = reinterpret_cast<PlaylistSettingsPageInstance*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (!self || !self->m_originalProc) return DefWindowProcW(window, message, wp, lp);
         if (message == WM_SIZE) { self->layoutControls(); return 0; }
+        if (message == WM_DPICHANGED || message == WM_DPICHANGED_AFTERPARENT) {
+            self->updateDpi(GetDpiForWindow(window)); return 0;
+        }
+        if (message == WM_SETTINGCHANGE) { self->updateDpi(GetDpiForWindow(window)); return 0; }
         if (message == WM_MOUSEWHEEL) {
             const auto point = POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             if (const auto target = WindowFromPoint(point); target == self->m_profileList) {
@@ -164,10 +168,24 @@ private:
 
     [[nodiscard]] int scaled(int value) const { return MulDiv(value, static_cast<int>(m_dpi), 96); }
     void createFont() {
+        if (m_ownedFont) { DeleteObject(m_ownedFont); m_ownedFont = nullptr; }
         NONCLIENTMETRICSW metrics{sizeof(metrics)};
         if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, m_dpi))
             m_ownedFont = CreateFontIndirectW(&metrics.lfMessageFont);
         m_font = m_ownedFont ? m_ownedFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
+    void updateDpi(UINT dpi) {
+        const auto oldDpi = std::max(1U, m_dpi);
+        m_dpi = dpi ? dpi : 96U;
+        m_scrollY = MulDiv(m_scrollY, static_cast<int>(m_dpi), static_cast<int>(oldDpi));
+        createFont();
+        EnumChildWindows(m_window, [](HWND child, LPARAM font) -> BOOL {
+            SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE); return TRUE;
+        }, reinterpret_cast<LPARAM>(m_font));
+        ListView_SetColumnWidth(m_columnList, 0, scaled(180));
+        ListView_SetColumnWidth(m_columnList, 1, scaled(64));
+        layoutControls();
+        RedrawWindow(m_window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     }
     HWND add(const wchar_t* type, const wchar_t* text, DWORD style, int id) {
         auto control = CreateWindowExW(0, type, text, WS_CHILD | WS_VISIBLE | style,

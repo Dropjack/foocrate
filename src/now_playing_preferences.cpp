@@ -84,6 +84,10 @@ private:
         auto* self = reinterpret_cast<PageInstance*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (!self || !self->m_original) return DefWindowProcW(window, msg, wp, lp);
         if (msg == WM_SIZE) { self->layout(); return 0; }
+        if (msg == WM_DPICHANGED || msg == WM_DPICHANGED_AFTERPARENT) {
+            self->updateDpi(GetDpiForWindow(window)); return 0;
+        }
+        if (msg == WM_SETTINGCHANGE) { self->updateDpi(GetDpiForWindow(window)); return 0; }
         if (msg == WM_MOUSEWHEEL) {
             self->scrollBy(-GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * self->s(48));
             return 0;
@@ -96,10 +100,22 @@ private:
     }
     int s(int value) const { return MulDiv(value, static_cast<int>(m_dpi), 96); }
     void createFont() {
+        if (m_fontOwned) { DeleteObject(m_fontOwned); m_fontOwned = nullptr; }
         NONCLIENTMETRICSW metrics{sizeof(metrics)};
         SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, m_dpi);
         m_fontOwned = CreateFontIndirectW(&metrics.lfMessageFont);
         m_font = m_fontOwned ? m_fontOwned : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
+    void updateDpi(UINT dpi) {
+        const auto oldDpi = std::max(1U, m_dpi);
+        m_dpi = dpi ? dpi : 96U;
+        m_scrollY = MulDiv(m_scrollY, static_cast<int>(m_dpi), static_cast<int>(oldDpi));
+        createFont();
+        EnumChildWindows(m_window, [](HWND child, LPARAM font) -> BOOL {
+            SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE); return TRUE;
+        }, reinterpret_cast<LPARAM>(m_font));
+        layout();
+        RedrawWindow(m_window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     }
     HWND add(const wchar_t* cls, const wchar_t* text, DWORD style, int id = 0) {
         const auto window = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
