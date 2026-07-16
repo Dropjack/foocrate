@@ -1,6 +1,6 @@
 # 023-打包 FooCrate 组件与升级迁移
 
-- 状态：实现中
+- 状态：实现完成待验收
 - 对应规格：[`../TODO.md`](../TODO.md) 步骤 23
 - 前置任务：[`../022-建立ESLyric推荐默认设置/README.md`](../022-建立ESLyric推荐默认设置/README.md)
 - Fork 提交标题：`打包 FooCrate 组件与升级迁移`
@@ -57,7 +57,7 @@
 - 产物：Release 组件、SHA-256、依赖说明和迁移记录。
 - 用户检查方法：按最终验收单在 test 实例执行。
 - 通过标准：包内只有获准文件；配置按规格保留或安全迁移；回退路径可执行。
-- 状态：待开始
+- 状态：实现完成待验收
 
 ### 步骤 4：封面配色无中间闪色
 
@@ -91,7 +91,7 @@
 - [x] 用户已要求 ESLyric 缺失时自动回退 Metadata。
 - [x] 用户已要求 Playlist Rating 采用 Foobox 风格的大五星并修正命中。
 - [ ] 用户已核对正式发布依赖策略。
-- [ ] 用户已按人工验收步骤确认结果。
+- [x] 用户已确认默认 FCL 可导入并形成 FooCrate 布局。
 - [ ] 用户已检查三档启动行为和设置 Reset 默认值。
 
 ## 验证记录
@@ -123,6 +123,7 @@
 - 2026-07-16：完成 FooCrate 1.0.0 发布元数据审计。CMake、foobar2000 组件版本、稳定身份常量、Windows VERSIONINFO、测试和打包文件名统一为 `1.0.0`；产品总规格同步三档启动行为。改名后的维护文本通过严格 UTF-8 无 BOM 检查。
 - 2026-07-16：在全新 `build/release-1.0.0` 构建树完成 x64 Debug/Release；两种配置各 14/14 自动测试通过。正式候选包为 `dist/FooCrate-1.0.0.fb2k-component`，大小 401443 字节，SHA-256 `B0F266C27175C4E0C2456B84E4947D255C56233374AEE15A582F9F94B61C620A`。包内仅根目录 `foo_crate.dll`；条目与 Release DLL 的 SHA-256 均为 `6E7A5703FB1654D81CB9B51196CD7ED7FA018C9918D932803AAC9840B9725F33`。Windows FileVersion、ProductVersion、ProductName、FileDescription 与 OriginalFilename 审计通过。
 - 2026-07-16：`dist` 已整理为 1.0.0 组件、安装升级说明、发布说明和 SHA-256 清单；旧 0.1.0 组件及嵌有 `Refrain` 名称的旧 FCL 已从交付目录移除。当前仍需用户在改名后的 Columns UI 中重新导出 `.fcl` 并在 `foobar-test` 导入验证；仓库尚未声明项目许可证，公开发布前必须由用户决定许可证或明确保留全部权利。
+- 2026-07-16：用户完成默认 Columns UI 布局的导入验证并重新导出 `dist/FooCrate-1.0.0.fcl`。文件大小 9821 字节，SHA-256 `9D62D4133F6E27D6C6BE6F83C2419D9FD4109F7ACB28A98B192566655EE6B1FC`；可见字符串审计包含 `FooCrate` 且不含 `Refrain`。布局保持通用默认，不覆盖 ESLyric 私有个性化配置。
 
 ## 改动文件
 
@@ -144,7 +145,7 @@
 
 - 五星采用 Foobox 的 5 个连续正方形交互模型，但由 FooCrate 原生 Direct2D 绘制，不复制 Foobox 的字体或位图资产。
 - ESLyric 和 Playback Statistics 维持可选独立组件；Columns UI 是 FooCrate 面板运行所需宿主。
-- 正式 FCL 是否包含足够的内部 ESLyric 实例数据，仍需在 `foobar-test` 完成导入/导出验证。
-- 现有 `dist/foocrate-0.1.0.fcl` 内仍含改名前的 `Refrain` 可见名称，禁止进入 FooCrate 1.0.0 正式产物；必须从改名后的 Columns UI 布局重新导出。
+- 正式 FCL 已完成改名后导出和导入验证；ESLyric 字体、布局、歌词源等私有个性化配置不进入 FCL，由用户在 ESLyric 右键单独保存。
+- 仓库尚未声明项目许可证；这不阻挡第 23 步提交，但阻挡公开发布 GitHub 仓库或 Release。
 - 任务 21 原先“实际播放时间恢复服从 foobar2000”的决定已被本任务中的用户新要求取代；FooCrate 现在正式负责上述三档启动行为。
 - Foobox 参考证据属于只读脚本观察：`D:\Dev\foobar2000\profile\foobox\script\js_panels\jsplaylist.js` 的 Enter 播放和 `WSHplaylist.js` 的 Now Playing 定位均使用 playlist item index；FooCrate 只复现可观察思路，不复制其 JavaScript 结构。

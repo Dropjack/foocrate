@@ -15,6 +15,7 @@ if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
 $repo = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\')
 $dist = [IO.Path]::GetFullPath((Join-Path $repo 'dist')).TrimEnd('\')
 $package = Join-Path $dist "FooCrate-$Version.fb2k-component"
+$layout = Join-Path $dist "FooCrate-$Version.fcl"
 $installationSource = Join-Path $repo 'docs\INSTALLATION_AND_UPGRADE.md'
 $releaseNotesSource = Join-Path $repo "docs\RELEASE_NOTES_$Version.md"
 $installationTarget = Join-Path $dist "FooCrate-$Version-INSTALLATION.md"
@@ -46,12 +47,25 @@ foreach ($staleName in @('FooCrate-0.1.0.fb2k-component', 'foocrate-0.1.0.fcl'))
 Copy-Item -LiteralPath $installationSource -Destination $installationTarget -Force
 Copy-Item -LiteralPath $releaseNotesSource -Destination $releaseNotesTarget -Force
 
-$hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
-$checksumLine = "$hash  $([IO.Path]::GetFileName($package))`n"
-[IO.File]::WriteAllText($checksumTarget, $checksumLine, [Text.UTF8Encoding]::new($false))
+$releaseArtifacts = @($package)
+if (Test-Path -LiteralPath $layout -PathType Leaf) {
+  $releaseArtifacts += $layout
+}
+
+$checksumLines = foreach ($artifact in $releaseArtifacts) {
+  $artifactHash = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash
+  "$artifactHash  $([IO.Path]::GetFileName($artifact))"
+}
+[IO.File]::WriteAllText(
+  $checksumTarget,
+  (($checksumLines -join "`n") + "`n"),
+  [Text.UTF8Encoding]::new($false))
 
 Write-Output "PACKAGE=$package"
+if (Test-Path -LiteralPath $layout -PathType Leaf) {
+  Write-Output "LAYOUT=$layout"
+}
 Write-Output "INSTALLATION=$installationTarget"
 Write-Output "RELEASE_NOTES=$releaseNotesTarget"
 Write-Output "CHECKSUMS=$checksumTarget"
-Write-Output "SHA256=$hash"
+Write-Output "PACKAGE_SHA256=$((Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash)"
