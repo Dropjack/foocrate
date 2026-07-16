@@ -15,7 +15,7 @@
 - 不把 ESLyric、Playback Statistics、Columns UI 或 Beefweb 二进制塞进 FooCrate 组件包。
 - 不把用户放在 `third_party` 的本地组件提交到 Git。
 - 不覆盖已有 Columns UI 布局、快捷键或 ESLyric 私有配置。
-- 本步骤生成版本号为 1.0.0 的正式候选组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
+- 本步骤生成版本号为 1.0.1 的正式候选组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
 
 ## 中文程序逻辑
 
@@ -124,10 +124,14 @@
 - 2026-07-16：在全新 `build/release-1.0.0` 构建树完成 x64 Debug/Release；两种配置各 14/14 自动测试通过。正式候选包为 `dist/FooCrate-1.0.0.fb2k-component`，大小 401443 字节，SHA-256 `B0F266C27175C4E0C2456B84E4947D255C56233374AEE15A582F9F94B61C620A`。包内仅根目录 `foo_crate.dll`；条目与 Release DLL 的 SHA-256 均为 `6E7A5703FB1654D81CB9B51196CD7ED7FA018C9918D932803AAC9840B9725F33`。Windows FileVersion、ProductVersion、ProductName、FileDescription 与 OriginalFilename 审计通过。
 - 2026-07-16：`dist` 已整理为 1.0.0 组件、安装升级说明、发布说明和 SHA-256 清单；旧 0.1.0 组件及嵌有 `Refrain` 名称的旧 FCL 已从交付目录移除。当前仍需用户在改名后的 Columns UI 中重新导出 `.fcl` 并在 `foobar-test` 导入验证；仓库尚未声明项目许可证，公开发布前必须由用户决定许可证或明确保留全部权利。
 - 2026-07-16：用户完成默认 Columns UI 布局的导入验证并重新导出 `dist/FooCrate-1.0.0.fcl`。文件大小 9821 字节，SHA-256 `9D62D4133F6E27D6C6BE6F83C2419D9FD4109F7ACB28A98B192566655EE6B1FC`；可见字符串审计包含 `FooCrate` 且不含 `Refrain`。布局保持通用默认，不覆盖 ESLyric 私有个性化配置。
+- 2026-07-16：发布候选人工检查发现部分 Apple M4A/AAC/ALAC 文件内嵌 `rating=0` 时，正在播放项目的动态标题格式会优先返回文件标签，遮蔽 Playback Statistics 数据库评分；正式右键 Rating 命令仍可写入数据库，因此表现为 FooCrate 不显示、点击后也像未生效。修正为右上五星、Playlist View Rating 列及 Track Details 的 Playback Statistics 区段始终使用目标 metadb 句柄的静态显示字段，让 Playback Statistics 的字段提供器决定结果；动态码率等真正需要播放动态信息的字段保持原路径。FooCrate 不读取或改写文件 `RATING` 标签。
+- 2026-07-16：M4A 评分修正版在 `build/release-1.0.0` 完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过。手动测试组件为 `dist/FooCrate-1.0.0.fb2k-component`，大小 401907 字节，SHA-256 `93E5D16F105491257457980CE276135DED965138FBFDE1572A64E88EDA60154F`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `D2875A136CD2AB45D7E8165B436133A4A044526ACE9AC2F3C58B86552B3DF393`。本轮保持版本 1.0.0 供人工复验；用户确认后再升至 1.0.1 并更新正式发布材料。
+- 2026-07-16：用户确认 Apple M4A/AAC/ALAC 评分显示、写入和清除均通过人工复验，FLAC 回归正常；批准将修复正式发布为 1.0.1。版本元数据、安装说明、README 和独立 1.0.1 Release Notes 同步更新；1.0.0 Release Notes 作为首版历史保留，1.0.0 FCL 因稳定 GUID 和布局格式未变继续兼容。
+- 2026-07-16：在全新 `build/release-1.0.1` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。正式组件为 `dist/FooCrate-1.0.1.fb2k-component`，大小 401905 字节，SHA-256 `46EACA4DB76DCA8435C06BF87508AAA082DA23332D867E497B0C735080973E6F`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `7DFC878AA3DAA30690C7EC1F4F4AC8F9D0220ABE92E9EB596A3DFC4463430511`。Windows FileVersion/ProductVersion 均为 1.0.1，ProductName、FileDescription 和 OriginalFilename 审计通过。`dist/FooCrate-1.0.1-SHA256SUMS.txt` 仅列本版组件，`dist/FooCrate-1.0.1-RELEASE-NOTES.md` 与仓库正式说明内容一致。
 
 ## 改动文件
 
-- `src/playback_panel.cpp`：ESLyric 缺失回退、Rating 五星绘制和点击命中、封面主题异步切换期间的稳定配色，以及三档启动恢复。
+- `src/playback_panel.cpp`：ESLyric 缺失回退、Rating 五星绘制和点击命中、M4A 内嵌 Rating 与 Playback Statistics 的读取隔离、封面主题异步切换期间的稳定配色，以及三档启动恢复。
 - `src/settings_model.h`、`src/settings.h`、`src/settings.cpp`、`src/preferences.cpp`：启动行为枚举、版本 8 迁移、绝对时间保存与设置界面。
 - `tests/settings_model_tests.cpp`：首次安装、旧版恢复开关和新三档值的迁移测试。
 - `src/artwork_cache.h`、`src/artwork_cache.cpp`：用户 Profile 缓存目录、版本化文件、校验、原子写入和 256 MB 清理。
@@ -135,9 +139,9 @@
 - `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃和容量上限测试。
 - `src/playlist_interaction_model.h`：共享的五星排列与命中模型。
 - `tests/playlist_interaction_model_tests.cpp`：五星边缘、连续格和窄列缩放测试。
-- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.0 版本元数据与自动检查。
+- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.1 版本元数据与自动检查。
 - `scripts/package-component.ps1`、`scripts/prepare-release.ps1`：按版本生成正式组件、整理 `dist` 文档并生成 SHA-256 清单。
-- `docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.0.md`：依赖、安装、升级、卸载、回退、已知限制与发布说明。
+- `README.md`、`docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.0.md`、`docs/RELEASE_NOTES_1.0.1.md`：当前发布入口、依赖、安装、升级、卸载、回退、首版历史与 1.0.1 修复说明。
 - `.gitignore`：忽略用户本地保存的第三方 `.fb2k-component`。
 - 本任务、任务入口和 TODO：记录步骤 23 的范围、状态和人工验收。
 

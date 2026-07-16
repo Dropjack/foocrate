@@ -1447,6 +1447,12 @@ private:
         return output.c_str();
     }
 
+    [[nodiscard]] std::string formatPlaylistStatisticsUtf8(
+        std::size_t index, const titleformat_object::ptr& script) const {
+        if (index >= m_playlistItems.get_count()) return {};
+        return formatHandleUtf8(m_playlistItems[index], script);
+    }
+
     void rebuildPlaylistGroups() {
         std::unordered_map<std::string, bool> priorCollapsed;
         for (const auto& group : m_playlistGroups) priorCollapsed[group.key] = group.collapsed;
@@ -4919,9 +4925,12 @@ private:
         row.columns.reserve(m_playlistSettings.columns.size());
         row.secondaryColumns.reserve(m_playlistSettings.columns.size());
         for (std::size_t column = 0; column < m_playlistSettings.columns.size(); ++column) {
+            const auto ratingColumn = m_playlistSettings.columns[column].id == "builtin.rating";
             row.columns.push_back(!m_playlistSettings.columns[column].visible
                     || m_playlistSettings.columns[column].cover
-                ? std::wstring{} : utf8ToWide(formatPlaylistItemUtf8(index, m_playlistColumnScripts[column]).c_str()));
+                ? std::wstring{} : utf8ToWide((ratingColumn
+                    ? formatPlaylistStatisticsUtf8(index, m_playlistColumnScripts[column])
+                    : formatPlaylistItemUtf8(index, m_playlistColumnScripts[column])).c_str()));
             row.secondaryColumns.push_back(m_trackRowLayout != TrackRowLayout::twoLine
                     || column >= m_playlistSecondaryColumnScripts.size()
                 ? std::wstring{} : utf8ToWide(formatPlaylistItemUtf8(index, m_playlistSecondaryColumnScripts[column]).c_str()));
@@ -5717,6 +5726,13 @@ private:
         return formatTargetField(script, L"");
     }
 
+    [[nodiscard]] std::wstring formatTargetStatisticsExpression(const char* expression) const {
+        if (m_target.is_empty()) return {};
+        titleformat_object::ptr script;
+        titleformat_compiler::get()->compile_safe(script, expression);
+        return utf8ToWide(formatHandleUtf8(m_target, script).c_str());
+    }
+
     void addDetailSection(const wchar_t* name) {
         m_detailRows.push_back({name, {}, true});
     }
@@ -5781,11 +5797,11 @@ private:
         if (settings.detailsPlaybackStatistics) {
             addDetailSection(L"Playback Statistics");
             const auto statisticsStart = m_detailRows.size();
-            addDetailRow(L"Rating", formatTargetExpression("[%rating%]"));
-            addDetailRow(L"Play count", formatTargetExpression("[%play_count%]"));
-            addDetailRow(L"First played", formatTargetExpression("[%first_played%]"));
-            addDetailRow(L"Last played", formatTargetExpression("[%last_played%]"));
-            addDetailRow(L"Added", formatTargetExpression("[%added%]"));
+            addDetailRow(L"Rating", formatTargetStatisticsExpression("[%rating%]"));
+            addDetailRow(L"Play count", formatTargetStatisticsExpression("[%play_count%]"));
+            addDetailRow(L"First played", formatTargetStatisticsExpression("[%first_played%]"));
+            addDetailRow(L"Last played", formatTargetStatisticsExpression("[%last_played%]"));
+            addDetailRow(L"Added", formatTargetStatisticsExpression("[%added%]"));
             if (m_detailRows.size() == statisticsStart && !m_ratingAvailable)
                 addDetailRow(L"Status", L"Playback Statistics unavailable");
         }
@@ -5851,7 +5867,7 @@ private:
         auto bitrate = formatTargetField(m_bitrateScript, L"Unknown bitrate");
         if (bitrate != L"Unknown bitrate" && bitrate.find(L"kbps") == std::wstring::npos) bitrate += L" kbps";
         m_codecBitrate = codec + L" | " + bitrate;
-        const auto ratingText = formatTargetField(m_ratingScript, L"0");
+        const auto ratingText = utf8ToWide(formatHandleUtf8(m_target, m_ratingScript).c_str());
         wchar_t* end{};
         m_rating = normalizeRating(std::wcstod(ratingText.c_str(), &end));
         if (targetChanged) m_ratingAvailable = haveAllRatingCommands(m_target);
@@ -5939,7 +5955,7 @@ private:
         const auto target = m_playlistItems[track];
         if (target.is_empty()) return;
         try {
-            const auto currentText = formatPlaylistItemUtf8(track, m_ratingScript);
+            const auto currentText = formatPlaylistStatisticsUtf8(track, m_ratingScript);
             const auto current = std::clamp(std::atoi(currentText.c_str()), 0, 5);
             const auto value = ratingCommandValue(current, clickedRating);
             const auto commandName = value == 0

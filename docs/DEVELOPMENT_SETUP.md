@@ -154,7 +154,7 @@ $ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 
 - Debug DLL：`Debug/foo_crate.dll`；
 - Release DLL：`Release/foo_crate.dll`；
-- 方便用户找到的正式安装包：仓库根目录 `dist/FooCrate-1.0.0.fb2k-component`。
+- 方便用户找到的正式安装包：仓库根目录 `dist/FooCrate-1.0.1.fb2k-component`。
 
 `dist/` 与 `build/` 一样被 Git 忽略。`build/` 保存编译中间产物，`dist/` 只保存用户可以直接安装的最终包；人工安装时不需要再进入多层构建目录。
 
