@@ -48,6 +48,8 @@ struct ThemePalette {
     RgbColor error{};
     RgbColor lyricsHighlight{};
     RgbColor lyricsNormal{};
+
+    bool operator==(const ThemePalette&) const = default;
 };
 
 [[nodiscard]] constexpr RgbColor rgb(std::uint32_t value) noexcept {

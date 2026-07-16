@@ -44,7 +44,8 @@ private:
     void relinquish(HWND child) noexcept;
     void childVisibilityRequested(HWND child, bool visible) noexcept;
     [[nodiscard]] bool childIsVisible(HWND child) const noexcept;
-    [[nodiscard]] bool applyThemeColors() const noexcept;
+    [[nodiscard]] bool applyThemeColors(
+        bool background = true, bool normal = true, bool highlight = true) const noexcept;
 
     HWND m_parent{};
     HWND m_child{};

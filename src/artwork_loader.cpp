@@ -1,4 +1,5 @@
 #include "artwork_loader.h"
+#include "artwork_cache.h"
 
 #include <windows.h>
 #include <mmsystem.h>
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace refrain {
 namespace {
@@ -29,6 +31,52 @@ public:
 private:
     HRESULT m_result{};
 };
+
+void hashBytes(hasher_md5& hasher, hasher_md5_state& state, const void* value, std::size_t size) {
+    hasher.process(state, value, size);
+}
+
+void hashString(hasher_md5& hasher, hasher_md5_state& state, const char* value) {
+    const auto length = value ? std::strlen(value) : 0U;
+    hashBytes(hasher, state, &length, sizeof(length));
+    if (length != 0) hashBytes(hasher, state, value, length);
+}
+
+[[nodiscard]] bool hashPath(
+    hasher_md5& hasher, hasher_md5_state& state, const char* path, abort_callback& aborter) {
+    if (!path || filesystem::g_is_remote_or_unrecognized(path)) return false;
+    foobar2000_io::t_filestats stats;
+    bool writeable{};
+    filesystem::g_get_stats(path, stats, writeable, aborter);
+    hashString(hasher, state, path);
+    hashBytes(hasher, state, &stats.m_size, sizeof(stats.m_size));
+    hashBytes(hasher, state, &stats.m_timestamp, sizeof(stats.m_timestamp));
+    return true;
+}
+
+[[nodiscard]] std::optional<std::string> artworkIdentity(
+    const GUID& artworkId, const album_art_extractor_instance_v2::ptr& extractor,
+    abort_callback& aborter) {
+    try {
+        auto hasher = hasher_md5::get();
+        auto state = hasher->initialize();
+        constexpr std::uint32_t identityVersion = 1U;
+        hashBytes(*hasher, state, &identityVersion, sizeof(identityVersion));
+        hashBytes(*hasher, state, &artworkId, sizeof(artworkId));
+        const auto paths = extractor->query_paths(artworkId, aborter);
+        if (paths.is_empty()) return std::nullopt;
+        const auto pathCount = paths->get_count();
+        hashBytes(*hasher, state, &pathCount, sizeof(pathCount));
+        for (t_size index = 0; index < pathCount; ++index) {
+            if (!hashPath(*hasher, state, paths->get_path(index), aborter)) return std::nullopt;
+        }
+        return std::string(hasher->get_result(state).asString().c_str());
+    } catch (const exception_aborted&) {
+        throw;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
 
 [[nodiscard]] ArtworkPixels decodeArtwork(
     album_art_data_ptr data, abort_callback& aborter, std::uint32_t maxDimension) {
@@ -153,13 +201,43 @@ ArtworkPixels loadGroupArtwork(
         pfc::list_t<GUID> ids;
         ids.add_item(artworkId);
         const auto extractor = album_art_manager_v2::get()->open(targets, ids, aborter);
-        return decodeArtwork(extractor->query(artworkId, aborter), aborter, maxDimension);
+        const auto identity = maxDimension <= 320U
+            ? artworkIdentity(artworkId, extractor, aborter) : std::nullopt;
+        if (identity) {
+            if (const auto cached = profileArtworkCache().loadPixels(*identity, maxDimension)) return *cached;
+        }
+        auto pixels = decodeArtwork(extractor->query(artworkId, aborter), aborter, maxDimension);
+        if (identity) profileArtworkCache().storePixels(*identity, maxDimension, pixels);
+        return pixels;
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};
     } catch (const exception_album_art_not_found&) {
         return {ArtworkStatus::missing};
     } catch (...) {
         return {ArtworkStatus::unavailable};
+    }
+}
+
+std::optional<ThemePalette> loadArtworkTheme(
+    const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept {
+    try {
+        if (target.is_empty()) return std::nullopt;
+        metadb_handle_list items;
+        items.add_item(target);
+        pfc::list_t<GUID> ids;
+        ids.add_item(artworkId);
+        const auto extractor = album_art_manager_v2::get()->open(items, ids, aborter);
+        const auto identity = artworkIdentity(artworkId, extractor, aborter);
+        if (identity) {
+            if (const auto cached = profileArtworkCache().loadTheme(*identity)) return cached;
+        }
+        const auto pixels = decodeArtwork(extractor->query(artworkId, aborter), aborter, 1024U);
+        if (pixels.status != ArtworkStatus::ready) return std::nullopt;
+        const auto palette = extractArtworkTheme(pixels.bgra, pixels.width, pixels.height);
+        if (identity && palette) profileArtworkCache().storeTheme(*identity, *palette);
+        return palette;
+    } catch (...) {
+        return std::nullopt;
     }
 }
 

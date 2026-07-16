@@ -47,8 +47,10 @@ struct PlaylistViewRestoreState {
     GUID playlistGuid{};
     std::string path;
     std::uint32_t subsong{};
+    std::size_t playlistItem{static_cast<std::size_t>(-1)};
     std::string groupKey;
     std::size_t viewportAnchor{};
+    double playbackPosition{};
 
     [[nodiscard]] bool valid() const noexcept { return !path.empty(); }
 };

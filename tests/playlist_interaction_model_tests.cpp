@@ -54,6 +54,21 @@ int main() {
         "playlist drops must skip existing and repeated incoming identities");
     expect(insertionBoundaryForRow(2, false, 5) == 2, "upper row half inserts before");
     expect(insertionBoundaryForRow(2, true, 5) == 3, "lower row half inserts after");
+    const auto ratingStrip = playlistRatingStrip(100.0F, 200.0F, 20.0F, 26.0F);
+    expect(ratingStrip.valid() && ratingStrip.starSize == 16.0F
+            && ratingStrip.left == 110.0F && ratingStrip.top == 25.0F,
+        "playlist rating strip must center five Foobox-sized stars in the column");
+    expect(playlistRatingFromPoint(ratingStrip, 110.0F, 30.0F) == 1,
+        "playlist rating hit testing must begin at the first drawn star");
+    expect(playlistRatingFromPoint(ratingStrip, 173.9F, 30.0F) == 4,
+        "playlist rating hit testing must use the same contiguous star cells as drawing");
+    expect(playlistRatingFromPoint(ratingStrip, 190.0F, 30.0F) == 5,
+        "playlist rating hit testing must include the final drawn edge");
+    expect(playlistRatingFromPoint(ratingStrip, 105.0F, 30.0F) == 0,
+        "playlist rating column padding must not activate an invisible star");
+    const auto narrowRatingStrip = playlistRatingStrip(0.0F, 68.0F, 0.0F, 22.0F);
+    expect(narrowRatingStrip.valid() && narrowRatingStrip.starSize == 12.0F,
+        "narrow rating columns must scale all five stars and preserve alignment");
     const auto columns = compactTrackColumns();
     expect(columns.front().field == CompactTrackField::ordinal && columns.front().leftFraction == 0.0F,
         "compact track list must start with ordinal");

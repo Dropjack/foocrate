@@ -21,6 +21,11 @@ enum class LowerRightView : std::int64_t {
 enum class TrackActivationAction : std::int64_t { play = 0, addToQueue = 1 };
 enum class RightPanelFollow : std::int64_t { playingTrack = 0, playlistSelection = 1 };
 enum class AlbumTileSize : std::int64_t { smallTile = 0, medium = 1, largeTile = 2 };
+enum class StartupBehavior : std::int64_t {
+    resumePlayback = 0,
+    restoreLastTrack = 1,
+    startAtHome = 2,
+};
 
 inline constexpr std::int64_t kArtworkFront = 1 << 0;
 inline constexpr std::int64_t kArtworkBack = 1 << 1;
@@ -41,7 +46,7 @@ struct SettingsValues {
     ThemePreset themePreset{ThemePreset::mist};
     ColourMode colourMode{ColourMode::refrainPreset};
     TrackActivationAction trackActivation{TrackActivationAction::play};
-    bool restorePlaylistView{true};
+    StartupBehavior startupBehavior{StartupBehavior::startAtHome};
     RightPanelFollow rightPanelFollow{RightPanelFollow::playingTrack};
     bool detailsMetadata{true};
     bool detailsLocation{true};
@@ -82,6 +87,7 @@ struct StoredSettings {
     std::int64_t artworkRotationSeconds{20};
     std::int64_t albumTileSize{static_cast<std::int64_t>(AlbumTileSize::medium)};
     std::string nowPlayingSummaryFormat{"$if2(%title%,$filename_ext(%path%))\n$if2(%artist%,'Unknown artist') | $if2(%album%,'Unknown album')"};
+    std::int64_t startupBehavior{static_cast<std::int64_t>(StartupBehavior::startAtHome)};
 };
 
 struct SettingsMigration {
@@ -90,7 +96,7 @@ struct SettingsMigration {
     bool rewriteKnownValues{};
 };
 
-inline constexpr std::int64_t kCurrentSettingsVersion = 7;
+inline constexpr std::int64_t kCurrentSettingsVersion = 8;
 
 [[nodiscard]] inline SettingsValues defaultSettings() {
     return {};
@@ -105,6 +111,10 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 7;
 }
 
 [[nodiscard]] constexpr bool isValidAlbumTileSize(std::int64_t value) noexcept {
+    return value >= 0 && value <= 2;
+}
+
+[[nodiscard]] constexpr bool isValidStartupBehavior(std::int64_t value) noexcept {
     return value >= 0 && value <= 2;
 }
 
@@ -163,7 +173,16 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 7;
     }
     result.values.trackActivation = isValidTrackActivation(stored.trackActivation)
         ? static_cast<TrackActivationAction>(stored.trackActivation) : TrackActivationAction::play;
-    result.values.restorePlaylistView = stored.version <= 6 ? true : stored.restorePlaylistView;
+    if (stored.version == 0) {
+        result.values.startupBehavior = StartupBehavior::startAtHome;
+    } else if (stored.version <= 7) {
+        const auto legacyRestore = stored.version <= 6 ? true : stored.restorePlaylistView;
+        result.values.startupBehavior = legacyRestore
+            ? StartupBehavior::restoreLastTrack : StartupBehavior::startAtHome;
+    } else {
+        result.values.startupBehavior = isValidStartupBehavior(stored.startupBehavior)
+            ? static_cast<StartupBehavior>(stored.startupBehavior) : StartupBehavior::startAtHome;
+    }
     result.values.rightPanelFollow = isValidRightPanelFollow(stored.rightPanelFollow)
         ? static_cast<RightPanelFollow>(stored.rightPanelFollow) : RightPanelFollow::playingTrack;
     result.values.detailsMetadata = stored.detailsMetadata;
@@ -194,6 +213,7 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 7;
             || !isValidThemePreset(stored.themePreset)
             || (stored.version >= 5 && !isValidColourMode(stored.colourMode))
             || !isValidTrackActivation(stored.trackActivation)
+            || (stored.version >= 8 && !isValidStartupBehavior(stored.startupBehavior))
             || !isValidRightPanelFollow(stored.rightPanelFollow)
             || !isValidArtworkSourceMask(stored.artworkSourceMask)
             || !isValidArtworkRotationSeconds(stored.artworkRotationSeconds)

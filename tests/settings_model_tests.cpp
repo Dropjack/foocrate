@@ -22,7 +22,8 @@ int main() {
     expect(defaults.timeDisplay == TimeDisplayMode::total, "default time mode must be total");
     expect(defaults.showTooltips, "tooltips must default on");
     expect(defaults.showSettingsButton, "settings button must default on");
-    expect(defaults.restorePlaylistView, "playlist view restore must default on");
+    expect(defaults.startupBehavior == StartupBehavior::startAtHome,
+        "startup must default to the home screen");
     expect(defaults.lyricsAutoSwitch, "lyrics auto switch must default on");
     expect(defaults.lowerRightView == LowerRightView::lyrics, "lower right view must default to lyrics");
     expect(!defaults.showReplayGain, "ReplayGain details must default off");
@@ -32,9 +33,10 @@ int main() {
     expect(defaults.colourMode == ColourMode::refrainPreset, "colour mode must default to Refrain preset");
 
     const auto firstRun = migrateSettings({0, 0, true, true, true, 0, false, 500, 230});
-    expect(firstRun.versionToKeep == 7, "version zero must migrate to seven");
+    expect(firstRun.versionToKeep == 8, "version zero must migrate to eight");
     expect(firstRun.rewriteKnownValues, "version migration must be persisted");
-    expect(firstRun.values.restorePlaylistView, "old settings must enable playlist view restore");
+    expect(firstRun.values.startupBehavior == StartupBehavior::startAtHome,
+        "first run must remain stopped at home");
 
     const auto invalid = migrateSettings({kCurrentSettingsVersion, 77, false, false, false, 77, true, 999, 999, 77, 77});
     expect(invalid.values.timeDisplay == TimeDisplayMode::total, "invalid enum must fall back to total");
@@ -66,10 +68,24 @@ int main() {
     versionSix.version = 6;
     versionSix.restorePlaylistView = false;
     const auto upgradedRestore = migrateSettings(versionSix);
-    expect(upgradedRestore.values.restorePlaylistView,
-        "version-six upgrade must enable playlist view restore by default");
+    expect(upgradedRestore.values.startupBehavior == StartupBehavior::restoreLastTrack,
+        "version-six upgrade must preserve playlist view restore");
     expect(upgradedRestore.rewriteKnownValues,
         "version-six upgrade must persist the new restore setting");
+
+    auto versionSevenDisabled = StoredSettings{};
+    versionSevenDisabled.version = 7;
+    versionSevenDisabled.restorePlaylistView = false;
+    const auto upgradedHome = migrateSettings(versionSevenDisabled);
+    expect(upgradedHome.values.startupBehavior == StartupBehavior::startAtHome,
+        "disabled legacy restore must migrate to home");
+
+    auto currentResume = StoredSettings{};
+    currentResume.version = kCurrentSettingsVersion;
+    currentResume.startupBehavior = static_cast<std::int64_t>(StartupBehavior::resumePlayback);
+    const auto preservedResume = migrateSettings(currentResume);
+    expect(preservedResume.values.startupBehavior == StartupBehavior::resumePlayback,
+        "resume playback must survive current settings");
 
     const auto oldRefrain = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 0});
     const auto oldWindows = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 1});

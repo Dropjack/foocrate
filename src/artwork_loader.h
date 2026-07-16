@@ -1,6 +1,9 @@
 #pragma once
 
+#include "theme_model.h"
+
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <windows.h>
@@ -32,5 +35,7 @@ struct ArtworkPixels {
 [[nodiscard]] ArtworkPixels loadGroupArtwork(
     metadb_handle_list_cref targets, const GUID& artworkId, abort_callback& aborter,
     std::uint32_t maxDimension = 1024U) noexcept;
+[[nodiscard]] std::optional<ThemePalette> loadArtworkTheme(
+    const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept;
 
 } // namespace refrain

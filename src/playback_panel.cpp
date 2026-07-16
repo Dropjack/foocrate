@@ -94,6 +94,9 @@ constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
 constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
 constexpr UINT kShowNowPlayingMessage = WM_APP + 0x42B;
 constexpr UINT kShowInDefaultPlaylistMessage = WM_APP + 0x42C;
+constexpr UINT kApplyStartupBehaviorMessage = WM_APP + 0x42D;
+constexpr UINT kApplyResumeSeekMessage = WM_APP + 0x42E;
+constexpr UINT kRememberPlayingTrackMessage = WM_APP + 0x42F;
 constexpr GUID kShowNowPlayingCommandGuid{
     0x2f03e63b, 0x2362, 0x42b5, {0x8a, 0xa8, 0xf4, 0x0c, 0x09, 0x72, 0xe4, 0x66}};
 constexpr GUID kShowInDefaultPlaylistCommandGuid{
@@ -104,6 +107,7 @@ constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kArtworkRotationTimer = 0x5272;
 constexpr UINT_PTR kStatusTimer = 0x5273;
 constexpr UINT_PTR kScrollbarVisibilityTimer = 0x5275;
+constexpr UINT_PTR kResumeSeekTimer = 0x5276;
 constexpr std::size_t kMaximumGroupArtworkEntries = 64;
 constexpr std::size_t kMaximumAlbumArtworkEntries = 160;
 constexpr std::size_t kMaximumArtworkCacheBytes = 64U * 1024U * 1024U;
@@ -112,10 +116,14 @@ static_assert(kPlaylistDragTimer != kArtworkRotationTimer
     && kPlaylistDragTimer != kScrollbarVisibilityTimer
     && kArtworkRotationTimer != kStatusTimer
     && kArtworkRotationTimer != kScrollbarVisibilityTimer
-    && kStatusTimer != kScrollbarVisibilityTimer);
+    && kArtworkRotationTimer != kResumeSeekTimer
+    && kStatusTimer != kScrollbarVisibilityTimer
+    && kStatusTimer != kResumeSeekTimer
+    && kScrollbarVisibilityTimer != kResumeSeekTimer);
 
 std::vector<HWND> g_queueWindows;
 std::atomic_bool g_defaultPlaylistApplied{};
+std::atomic_bool g_startupBehaviorApplied{};
 
 class QueueChangeCallback : public playback_queue_callback {
 public:
@@ -501,14 +509,16 @@ public:
             m_artworkAsync->window = wnd;
             m_dpi = static_cast<float>(GetDpiForWindow(wnd));
             createIndependentResources();
-            updateThemePalette();
+            (void)updateThemePalette();
             m_albumSplitPermille = readAlbumBrowserSettings().splitPermille;
             m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
             restoreAlbumBridgeLock();
             refreshPlaylistBrowserSnapshot();
             applyDefaultPlaylistOnce();
             reloadPlaylistViewSettings();
-            m_restorePlaylistViewEnabled = readSettings().restorePlaylistView;
+            m_startupBehavior = readSettings().startupBehavior;
+            m_startupRestoreState = readPlaylistViewRestoreState();
+            m_startupRestorePending = true;
             startGroupArtworkWorker();
             startAlbumArtworkWorker();
             registerPlaybackCallback();
@@ -517,7 +527,6 @@ public:
             rebuildPlaylistSnapshot(true);
             refreshQueueSnapshot();
             refreshFromCore();
-            restorePlaylistViewOnStartup();
             createTooltip(wnd);
             registerSettingsWindow(wnd);
             initializeLowerRightView();
@@ -529,14 +538,22 @@ public:
             if (std::find(g_queueWindows.begin(), g_queueWindows.end(), wnd) == g_queueWindows.end()) {
                 g_queueWindows.push_back(wnd);
             }
+            if (!g_startupBehaviorApplied.exchange(true)) {
+                PostMessageW(wnd, kApplyStartupBehaviorMessage, 0, 0);
+            }
             return 0;
         case WM_DESTROY: {
+            rememberPlaybackPositionForRestore(true);
+            if (!m_startupRestorePending && playback_control::get()->is_playing()) {
+                rememberPlayingTrackForRestore();
+            }
             rememberCurrentViewportAnchor();
             cancelPlaylistBrowserRename();
             std::erase(g_queueWindows, wnd);
             KillTimer(wnd, kPlaylistDragTimer);
             KillTimer(wnd, kStatusTimer);
             KillTimer(wnd, kScrollbarVisibilityTimer);
+            KillTimer(wnd, kResumeSeekTimer);
             m_dropAsync->alive.store(false);
             m_dropAsync->window = nullptr;
             m_dropAsync->generation.fetch_add(1);
@@ -686,6 +703,10 @@ public:
                 rotateArtworkFrame();
                 return 0;
             }
+            if (wp == kResumeSeekTimer) {
+                applyPendingResumeSeek();
+                return 0;
+            }
             break;
         case WM_SETFOCUS:
             if (m_focus == ControlId::none) {
@@ -765,16 +786,29 @@ public:
                 (void)showInDefaultPlaylist(*target, true);
             }
             return 0;
+        case kApplyStartupBehaviorMessage:
+            applyStartupBehavior();
+            return 0;
+        case kApplyResumeSeekMessage:
+            applyPendingResumeSeek();
+            return 0;
+        case kRememberPlayingTrackMessage:
+            if (!m_startupRestorePending) rememberPlayingTrackForRestore();
+            return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
     }
 
     void on_playback_starting(play_control::t_track_command, bool paused) override {
+        m_playbackTrackTransition = true;
         m_state.playing = true;
         m_state.paused = paused;
         requestRefresh();
     }
-    void on_playback_new_track(metadb_handle_ptr) override {
+    void on_playback_new_track(metadb_handle_ptr track) override {
+        m_playbackTrackTransition = false;
+        m_lastRestorePosition = 0.0;
+        m_lastPersistedRestoreBucket = 0;
         if (m_albumSessionActive) {
             t_size playlist = SIZE_MAX, item = SIZE_MAX;
             playlist_manager::get()->get_playing_item_location(&playlist, &item);
@@ -786,11 +820,29 @@ public:
                 if (const auto wnd = get_wnd()) PostMessage(wnd, kRestoreAlbumSourceMessage, 0, 0);
             }
         }
-        if (readSettings().lyricsAutoSwitch) setLowerRightView(LowerRightView::lyrics, false);
-        rememberPlayingTrackForRestore();
+        if (readSettings().lyricsAutoSwitch && m_lyricsHost.available()) {
+            setLowerRightView(LowerRightView::lyrics, false);
+        } else if (!m_lyricsHost.available()) {
+            setLowerRightView(LowerRightView::trackDetails, false);
+        }
+        if (m_pendingResumeTrack.is_valid()) {
+            if (sameTrack(m_pendingResumeTrack, track)) {
+                m_startupRestorePending = false;
+                if (const auto wnd = get_wnd()) PostMessageW(wnd, kRememberPlayingTrackMessage, 0, 0);
+                if (const auto wnd = get_wnd()) PostMessageW(wnd, kApplyResumeSeekMessage, 0, 0);
+            } else {
+                m_startupRestorePending = false;
+                clearPendingResumeSeek();
+                if (const auto wnd = get_wnd()) PostMessageW(wnd, kRememberPlayingTrackMessage, 0, 0);
+            }
+        } else if (!m_startupRestorePending) {
+            if (const auto wnd = get_wnd()) PostMessageW(wnd, kRememberPlayingTrackMessage, 0, 0);
+        }
         requestRefresh();
     }
     void on_playback_stop(play_control::t_stop_reason reason) override {
+        if (!m_startupRestorePending) rememberPlaybackPositionForRestore(false);
+        m_playbackTrackTransition = reason == play_control::stop_reason_starting_another;
         if (!m_startingAlbumSession) endAlbumPlaybackSession();
         m_state.playing = false;
         m_state.paused = false;
@@ -801,14 +853,21 @@ public:
         if (reason != play_control::stop_reason_starting_another && readSettings().lyricsAutoSwitch) {
             setLowerRightView(LowerRightView::trackDetails, false);
         }
+        if (m_waitingForStartupStop) {
+            m_waitingForStartupStop = false;
+            if (const auto wnd = get_wnd()) PostMessageW(wnd, kApplyStartupBehaviorMessage, 0, 0);
+        }
         requestRefresh();
     }
     void on_playback_seek(double time) override {
         m_state.position = std::max(0.0, time);
+        m_lastRestorePosition = m_state.position;
+        if (!m_startupRestorePending) rememberPlayingTrackForRestore();
         invalidate();
     }
     void on_playback_pause(bool paused) override {
         m_state.paused = paused;
+        if (!m_startupRestorePending) rememberPlayingTrackForRestore();
         invalidate();
     }
     void on_playback_edited(metadb_handle_ptr) override { requestRefresh(); }
@@ -817,6 +876,12 @@ public:
     void on_playback_time(double time) override {
         if (!m_previewing) {
             m_state.position = std::max(0.0, time);
+            m_lastRestorePosition = m_state.position;
+            const auto bucket = static_cast<std::int64_t>(m_lastRestorePosition / 5.0);
+            if (!m_startupRestorePending && bucket != m_lastPersistedRestoreBucket) {
+                m_lastPersistedRestoreBucket = bucket;
+                rememberPlayingTrackForRestore();
+            }
             invalidate();
         }
     }
@@ -1063,6 +1128,7 @@ private:
             0xFF000000u | rgbValue(m_themePalette.lyricsNormal),
             0xFF000000u | rgbValue(m_themePalette.lyricsHighlight));
         (void)m_lyricsHost.create(wnd, get_host(), lowerRightPixels(wnd), kLyricsMiddleClickMessage);
+        if (!m_lyricsHost.available()) m_lowerRightView = LowerRightView::trackDetails;
         syncLyricsHost(wnd);
     }
 
@@ -1075,6 +1141,9 @@ private:
     }
 
     void setLowerRightView(LowerRightView view, bool persist) {
+        if (view == LowerRightView::lyrics && !m_lyricsHost.available()) {
+            view = LowerRightView::trackDetails;
+        }
         if (m_lowerRightView == view && !persist) return;
         m_lowerRightView = view;
         if (persist) {
@@ -1436,10 +1505,13 @@ private:
     }
 
     [[nodiscard]] std::optional<t_size> findTrackInPlaylist(
-        t_size playlist, const metadb_handle_ptr& target) const {
+        t_size playlist, const metadb_handle_ptr& target, t_size preferredItem = SIZE_MAX) const {
         if (playlist == SIZE_MAX || target.is_empty()) return std::nullopt;
         metadb_handle_list items;
         playlist_manager::get()->playlist_get_all_items(playlist, items);
+        if (preferredItem < items.get_count() && sameTrack(items[preferredItem], target)) {
+            return preferredItem;
+        }
         for (t_size index = 0; index < items.get_count(); ++index) {
             if (sameTrack(items[index], target)) return index;
         }
@@ -1486,10 +1558,10 @@ private:
 
     [[nodiscard]] bool activatePlaylistLocation(const GUID& playlistGuid,
         const metadb_handle_ptr& target, std::size_t viewportAnchor, const std::string& savedGroupKey,
-        bool reportFailure) {
+        bool reportFailure, t_size preferredItem = SIZE_MAX) {
         auto api = playlist_manager_v5::get();
         auto playlist = api->find_playlist_by_guid(playlistGuid);
-        const auto item = findTrackInPlaylist(playlist, target);
+        const auto item = findTrackInPlaylist(playlist, target, preferredItem);
         if (playlist == SIZE_MAX || !item) {
             if (reportFailure) showStatus(L"The target playlist or track is no longer available.");
             return false;
@@ -1501,7 +1573,7 @@ private:
             if (reportFailure) showStatus(L"The target playlist was removed.");
             return false;
         }
-        const auto revalidated = findTrackInPlaylist(playlist, target);
+        const auto revalidated = findTrackInPlaylist(playlist, target, preferredItem);
         if (!revalidated) {
             if (reportFailure) showStatus(L"The target track was removed from the playlist.");
             return false;
@@ -1618,7 +1690,9 @@ private:
         state.playlistGuid = playlistGuid;
         state.path = target->get_path();
         state.subsong = target->get_subsong_index();
+        state.playlistItem = *item;
         state.groupKey = groupKeyForHandle(target);
+        state.playbackPosition = std::max(0.0, m_lastRestorePosition);
         if (m_workspace == Workspace::playlist && m_activePlaylist == playlist) {
             const auto displayRow = displayRowForTrack(m_playlistDisplayRows, *item);
             if (displayRow != SIZE_MAX && displayRow >= m_playlistTopRow) {
@@ -1628,14 +1702,157 @@ private:
         writePlaylistViewRestoreState(state);
     }
 
-    void restorePlaylistViewOnStartup() {
-        if (!readSettings().restorePlaylistView) return;
-        if (playback_control::get()->is_playing() && showNowPlaying(false)) return;
-        const auto state = readPlaylistViewRestoreState();
+    void rememberPlaybackPositionForRestore(bool queryCore) {
+        if (m_startupRestorePending) return;
+        if (queryCore) {
+            const auto playback = playback_control::get();
+            if (playback->is_playing()) {
+                m_lastRestorePosition = std::max(0.0, playback->playback_get_position());
+            }
+        }
+        auto state = readPlaylistViewRestoreState();
         if (!state.valid()) return;
+        state.playbackPosition = std::max(0.0, m_lastRestorePosition);
+        writePlaylistViewRestoreState(state);
+    }
+
+    void clearPendingResumeSeek() {
+        if (const auto wnd = get_wnd()) KillTimer(wnd, kResumeSeekTimer);
+        m_pendingResumeTrack.release();
+        m_pendingResumePosition = 0.0;
+        m_resumeSeekAttempts = 0;
+    }
+
+    void applyPendingResumeSeek() {
+        const auto wnd = get_wnd();
+        if (wnd) KillTimer(wnd, kResumeSeekTimer);
+        if (m_pendingResumeTrack.is_empty()) return;
+        ++m_resumeSeekAttempts;
+        auto playback = playback_control::get();
+        metadb_handle_ptr nowPlaying;
+        const auto matching = playback->is_playing()
+            && playback->get_now_playing(nowPlaying)
+            && sameTrack(nowPlaying, m_pendingResumeTrack);
+        if (!matching) {
+            m_startupRestorePending = false;
+            clearPendingResumeSeek();
+            if (wnd) PostMessageW(wnd, kRememberPlayingTrackMessage, 0, 0);
+            return;
+        }
+        if (m_pendingResumePosition <= 0.0) {
+            clearPendingResumeSeek();
+            return;
+        }
+        if (playback->playback_can_seek()) {
+            const auto length = std::max(0.0, playback->playback_get_length_ex());
+            const auto position = length > 0.0
+                ? std::min(m_pendingResumePosition, std::max(0.0, length - 0.25))
+                : m_pendingResumePosition;
+            clearPendingResumeSeek();
+            playback->playback_seek(position);
+            return;
+        }
+        if (m_resumeSeekAttempts < 3 && wnd) {
+            SetTimer(wnd, kResumeSeekTimer, 75, nullptr);
+        } else {
+            m_startupRestorePending = false;
+            clearPendingResumeSeek();
+            if (wnd) PostMessageW(wnd, kRememberPlayingTrackMessage, 0, 0);
+        }
+    }
+
+    void startAtHome() {
+        auto playback = playback_control::get();
+        if (playback->is_playing()) {
+            m_waitingForStartupStop = true;
+            playback->stop();
+            return;
+        }
+        clearPendingResumeSeek();
+        if (m_workspace != Workspace::playlist) setWorkspace(Workspace::playlist);
+        m_queueMode = false;
+        const auto playlist = ensureDefaultPlaylist(true);
+        if (playlist == SIZE_MAX) {
+            m_startupRestorePending = false;
+            return;
+        }
+        auto api = playlist_manager_v5::get();
+        api->set_active_playlist(playlist);
+        api->set_playing_playlist(playlist);
+        rebuildPlaylistSnapshot(false);
+        m_playlistTopRow = 0;
+        if (m_playlistItems.get_count() > 0) {
+            api->playlist_set_selection(playlist, pfc::bit_array_true(), pfc::bit_array_false());
+            api->playlist_set_focus_item(playlist, 0);
+            m_playlistFocus = 0;
+            m_playlistAnchor = 0;
+        }
+        refreshPlaylistSelection();
+        refreshPlaylistBrowserSnapshot();
+        m_startupRestorePending = false;
+        invalidate();
+    }
+
+    void applyStartupBehavior() {
+        const auto behavior = m_startupBehavior;
+        if (behavior == StartupBehavior::startAtHome) {
+            startAtHome();
+            return;
+        }
+        auto playback = playback_control::get();
+        if (playback->is_playing()) {
+            m_waitingForStartupStop = true;
+            playback->stop();
+            return;
+        }
+        const auto& state = m_startupRestoreState;
+        if (!state.valid()) {
+            startAtHome();
+            return;
+        }
         const auto target = metadb::get()->handle_create(state.path.c_str(), state.subsong);
-        (void)activatePlaylistLocation(state.playlistGuid, target, state.viewportAnchor,
-            state.groupKey, false);
+        if (!activatePlaylistLocation(state.playlistGuid, target, state.viewportAnchor,
+                state.groupKey, false, state.playlistItem)) {
+            startAtHome();
+            return;
+        }
+        auto api = playlist_manager_v5::get();
+        const auto playlist = api->find_playlist_by_guid(state.playlistGuid);
+        const auto item = findTrackInPlaylist(playlist, target, state.playlistItem);
+        if (playlist == SIZE_MAX || !item) {
+            startAtHome();
+            return;
+        }
+        api->set_playing_playlist(playlist);
+        if (behavior == StartupBehavior::restoreLastTrack) {
+            m_startupRestorePending = false;
+            writePlaylistViewRestoreState(state);
+            return;
+        }
+
+        m_pendingResumeTrack = target;
+        m_pendingResumePosition = std::max(0.0, state.playbackPosition);
+        m_resumeSeekAttempts = 0;
+        if (!api->playlist_execute_default_action(playlist, *item)) {
+            clearPendingResumeSeek();
+            startAtHome();
+        }
+    }
+
+    void playOrPauseFocusedTrack() {
+        auto playback = playback_control::get();
+        if (playback->is_playing()) {
+            playback->toggle_pause();
+            return;
+        }
+        auto playlists = playlist_manager::get();
+        const auto active = playlists->get_active_playlist();
+        const auto focus = active == SIZE_MAX ? SIZE_MAX : playlists->playlist_get_focus_item(active);
+        if (active != SIZE_MAX && focus != SIZE_MAX
+            && playlists->playlist_execute_default_action(active, focus)) {
+            return;
+        }
+        playback->start();
     }
 
     void rememberCurrentViewportAnchor() {
@@ -3575,12 +3792,12 @@ private:
             const auto right = left + (layout.playlistBody.right - layout.playlistBody.left)
                 * static_cast<float>(column.widthWeight) / static_cast<float>(std::max(1, totalWeight));
             if (column.id == "builtin.rating" && point.x >= left && point.x <= right) {
-                const auto usableLeft = left + 5.0F;
-                const auto usableRight = right - 5.0F;
-                if (usableRight <= usableLeft) return std::nullopt;
-                const auto value = std::clamp(static_cast<int>((point.x - usableLeft)
-                    / (usableRight - usableLeft) * 5.0F) + 1, 1, 5);
-                return std::pair{display.track, value};
+                const auto strip = playlistRatingStrip(left, right,
+                    layout.playlistBody.top + static_cast<float>(*displayRow - m_playlistTopRow)
+                        * playlistRowHeight(),
+                    playlistRowHeight());
+                const auto value = playlistRatingFromPoint(strip, point.x, point.y);
+                return value > 0 ? std::optional{std::pair{display.track, value}} : std::nullopt;
             }
             left = right;
         }
@@ -4001,6 +4218,8 @@ private:
         m_state.playing = api->is_playing();
         m_state.paused = m_state.playing && api->is_paused();
         m_state.position = m_state.playing ? std::max(0.0, api->playback_get_position()) : 0.0;
+        m_lastRestorePosition = m_state.position;
+        m_lastPersistedRestoreBucket = static_cast<std::int64_t>(m_lastRestorePosition / 5.0);
         m_state.length = m_state.playing ? std::max(0.0, api->playback_get_length_ex()) : 0.0;
         m_state.seekable = m_state.playing && api->playback_can_seek();
         m_state.setVolume(api->get_volume());
@@ -4064,8 +4283,15 @@ private:
         }
     }
 
-    void updateThemePalette() {
-        m_themePalette = resolveThemePalette();
+    [[nodiscard]] bool updateThemePalette() {
+        const auto next = resolveThemePalette();
+        if (next == m_themePalette) return false;
+        m_themePalette = next;
+        applyCurrentThemeToLyrics();
+        return true;
+    }
+
+    void applyCurrentThemeToLyrics() {
         m_lyricsHost.setThemeColors(0xFF000000u | rgbValue(m_themePalette.backgroundBase),
             0xFF000000u | rgbValue(m_themePalette.lyricsNormal),
             0xFF000000u | rgbValue(m_themePalette.lyricsHighlight));
@@ -4090,8 +4316,25 @@ private:
     }
 
     void refreshThemeResources() {
-        updateThemePalette();
-        releaseThemeBrushes();
+        if (!updateThemePalette()) return;
+        const auto set = [](const ComPtr<ID2D1SolidColorBrush>& brush, RgbColor colour) {
+            if (brush) brush->SetColor(D2D1::ColorF(rgbValue(colour)));
+        };
+        set(m_background, m_themePalette.backgroundBase);
+        set(m_panel, m_themePalette.surfacePanel);
+        set(m_surface, m_themePalette.surfaceMuted);
+        set(m_elevated, m_themePalette.surfaceElevated);
+        set(m_foreground, m_themePalette.textPrimary);
+        set(m_secondary, m_themePalette.textSecondary);
+        set(m_disabled, m_themePalette.textDisabled);
+        set(m_textOnAccent, m_themePalette.textOnAccent);
+        set(m_border, m_themePalette.borderSubtle);
+        set(m_accent, m_themePalette.accent);
+        set(m_accentHover, m_themePalette.accentHover);
+        set(m_hoverSurface, m_themePalette.stateHover);
+        set(m_focusBrush, m_themePalette.focus);
+        set(m_defaultPlaylist, m_themePalette.defaultPlaylist);
+        set(m_error, m_themePalette.error);
         invalidate();
     }
 
@@ -4154,7 +4397,7 @@ private:
             m_renderTarget->SetDpi(m_dpi, m_dpi);
         }
         if (!m_background) {
-            updateThemePalette();
+            (void)updateThemePalette();
             const auto make = [&](RgbColor colour, ComPtr<ID2D1SolidColorBrush>& target) {
                 return SUCCEEDED(m_renderTarget->CreateSolidColorBrush(
                     D2D1::ColorF(rgbValue(colour)), target.ReleaseAndGetAddressOf()));
@@ -5158,8 +5401,18 @@ private:
                 } else if (definition.id == "builtin.rating") {
                     const auto rating = m_playlistRatingHover && m_playlistRatingHover->first == index
                         ? m_playlistRatingHover->second : std::clamp(_wtoi(text.c_str()), 0, 5);
-                    text.assign(static_cast<std::size_t>(rating), L'\x2605');
-                    text.append(static_cast<std::size_t>(5 - rating), L'\x2606');
+                    const auto strip = playlistRatingStrip(
+                        column.rect.left, column.rect.right, y, rowHeight);
+                    if (strip.valid()) {
+                        for (int star = 0; star < 5; ++star) {
+                            const auto center = D2D1::Point2F(
+                                strip.left + (static_cast<float>(star) + 0.5F) * strip.starSize,
+                                strip.top + strip.starSize * 0.5F);
+                            drawStar(center, strip.starSize * 0.45F,
+                                star < rating ? textBrush : m_disabled.Get(), true);
+                        }
+                    }
+                    continue;
                 }
                 drawTextWith(text, rect, m_secondaryFormat.Get(),
                     alignment(definition.alignment), textBrush);
@@ -5550,8 +5803,14 @@ private:
     void refreshNowPlayingTarget() {
         metadb_handle_ptr target;
         const auto settings = readSettings();
-        if (m_state.playing && settings.rightPanelFollow == RightPanelFollow::playingTrack) {
-            playback_control::get()->get_now_playing(target);
+        if (settings.rightPanelFollow == RightPanelFollow::playingTrack) {
+            const auto haveNowPlaying = playback_control::get()->get_now_playing(target);
+            if (!haveNowPlaying && (m_state.playing || m_playbackTrackTransition)) {
+                return;
+            }
+            if (!haveNowPlaying) {
+                playlist_manager::get()->activeplaylist_get_focus_item_handle(target);
+            }
         } else {
             playlist_manager::get()->activeplaylist_get_focus_item_handle(target);
         }
@@ -5958,16 +6217,21 @@ private:
             if (state->aborter) state->aborter->abort();
             state->aborter = aborter;
         }
-        m_artworkBitmap.Reset();
-        m_artworkPixels = {target.is_valid() ? ArtworkStatus::unavailable : ArtworkStatus::missing};
         m_artworkFrames.clear(); m_artworkFrameLabels.clear(); m_artworkFrameSourceBits.clear(); m_artworkFrameIndex = 0;
         if (const auto wnd = get_wnd()) KillTimer(wnd, kArtworkRotationTimer);
-        m_artworkTheme.reset();
         m_artworkLoading = target.is_valid();
-        if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
-            refreshThemeResources();
+        if (target.is_empty()) {
+            m_artworkBitmap.Reset();
+            m_artworkPixels = {ArtworkStatus::missing};
+            m_artworkTheme.reset();
+            if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
+                refreshThemeResources();
+            }
+            return;
         }
-        if (target.is_empty()) return;
+        if (readEffectiveSettings().colourMode == ColourMode::albumArtwork) {
+            applyCurrentThemeToLyrics();
+        }
 
         metadb_handle_ptr themeTarget = target;
         if (playback_control::get()->is_playing()) playback_control::get()->get_now_playing(themeTarget);
@@ -5990,12 +6254,9 @@ private:
             std::optional<ThemePalette> artworkTheme;
             for (const auto id : {album_art_ids::cover_front, album_art_ids::cover_back,
                     album_art_ids::disc, album_art_ids::artist}) {
-                auto themePixels = loadArtwork(themeTarget, id, *aborter);
-                if (themePixels.status == ArtworkStatus::aborted) return;
-                if (themePixels.status == ArtworkStatus::ready) {
-                    artworkTheme = extractArtworkTheme(themePixels.bgra, themePixels.width, themePixels.height);
-                    break;
-                }
+                artworkTheme = loadArtworkTheme(themeTarget, id, *aborter);
+                if (aborter->is_aborting()) return;
+                if (artworkTheme) break;
             }
             fb2k::inMainThread([state, generation, frames = std::move(frames), labels = std::move(labels),
                     sourceBits = std::move(sourceBits), artworkTheme]() mutable {
@@ -7321,7 +7582,7 @@ private:
             if (!standard_commands::main_open()) showStatus(L"foobar2000's Open command is unavailable.");
             break;
         case ControlId::previous: api->userPrev(); break;
-        case ControlId::playPause: api->play_or_pause(); break;
+        case ControlId::playPause: playOrPauseFocusedTrack(); break;
         case ControlId::next: api->userNext(); break;
         case ControlId::stop: api->userStop(); break;
         case ControlId::mute: api->userMute(); break;
@@ -7515,8 +7776,6 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
-        const auto restoreJustEnabled = settings.restorePlaylistView && !m_restorePlaylistViewEnabled;
-        m_restorePlaylistViewEnabled = settings.restorePlaylistView;
         refreshThemeResources();
         m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
         reloadPlaylistViewSettings();
@@ -7529,10 +7788,14 @@ private:
         if (settings.lyricsAutoSwitch != m_autoSwitchEnabled) {
             m_autoSwitchEnabled = settings.lyricsAutoSwitch;
             m_lowerRightView = settings.lyricsAutoSwitch
-                ? (playback_control::get()->is_playing() ? LowerRightView::lyrics : LowerRightView::trackDetails)
+                ? (playback_control::get()->is_playing() && m_lyricsHost.available()
+                    ? LowerRightView::lyrics : LowerRightView::trackDetails)
                 : settings.lowerRightView;
         } else if (!settings.lyricsAutoSwitch) {
             m_lowerRightView = settings.lowerRightView;
+        }
+        if (m_lowerRightView == LowerRightView::lyrics && !m_lyricsHost.available()) {
+            m_lowerRightView = LowerRightView::trackDetails;
         }
         SendMessage(m_tooltip, TTM_ACTIVATE, settings.showTooltips ? TRUE : FALSE, 0);
         if (!settings.showSettingsButton) {
@@ -7541,7 +7804,6 @@ private:
             if (m_focus == ControlId::settings) m_focus = ControlId::playPause;
         }
         updateTooltip(m_hover);
-        if (restoreJustEnabled) restorePlaylistViewOnStartup();
         invalidate();
     }
 
@@ -7608,7 +7870,16 @@ private:
     bool m_restoringAlbumPlaybackOrder{};
     LowerRightView m_lowerRightView{LowerRightView::lyrics};
     bool m_autoSwitchEnabled{true};
-    bool m_restorePlaylistViewEnabled{true};
+    bool m_playbackTrackTransition{};
+    StartupBehavior m_startupBehavior{StartupBehavior::startAtHome};
+    PlaylistViewRestoreState m_startupRestoreState;
+    bool m_startupRestorePending{};
+    bool m_waitingForStartupStop{};
+    metadb_handle_ptr m_pendingResumeTrack;
+    double m_pendingResumePosition{};
+    double m_lastRestorePosition{};
+    std::int64_t m_lastPersistedRestoreBucket{-1};
+    unsigned m_resumeSeekAttempts{};
     int m_dragHeaderPermille{-1};
     int m_dragRightColumnPermille{-1};
     float m_detailScroll{};

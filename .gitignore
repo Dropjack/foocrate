@@ -1,5 +1,6 @@
 # 本地 foobar2000 开发/测试实例及运行数据
 .local/
+third_party/*.fb2k-component
 
 # Visual Studio、CMake 和常见构建产物
 .vs/

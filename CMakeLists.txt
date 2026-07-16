@@ -23,6 +23,8 @@ include(CTest)
 include(cmake/Foobar2000Sdk.cmake)
 
 add_library(foo_refrain MODULE
+  src/artwork_cache.cpp
+  src/artwork_cache.h
   src/artwork_loader.cpp
   src/artwork_loader.h
   src/album_browser_model.h
@@ -134,6 +136,27 @@ if(BUILD_TESTING)
   target_include_directories(refrain_theme_model_tests PRIVATE src)
   target_compile_options(refrain_theme_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME theme_model COMMAND refrain_theme_model_tests)
+
+  add_executable(refrain_artwork_cache_tests
+    tests/artwork_cache_tests.cpp
+    src/artwork_cache.cpp
+    src/theme_model.cpp
+  )
+  target_include_directories(refrain_artwork_cache_tests PRIVATE src)
+  target_compile_definitions(refrain_artwork_cache_tests PRIVATE
+    _UNICODE
+    UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+  )
+  target_compile_options(refrain_artwork_cache_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  target_link_libraries(refrain_artwork_cache_tests PRIVATE
+    refrain_foobar2000_sdk
+    refrain_component_client
+    refrain_pfc
+    refrain_shared
+  )
+  add_test(NAME artwork_cache COMMAND refrain_artwork_cache_tests)
 
   add_executable(refrain_now_playing_state_tests tests/now_playing_state_tests.cpp)
   target_include_directories(refrain_now_playing_state_tests PRIVATE src)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -116,6 +117,47 @@ template<typename T>
     std::size_t row, bool lowerHalf, std::size_t itemCount) noexcept {
     if (itemCount == 0) return 0;
     return std::min(row + (lowerHalf ? 1U : 0U), itemCount);
+}
+
+struct PlaylistRatingStrip {
+    float left{};
+    float top{};
+    float starSize{};
+    float hitTop{};
+    float hitBottom{};
+
+    [[nodiscard]] constexpr bool valid() const noexcept { return starSize > 0.0F; }
+    [[nodiscard]] constexpr float right() const noexcept { return left + starSize * 5.0F; }
+};
+
+[[nodiscard]] inline PlaylistRatingStrip playlistRatingStrip(
+    float columnLeft, float columnRight, float rowTop, float rowHeight) noexcept {
+    constexpr float horizontalPadding = 4.0F;
+    constexpr float preferredStarSize = 16.0F;
+    constexpr float minimumStarSize = 8.0F;
+    const auto availableWidth = columnRight - columnLeft - horizontalPadding * 2.0F;
+    if (!std::isfinite(availableWidth) || !std::isfinite(rowHeight)
+        || availableWidth < minimumStarSize * 5.0F || rowHeight <= 4.0F) {
+        return {};
+    }
+    const auto starSize = std::min(preferredStarSize, availableWidth / 5.0F);
+    const auto width = starSize * 5.0F;
+    return {
+        columnLeft + (columnRight - columnLeft - width) * 0.5F,
+        rowTop + (rowHeight - starSize) * 0.5F,
+        starSize,
+        rowTop + 2.0F,
+        rowTop + rowHeight - 2.0F,
+    };
+}
+
+[[nodiscard]] inline int playlistRatingFromPoint(
+    const PlaylistRatingStrip& strip, float x, float y) noexcept {
+    if (!strip.valid() || !std::isfinite(x) || !std::isfinite(y)
+        || x < strip.left || x > strip.right() || y <= strip.hitTop || y >= strip.hitBottom) {
+        return 0;
+    }
+    return std::clamp(static_cast<int>((x - strip.left) / strip.starSize) + 1, 1, 5);
 }
 
 } // namespace refrain

@@ -11,11 +11,11 @@
 
 ## 当前进度
 
-- 当前提交步骤：`22 建立 ESLyric 推荐默认设置`
-- 当前任务：[`022-建立ESLyric推荐默认设置`](022-建立ESLyric推荐默认设置/README.md)
-- 状态：已验收，等待用户 Fork 提交
-- 前置提交：`382a073 实现播放定位与 Playlist View 恢复`
-- 当前下一步：用户在 Fork 中以 `建立 ESLyric 推荐默认设置` 提交当前改动；提交后再开始步骤 23
+- 当前提交步骤：`23 打包 Refrain 组件与升级迁移`
+- 当前任务：[`023-打包Refrain组件与升级迁移`](023-打包Refrain组件与升级迁移/README.md)
+- 状态：实现中
+- 前置提交：`8fd1f23 建立 ESLyric 推荐默认设置`
+- 当前下一步：完成发布依赖策略、缺失依赖降级、正式组件与可选 FCL 的安装升级验证
 
 ## 状态定义
 
@@ -55,8 +55,8 @@
 | 019 | [完成稳定性性能与生命周期验证](019-完成稳定性性能与生命周期验证/README.md) | 已验收并提交 | 资源基线、短时压力、生命周期审计与 1.0 后观察表 |
 | 020 | [建立 Refrain 临时图标系统](020-建立Refrain临时图标系统/README.md) | 已验收（待提交） | 原生临时图标、Playback Order 七态、Remix Icon 临时来源策略 |
 | 021 | [实现播放定位与 Playlist View 恢复](021-实现播放定位与Playlist-View恢复/README.md) | 已验收并提交 | Show Now Playing、Show in Default Playlist、默认恢复列表位置 |
-| 022 | [建立 ESLyric 推荐默认设置](022-建立ESLyric推荐默认设置/README.md) | 已验收（待提交） | 安全接口验证、动态歌词颜色、用户设置保留与 Playlist 默认 profile |
-| 023 | 打包 Refrain 组件与升级迁移 | 待讨论 | 正式安装包、迁移、依赖说明、卸载与回退 |
+| 022 | [建立 ESLyric 推荐默认设置](022-建立ESLyric推荐默认设置/README.md) | 已验收并提交 | 安全接口验证、动态歌词颜色、用户设置保留与 Playlist 默认 profile |
+| 023 | [打包 Refrain 组件与升级迁移](023-打包Refrain组件与升级迁移/README.md) | 实现中 | 正式安装包、迁移、依赖说明、卸载与回退 |
 | 024 | 发布 Refrain 1.0.0 | 待讨论 | 全量回归、发布记录、最终产物与校验和 |
 | 025 | [实现原生 Mini Player](025-实现原生Mini-Player/README.md) | 待讨论 | Artwork/Compact 两形态独立播放窗口 |
 | 026 | [实现独立 CoverFlow 窗口](026-实现独立CoverFlow窗口/README.md) | 待讨论 | 上部 CoverFlow、下部 Playlist View 与双向联动 |
