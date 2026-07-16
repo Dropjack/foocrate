@@ -28,6 +28,7 @@ enum ControlId : int {
     dependencyStatusBase = 1100,
     dependencyButtonBase = 1200,
     trackActivation = 1300,
+    restorePlaylistView = 1301,
 };
 
 class SettingsPageInstance : public preferences_page_instance {
@@ -79,6 +80,7 @@ public:
         auto merged = readSettings();
         merged.timeDisplay = m_draft.timeDisplay; merged.showTooltips = m_draft.showTooltips;
         merged.showSettingsButton = m_draft.showSettingsButton; merged.trackActivation = m_draft.trackActivation;
+        merged.restorePlaylistView = m_draft.restorePlaylistView;
         merged.colourMode = m_draft.colourMode; merged.themePreset = m_draft.themePreset;
         writeSettings(merged); m_draft = merged;
         clearSettingsPreview(m_window);
@@ -90,6 +92,7 @@ public:
         const auto defaults = defaultSettings();
         m_draft.timeDisplay = defaults.timeDisplay; m_draft.showTooltips = defaults.showTooltips;
         m_draft.showSettingsButton = defaults.showSettingsButton; m_draft.trackActivation = defaults.trackActivation;
+        m_draft.restorePlaylistView = defaults.restorePlaylistView;
         m_draft.colourMode = defaults.colourMode; m_draft.themePreset = defaults.themePreset;
         writeDraftToControls();
         previewDraft();
@@ -169,6 +172,8 @@ private:
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showTooltips);
         m_settingsButton = addControl(L"BUTTON", L"Show settings button",
             BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::showSettingsButton);
+        m_restorePlaylistView = addControl(L"BUTTON", L"Restore Playlist View to last played track",
+            BS_AUTOCHECKBOX | WS_TABSTOP, ControlId::restorePlaylistView);
         m_trackActivationLabel = addControl(L"STATIC", L"Activate track (double-click or Enter):", SS_LEFT, 0);
         m_trackActivation = addControl(L"COMBOBOX", nullptr,
             CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::trackActivation);
@@ -234,13 +239,14 @@ private:
         const auto margin16 = scaled(16);
         const auto margin24 = scaled(24);
         const auto contentWidth = (width > scaled(32)) ? width - scaled(32) : 1;
-        MoveWindow(m_generalGroup, margin8, margin8, width > margin16 ? width - margin16 : 1, scaled(170), TRUE);
+        MoveWindow(m_generalGroup, margin8, margin8, width > margin16 ? width - margin16 : 1, scaled(202), TRUE);
         MoveWindow(m_timeLabel, margin24, scaled(34), scaled(120), scaled(22), TRUE);
         MoveWindow(m_timeMode, scaled(150), scaled(30), scaled(170), scaled(200), TRUE);
         MoveWindow(m_tooltips, margin24, scaled(66), scaled(250), scaled(24), TRUE);
         MoveWindow(m_settingsButton, margin24, scaled(98), scaled(250), scaled(24), TRUE);
-        MoveWindow(m_trackActivationLabel, margin24, scaled(130), scaled(240), scaled(22), TRUE);
-        MoveWindow(m_trackActivation, scaled(270), scaled(126), scaled(150), scaled(180), TRUE);
+        MoveWindow(m_restorePlaylistView, margin24, scaled(130), scaled(330), scaled(24), TRUE);
+        MoveWindow(m_trackActivationLabel, margin24, scaled(162), scaled(240), scaled(22), TRUE);
+        MoveWindow(m_trackActivation, scaled(270), scaled(158), scaled(150), scaled(180), TRUE);
 
         for (const auto control : {m_lyricsGroup, m_lyricsAutoSwitch, m_lowerViewLabel, m_lowerRightView,
                 m_showReplayGain, m_dependenciesGroup, m_dependencyNote}) ShowWindow(control, SW_HIDE);
@@ -252,11 +258,11 @@ private:
         MoveWindow(m_lowerRightView, scaled(160), scaled(204), scaled(170), scaled(200), TRUE);
         MoveWindow(m_showReplayGain, margin24, scaled(240), scaled(340), scaled(24), TRUE);
 
-        MoveWindow(m_appearanceGroup, margin8, scaled(188), width > margin16 ? width - margin16 : 1, scaled(110), TRUE);
-        MoveWindow(m_colourModeLabel, margin24, scaled(216), scaled(128), scaled(22), TRUE);
-        MoveWindow(m_colourMode, scaled(160), scaled(212), scaled(220), scaled(200), TRUE);
-        MoveWindow(m_themeLabel, margin24, scaled(250), scaled(128), scaled(22), TRUE);
-        MoveWindow(m_themePreset, scaled(160), scaled(246), scaled(220), scaled(200), TRUE);
+        MoveWindow(m_appearanceGroup, margin8, scaled(218), width > margin16 ? width - margin16 : 1, scaled(110), TRUE);
+        MoveWindow(m_colourModeLabel, margin24, scaled(246), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_colourMode, scaled(160), scaled(242), scaled(220), scaled(200), TRUE);
+        MoveWindow(m_themeLabel, margin24, scaled(280), scaled(128), scaled(22), TRUE);
+        MoveWindow(m_themePreset, scaled(160), scaled(276), scaled(220), scaled(200), TRUE);
 
         MoveWindow(m_dependenciesGroup, margin8, scaled(410), width > margin16 ? width - margin16 : 1, scaled(184), TRUE);
         for (std::size_t index = 0; index < m_dependencyLabels.size(); ++index) {
@@ -284,7 +290,8 @@ private:
             || ((id == ControlId::colourMode || id == ControlId::themePreset)
                 && notification == CBN_SELCHANGE)
             || ((id == ControlId::showTooltips || id == ControlId::showSettingsButton
-                    || id == ControlId::lyricsAutoSwitch || id == ControlId::showReplayGain)
+                    || id == ControlId::lyricsAutoSwitch || id == ControlId::showReplayGain
+                    || id == ControlId::restorePlaylistView)
                 && notification == BN_CLICKED)) {
             if (id == ControlId::colourMode || id == ControlId::themePreset) {
                 previewDraft();
@@ -300,6 +307,7 @@ private:
         values.timeDisplay = selection == 1 ? TimeDisplayMode::remaining : TimeDisplayMode::total;
         values.showTooltips = SendMessageW(m_tooltips, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.showSettingsButton = SendMessageW(m_settingsButton, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        values.restorePlaylistView = SendMessageW(m_restorePlaylistView, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.lyricsAutoSwitch = SendMessageW(m_lyricsAutoSwitch, BM_GETCHECK, 0, 0) == BST_CHECKED;
         values.lowerRightView = SendMessageW(m_lowerRightView, CB_GETCURSEL, 0, 0) == 1
             ? LowerRightView::trackDetails : LowerRightView::lyrics;
@@ -324,6 +332,8 @@ private:
         SendMessageW(m_tooltips, BM_SETCHECK, m_draft.showTooltips ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(m_settingsButton, BM_SETCHECK,
             m_draft.showSettingsButton ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(m_restorePlaylistView, BM_SETCHECK,
+            m_draft.restorePlaylistView ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(m_lyricsAutoSwitch, BM_SETCHECK,
             m_draft.lyricsAutoSwitch ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(m_lowerRightView, CB_SETCURSEL,
@@ -370,6 +380,7 @@ private:
     HWND m_timeMode{};
     HWND m_tooltips{};
     HWND m_settingsButton{};
+    HWND m_restorePlaylistView{};
     HWND m_trackActivationLabel{};
     HWND m_trackActivation{};
     HWND m_lyricsGroup{};

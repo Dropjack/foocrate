@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <string>
+#include <cstdint>
 #include <vector>
 
 namespace refrain {
@@ -42,6 +43,16 @@ struct PlaylistBrowserSettings {
     int splitPermille{150};
 };
 
+struct PlaylistViewRestoreState {
+    GUID playlistGuid{};
+    std::string path;
+    std::uint32_t subsong{};
+    std::string groupKey;
+    std::size_t viewportAnchor{};
+
+    [[nodiscard]] bool valid() const noexcept { return !path.empty(); }
+};
+
 [[nodiscard]] SettingsValues readSettings();
 [[nodiscard]] SettingsValues readEffectiveSettings();
 void writeSettings(const SettingsValues& values);
@@ -53,6 +64,8 @@ void writePlaylistViewSettings(const PlaylistViewSettings& values);
 void writeAlbumBrowserSettings(const AlbumBrowserSettings& values);
 [[nodiscard]] PlaylistBrowserSettings readPlaylistBrowserSettings();
 void writePlaylistBrowserSettings(const PlaylistBrowserSettings& values);
+[[nodiscard]] PlaylistViewRestoreState readPlaylistViewRestoreState();
+void writePlaylistViewRestoreState(const PlaylistViewRestoreState& value);
 void notifySettingsChanged();
 void registerSettingsWindow(HWND window);
 void unregisterSettingsWindow(HWND window) noexcept;

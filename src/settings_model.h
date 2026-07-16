@@ -41,6 +41,7 @@ struct SettingsValues {
     ThemePreset themePreset{ThemePreset::mist};
     ColourMode colourMode{ColourMode::refrainPreset};
     TrackActivationAction trackActivation{TrackActivationAction::play};
+    bool restorePlaylistView{true};
     RightPanelFollow rightPanelFollow{RightPanelFollow::playingTrack};
     bool detailsMetadata{true};
     bool detailsLocation{true};
@@ -69,6 +70,7 @@ struct StoredSettings {
     std::int64_t themePreset{};
     std::int64_t colourMode{};
     std::int64_t trackActivation{};
+    bool restorePlaylistView{true};
     std::int64_t rightPanelFollow{};
     bool detailsMetadata{true};
     bool detailsLocation{true};
@@ -88,7 +90,7 @@ struct SettingsMigration {
     bool rewriteKnownValues{};
 };
 
-inline constexpr std::int64_t kCurrentSettingsVersion = 6;
+inline constexpr std::int64_t kCurrentSettingsVersion = 7;
 
 [[nodiscard]] inline SettingsValues defaultSettings() {
     return {};
@@ -161,6 +163,7 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 6;
     }
     result.values.trackActivation = isValidTrackActivation(stored.trackActivation)
         ? static_cast<TrackActivationAction>(stored.trackActivation) : TrackActivationAction::play;
+    result.values.restorePlaylistView = stored.version <= 6 ? true : stored.restorePlaylistView;
     result.values.rightPanelFollow = isValidRightPanelFollow(stored.rightPanelFollow)
         ? static_cast<RightPanelFollow>(stored.rightPanelFollow) : RightPanelFollow::playingTrack;
     result.values.detailsMetadata = stored.detailsMetadata;

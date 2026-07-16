@@ -5,6 +5,7 @@
 #include "lyrics_host.h"
 #include "now_playing_state.h"
 #include "playback_layout.h"
+#include "playback_location_model.h"
 #include "playback_order_icon.h"
 #include "playback_state.h"
 #include "playlist_view_model.h"
@@ -89,6 +90,14 @@ constexpr UINT kDropReadyMessage = WM_APP + 0x427;
 constexpr UINT kRestoreAlbumSourceMessage = WM_APP + 0x428;
 constexpr UINT kCommitPlaylistRenameMessage = WM_APP + 0x429;
 constexpr UINT kCancelPlaylistRenameMessage = WM_APP + 0x42A;
+constexpr UINT kShowNowPlayingMessage = WM_APP + 0x42B;
+constexpr UINT kShowInDefaultPlaylistMessage = WM_APP + 0x42C;
+constexpr GUID kShowNowPlayingCommandGuid{
+    0x2f03e63b, 0x2362, 0x42b5, {0x8a, 0xa8, 0xf4, 0x0c, 0x09, 0x72, 0xe4, 0x66}};
+constexpr GUID kShowInDefaultPlaylistCommandGuid{
+    0xa44197ed, 0xec0a, 0x45a5, {0x98, 0xba, 0x93, 0xd8, 0x73, 0x16, 0xcc, 0x59}};
+constexpr GUID kShowInDefaultPlaylistGroupGuid{
+    0xc783b38f, 0x7d8c, 0x48de, {0x8f, 0x0e, 0x82, 0x68, 0x73, 0xb5, 0xfe, 0xe0}};
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kArtworkRotationTimer = 0x5272;
 constexpr UINT_PTR kStatusTimer = 0x5273;
@@ -115,6 +124,59 @@ public:
 };
 
 service_factory_single_t<QueueChangeCallback> g_queueChangeCallbackFactory;
+
+class ShowNowPlayingCommand : public mainmenu_commands {
+public:
+    t_uint32 get_command_count() override { return 1; }
+    GUID get_command(t_uint32) override { return kShowNowPlayingCommandGuid; }
+    void get_name(t_uint32, pfc::string_base& out) override { out = "Refrain: Show Now Playing"; }
+    bool get_description(t_uint32, pfc::string_base& out) override {
+        out = "Show the real foobar2000 playing item in Refrain Playlist View";
+        return true;
+    }
+    GUID get_parent() override { return mainmenu_groups::view; }
+    t_uint32 get_sort_priority() override { return sort_priority_base + 1; }
+    void execute(t_uint32, ctx_t) override {
+        std::erase_if(g_queueWindows, [](HWND window) { return !IsWindow(window); });
+        if (!g_queueWindows.empty()) {
+            PostMessage(g_queueWindows.front(), kShowNowPlayingMessage, 0, 0);
+        } else {
+            MessageBoxW(nullptr, L"Open a Refrain panel before using Show Now Playing.",
+                L"Refrain", MB_OK | MB_ICONINFORMATION);
+        }
+    }
+};
+
+mainmenu_commands_factory_t<ShowNowPlayingCommand> g_showNowPlayingCommandFactory;
+
+contextmenu_group_factory g_showInDefaultPlaylistGroupFactory{kShowInDefaultPlaylistGroupGuid,
+    contextmenu_groups::root, contextmenu_priorities::root_queue - 1};
+
+class ShowInDefaultPlaylistCommand : public contextmenu_item_simple {
+public:
+    unsigned get_num_items() override { return 1; }
+    void get_item_name(unsigned, pfc::string_base& out) override { out = "Show in Default Playlist"; }
+    GUID get_item_guid(unsigned) override { return kShowInDefaultPlaylistCommandGuid; }
+    GUID get_parent() override { return kShowInDefaultPlaylistGroupGuid; }
+    bool get_item_description(unsigned, pfc::string_base& out) override {
+        out = "Locate this track in the configured Default Playlist";
+        return true;
+    }
+    void context_command(unsigned, metadb_handle_list_cref items, const GUID&) override {
+        if (items.get_count() == 0) return;
+        std::erase_if(g_queueWindows, [](HWND window) { return !IsWindow(window); });
+        if (g_queueWindows.empty()) {
+            MessageBoxW(nullptr, L"Open a Refrain panel before using Show in Default Playlist.",
+                L"Refrain", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        auto frozenTarget = items[0];
+        SendMessage(g_queueWindows.front(), kShowInDefaultPlaylistMessage, 0,
+            reinterpret_cast<LPARAM>(&frozenTarget));
+    }
+};
+
+contextmenu_item_factory_t<ShowInDefaultPlaylistCommand> g_showInDefaultPlaylistCommandFactory;
 
 class AlbumViewPlaylistLock : public playlist_lock {
 public:
@@ -432,6 +494,7 @@ public:
             refreshPlaylistBrowserSnapshot();
             applyDefaultPlaylistOnce();
             reloadPlaylistViewSettings();
+            m_restorePlaylistViewEnabled = readSettings().restorePlaylistView;
             startGroupArtworkWorker();
             startAlbumArtworkWorker();
             registerPlaybackCallback();
@@ -440,6 +503,7 @@ public:
             rebuildPlaylistSnapshot(true);
             refreshQueueSnapshot();
             refreshFromCore();
+            restorePlaylistViewOnStartup();
             createTooltip(wnd);
             registerSettingsWindow(wnd);
             initializeLowerRightView();
@@ -453,6 +517,7 @@ public:
             }
             return 0;
         case WM_DESTROY: {
+            rememberCurrentViewportAnchor();
             cancelPlaylistBrowserRename();
             std::erase(g_queueWindows, wnd);
             KillTimer(wnd, kPlaylistDragTimer);
@@ -678,6 +743,14 @@ public:
         case kCancelPlaylistRenameMessage:
             cancelPlaylistBrowserRename();
             return 0;
+        case kShowNowPlayingMessage:
+            (void)showNowPlaying(true);
+            return 0;
+        case kShowInDefaultPlaylistMessage:
+            if (const auto* target = reinterpret_cast<const metadb_handle_ptr*>(lp)) {
+                (void)showInDefaultPlaylist(*target, true);
+            }
+            return 0;
         }
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -700,6 +773,7 @@ public:
             }
         }
         if (readSettings().lyricsAutoSwitch) setLowerRightView(LowerRightView::lyrics, false);
+        rememberPlayingTrackForRestore();
         requestRefresh();
     }
     void on_playback_stop(play_control::t_stop_reason reason) override {
@@ -1310,6 +1384,230 @@ private:
         playlist_manager::get()->get_playing_item_location(&m_playingPlaylist, &m_playingItem);
     }
 
+    [[nodiscard]] static bool sameTrack(const metadb_handle_ptr& left,
+        const metadb_handle_ptr& right) noexcept {
+        return left.is_valid() && right.is_valid() && left->get_location() == right->get_location();
+    }
+
+    [[nodiscard]] std::optional<t_size> findTrackInPlaylist(
+        t_size playlist, const metadb_handle_ptr& target) const {
+        if (playlist == SIZE_MAX || target.is_empty()) return std::nullopt;
+        metadb_handle_list items;
+        playlist_manager::get()->playlist_get_all_items(playlist, items);
+        for (t_size index = 0; index < items.get_count(); ++index) {
+            if (sameTrack(items[index], target)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::string groupKeyForHandle(const metadb_handle_ptr& handle) const {
+        if (handle.is_empty()) return {};
+        std::vector<PlaylistGroupInput> input{{formatHandleUtf8(handle, m_playlistGroupScripts[0]),
+            formatHandleUtf8(handle, m_playlistGroupScripts[1]),
+            formatHandleUtf8(handle, m_playlistGroupScripts[2]),
+            formatHandleUtf8(handle, m_playlistGroupScripts[3]),
+            formatHandleUtf8(handle, m_playlistGroupScripts[4])}};
+        const auto groups = buildPlaylistGroups(input, false);
+        return groups.empty() ? std::string{} : groups.front().key;
+    }
+
+    [[nodiscard]] std::optional<std::pair<GUID, t_size>> visibleLocationForBridgeTrack(
+        const metadb_handle_ptr& target) {
+        std::vector<GUID> candidates;
+        const auto addCandidate = [&](const GUID& guid) {
+            if (guid == GUID{} || isAlbumBridgeGuid(guid)) return;
+            if (std::none_of(candidates.begin(), candidates.end(),
+                    [&](const GUID& existing) { return sameGuid(existing, guid); })) {
+                candidates.push_back(guid);
+            }
+        };
+        if (m_albumSourceKind == AlbumSourceKind::playlist) addCandidate(m_albumSourcePlaylistGuid);
+        const auto savedAlbum = readAlbumBrowserSettings();
+        if (!savedAlbum.mediaLibrary) addCandidate(savedAlbum.playlistGuid);
+        addCandidate(m_albumPendingReturnPlaylistGuid);
+        addCandidate(m_albumReturnPlaylistGuid);
+        refreshPlaylistBrowserSnapshot();
+        const auto defaultPlaylist = ensureDefaultPlaylist(true);
+        if (defaultPlaylist != SIZE_MAX) {
+            addCandidate(playlist_manager_v5::get()->playlist_get_guid(defaultPlaylist));
+        }
+        for (const auto& guid : candidates) {
+            const auto playlist = playlistByGuid(guid);
+            if (const auto item = findTrackInPlaylist(playlist, target)) return std::pair{guid, *item};
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool activatePlaylistLocation(const GUID& playlistGuid,
+        const metadb_handle_ptr& target, std::size_t viewportAnchor, const std::string& savedGroupKey,
+        bool reportFailure) {
+        auto api = playlist_manager_v5::get();
+        auto playlist = api->find_playlist_by_guid(playlistGuid);
+        const auto item = findTrackInPlaylist(playlist, target);
+        if (playlist == SIZE_MAX || !item) {
+            if (reportFailure) showStatus(L"The target playlist or track is no longer available.");
+            return false;
+        }
+        if (m_workspace != Workspace::playlist) setWorkspace(Workspace::playlist);
+        m_queueMode = false;
+        playlist = api->find_playlist_by_guid(playlistGuid);
+        if (playlist == SIZE_MAX) {
+            if (reportFailure) showStatus(L"The target playlist was removed.");
+            return false;
+        }
+        const auto revalidated = findTrackInPlaylist(playlist, target);
+        if (!revalidated) {
+            if (reportFailure) showStatus(L"The target track was removed from the playlist.");
+            return false;
+        }
+        api->set_active_playlist(playlist);
+        rebuildPlaylistSnapshot(false);
+        if (m_activePlaylist == SIZE_MAX
+            || !sameGuid(api->playlist_get_guid(m_activePlaylist), playlistGuid)
+            || *revalidated >= m_playlistItems.get_count()
+            || !sameTrack(m_playlistItems[*revalidated], target)) {
+            if (reportFailure) showStatus(L"The playlist changed before Refrain could show the track.");
+            return false;
+        }
+        api->playlist_set_selection(m_activePlaylist, pfc::bit_array_true(), pfc::bit_array_false());
+        api->playlist_set_selection_single(m_activePlaylist, *revalidated, true);
+        api->playlist_set_focus_item(m_activePlaylist, *revalidated);
+        m_playlistFocus = *revalidated;
+        m_playlistAnchor = *revalidated;
+
+        auto groupIndex = groupForTrack(m_playlistGroups, *revalidated);
+        if (!savedGroupKey.empty()) {
+            const auto saved = std::find_if(m_playlistGroups.begin(), m_playlistGroups.end(),
+                [&](const PlaylistGroup& group) { return group.key == savedGroupKey
+                    && *revalidated >= group.start && *revalidated < group.start + group.count; });
+            if (saved != m_playlistGroups.end()) {
+                groupIndex = static_cast<std::size_t>(saved - m_playlistGroups.begin());
+            }
+        }
+        if (groupIndex != SIZE_MAX && m_playlistGroups[groupIndex].collapsed) {
+            m_playlistGroups[groupIndex].collapsed = false;
+            m_playlistDisplayRows = buildPlaylistDisplayRows(m_playlistGroups, 4);
+        }
+        const auto displayRow = displayRowForTrack(m_playlistDisplayRows, *revalidated);
+        if (const auto wnd = get_wnd(); wnd && displayRow != SIZE_MAX) {
+            const auto body = calculateLayout(wnd).playlistBody;
+            const auto capacity = visibleRowCapacity(body.bottom - body.top, playlistRowHeight());
+            m_playlistTopRow = restoredPlaylistTopRow(displayRow, viewportAnchor,
+                m_playlistDisplayRows.size(), capacity);
+            if (maximumTopRow(m_playlistDisplayRows.size(), capacity) > 0) {
+                showScrollbar(wnd, ScrollbarKind::playlist);
+            }
+        }
+        refreshPlaylistSelection();
+        refreshPlaylistBrowserSnapshot();
+        invalidate();
+        return true;
+    }
+
+    [[nodiscard]] bool showNowPlaying(bool reportFailure) {
+        refreshPlayingLocation();
+        auto api = playlist_manager_v5::get();
+        if (m_playingPlaylist == SIZE_MAX || m_playingItem == SIZE_MAX
+            || m_playingPlaylist >= api->get_playlist_count()) {
+            if (reportFailure) showStatus(L"Nothing is currently playing from a playlist.");
+            return false;
+        }
+        metadb_handle_ptr target;
+        if (!api->playlist_get_item_handle(target, m_playingPlaylist, m_playingItem)
+            || target.is_empty()) {
+            if (reportFailure) showStatus(L"The playing item cannot be located in a playlist.");
+            return false;
+        }
+        const auto playingGuid = api->playlist_get_guid(m_playingPlaylist);
+        if (isAlbumBridgeGuid(playingGuid)) {
+            const auto visible = visibleLocationForBridgeTrack(target);
+            if (!visible) {
+                if (reportFailure) showStatus(L"The playing album track is not in its source or Default Playlist.");
+                return false;
+            }
+            return activatePlaylistLocation(visible->first, target, 0, {}, reportFailure);
+        }
+        return activatePlaylistLocation(playingGuid, target, 0, {}, reportFailure);
+    }
+
+    [[nodiscard]] bool showInDefaultPlaylist(const metadb_handle_ptr& target, bool reportFailure) {
+        if (target.is_empty()) {
+            if (reportFailure) showStatus(L"No track is available for Default Playlist lookup.");
+            return false;
+        }
+        refreshPlaylistBrowserSnapshot();
+        const auto playlist = ensureDefaultPlaylist(true);
+        if (playlist == SIZE_MAX) {
+            if (reportFailure) showStatus(L"Default Playlist is unavailable.");
+            return false;
+        }
+        const auto guid = playlist_manager_v5::get()->playlist_get_guid(playlist);
+        if (!findTrackInPlaylist(playlist, target)) {
+            if (reportFailure) showStatus(L"Track is not in the Default Playlist");
+            return false;
+        }
+        return activatePlaylistLocation(guid, target, 0, {}, reportFailure);
+    }
+
+    void rememberPlayingTrackForRestore() {
+        refreshPlayingLocation();
+        auto api = playlist_manager_v5::get();
+        if (m_playingPlaylist == SIZE_MAX || m_playingItem == SIZE_MAX
+            || m_playingPlaylist >= api->get_playlist_count()) return;
+        metadb_handle_ptr target;
+        if (!api->playlist_get_item_handle(target, m_playingPlaylist, m_playingItem)
+            || target.is_empty()) return;
+        auto playlistGuid = api->playlist_get_guid(m_playingPlaylist);
+        auto playlist = m_playingPlaylist;
+        auto item = std::optional<t_size>{m_playingItem};
+        if (isAlbumBridgeGuid(playlistGuid)) {
+            const auto visible = visibleLocationForBridgeTrack(target);
+            if (!visible) return;
+            playlistGuid = visible->first;
+            playlist = api->find_playlist_by_guid(playlistGuid);
+            item = visible->second;
+        }
+        if (playlist == SIZE_MAX || !item) return;
+        PlaylistViewRestoreState state;
+        state.playlistGuid = playlistGuid;
+        state.path = target->get_path();
+        state.subsong = target->get_subsong_index();
+        state.groupKey = groupKeyForHandle(target);
+        if (m_workspace == Workspace::playlist && m_activePlaylist == playlist) {
+            const auto displayRow = displayRowForTrack(m_playlistDisplayRows, *item);
+            if (displayRow != SIZE_MAX && displayRow >= m_playlistTopRow) {
+                state.viewportAnchor = displayRow - m_playlistTopRow;
+            }
+        }
+        writePlaylistViewRestoreState(state);
+    }
+
+    void restorePlaylistViewOnStartup() {
+        if (!readSettings().restorePlaylistView) return;
+        if (playback_control::get()->is_playing() && showNowPlaying(false)) return;
+        const auto state = readPlaylistViewRestoreState();
+        if (!state.valid()) return;
+        const auto target = metadb::get()->handle_create(state.path.c_str(), state.subsong);
+        (void)activatePlaylistLocation(state.playlistGuid, target, state.viewportAnchor,
+            state.groupKey, false);
+    }
+
+    void rememberCurrentViewportAnchor() {
+        auto state = readPlaylistViewRestoreState();
+        if (!state.valid() || m_workspace != Workspace::playlist || m_activePlaylist == SIZE_MAX) return;
+        const auto activeGuid = playlist_manager_v5::get()->playlist_get_guid(m_activePlaylist);
+        if (!sameGuid(activeGuid, state.playlistGuid)) return;
+        const auto target = metadb::get()->handle_create(state.path.c_str(), state.subsong);
+        const auto item = findTrackInPlaylist(m_activePlaylist, target);
+        if (!item) return;
+        const auto displayRow = displayRowForTrack(m_playlistDisplayRows, *item);
+        if (displayRow == SIZE_MAX || displayRow < m_playlistTopRow) return;
+        state.viewportAnchor = displayRow - m_playlistTopRow;
+        const auto group = groupForTrack(m_playlistGroups, *item);
+        if (group != SIZE_MAX) state.groupKey = m_playlistGroups[group].key;
+        writePlaylistViewRestoreState(state);
+    }
+
     void refreshPlaylistSelection() {
         if (m_activePlaylist == SIZE_MAX) {
             m_playlistSelection.resize(0);
@@ -1802,6 +2100,7 @@ private:
         const auto now = GetTickCount64();
         bool changed{};
         bool keepTimer{};
+        bool rememberPlaylistAnchor{};
         for (std::size_t index = 0; index < scrollbarIndex(ScrollbarKind::count); ++index) {
             if (!m_scrollbarVisible[index]) continue;
             const auto kind = static_cast<ScrollbarKind>(index);
@@ -1812,11 +2111,13 @@ private:
             } else if (now >= m_scrollbarHideAfter[index]) {
                 m_scrollbarVisible[index] = false;
                 changed = true;
+                rememberPlaylistAnchor = rememberPlaylistAnchor || kind == ScrollbarKind::playlist;
             } else {
                 keepTimer = true;
             }
         }
         if (!keepTimer) KillTimer(wnd, kScrollbarVisibilityTimer);
+        if (rememberPlaylistAnchor) rememberCurrentViewportAnchor();
         if (changed) invalidate();
     }
 
@@ -3154,8 +3455,13 @@ private:
 
     void onLeftButtonDoubleClick(HWND wnd, LPARAM lp) {
         const auto point = pointFromLParam(lp, dpiScale());
+        const auto rootLayout = calculateLayout(wnd);
+        if (!m_queueMode && contains(rootLayout.trackTitle, point)) {
+            (void)showNowPlaying(true);
+            return;
+        }
         if (m_workspace == Workspace::album) {
-            const auto layout = calculateLayout(wnd);
+            const auto& layout = rootLayout;
             if (const auto album = albumAt(layout, point)) {
                 m_albumSelection = *album;
                 resetAlbumTrackSelection();
@@ -3437,6 +3743,15 @@ private:
 
     void onRightButtonUp(HWND wnd, D2D1_POINT_2F point, POINT clientPoint) {
         const auto layout = calculateLayout(wnd);
+        if (!m_queueMode && contains(layout.header, point) && !contains(layout.artwork, point)) {
+            metadb_handle_list target;
+            if (m_target.is_valid()) target.add_item(m_target);
+            if (target.get_count() > 0) {
+                ClientToScreen(wnd, &clientPoint);
+                contextmenu_manager::win32_run_menu_context(wnd, target, &clientPoint);
+            }
+            return;
+        }
         if (m_workspace == Workspace::album) {
             if (const auto row = albumTrackAt(layout, point); row && m_albumSelection < m_albums.size()) {
                 if (*row >= m_albumTrackSelected.size() || !m_albumTrackSelected[*row]) {
@@ -3452,8 +3767,10 @@ private:
                             items.add_item(m_albumSourceItems[selectedSource]);
                         }
                     }
-                    ClientToScreen(wnd, &clientPoint);
-                    contextmenu_manager::win32_run_menu_context(wnd, items, &clientPoint);
+                    if (items.get_count() > 0) {
+                        ClientToScreen(wnd, &clientPoint);
+                        contextmenu_manager::win32_run_menu_context(wnd, items, &clientPoint);
+                    }
                 }
                 invalidate();
             }
@@ -7150,6 +7467,8 @@ private:
 
     void applySettingsChange() {
         const auto settings = readSettings();
+        const auto restoreJustEnabled = settings.restorePlaylistView && !m_restorePlaylistViewEnabled;
+        m_restorePlaylistViewEnabled = settings.restorePlaylistView;
         refreshThemeResources();
         m_playlistBrowserSplitPermille = readPlaylistBrowserSettings().splitPermille;
         reloadPlaylistViewSettings();
@@ -7174,6 +7493,7 @@ private:
             if (m_focus == ControlId::settings) m_focus = ControlId::playPause;
         }
         updateTooltip(m_hover);
+        if (restoreJustEnabled) restorePlaylistViewOnStartup();
         invalidate();
     }
 
@@ -7240,6 +7560,7 @@ private:
     bool m_restoringAlbumPlaybackOrder{};
     LowerRightView m_lowerRightView{LowerRightView::lyrics};
     bool m_autoSwitchEnabled{true};
+    bool m_restorePlaylistViewEnabled{true};
     int m_dragHeaderPermille{-1};
     int m_dragRightColumnPermille{-1};
     float m_detailScroll{};

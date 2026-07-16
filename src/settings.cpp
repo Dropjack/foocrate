@@ -10,6 +10,7 @@
 #include <array>
 #include <cwctype>
 #include <mutex>
+#include <limits>
 #include <optional>
 
 namespace refrain {
@@ -64,6 +65,18 @@ constexpr GUID kDefaultPlaylistGuid{
     0x09a54027, 0x3884, 0x45c1, {0x89, 0x8c, 0xd5, 0xa9, 0x84, 0x94, 0x43, 0xb2}};
 constexpr GUID kPlaylistBrowserSplitGuid{
     0x83f11fdb, 0xc4d9, 0x46b8, {0x95, 0x20, 0x30, 0x99, 0xf4, 0x3d, 0x0e, 0x1a}};
+constexpr GUID kRestorePlaylistViewGuid{
+    0xa49d0135, 0x87c8, 0x4d45, {0x84, 0xf5, 0xb9, 0x11, 0x13, 0x89, 0x78, 0xd1}};
+constexpr GUID kRestorePlaylistGuidGuid{
+    0xcb6655d7, 0x9769, 0x438f, {0x81, 0xd2, 0x16, 0xb4, 0xcc, 0x7a, 0xb8, 0x33}};
+constexpr GUID kRestorePathGuid{
+    0x45e2a9ab, 0xe529, 0x41e6, {0xa4, 0x3c, 0xd6, 0x38, 0x22, 0x7d, 0x4a, 0x90}};
+constexpr GUID kRestoreSubsongGuid{
+    0xd652c194, 0x3858, 0x40ca, {0x8a, 0x90, 0x44, 0x79, 0x9d, 0x7b, 0x71, 0x4f}};
+constexpr GUID kRestoreGroupKeyGuid{
+    0x81495cb8, 0xf5f5, 0x4034, {0x86, 0xc4, 0x3a, 0x91, 0x71, 0x26, 0x13, 0xe2}};
+constexpr GUID kRestoreAnchorGuid{
+    0x2b4434b2, 0x8d22, 0x4781, {0x8b, 0xc4, 0x23, 0x76, 0x82, 0x3f, 0x1f, 0x1c}};
 
 cfg_int g_configVersion(kConfigVersionGuid, 0);
 cfg_int g_timeDisplay(kTimeDisplayGuid, static_cast<std::int64_t>(TimeDisplayMode::total));
@@ -98,6 +111,12 @@ cfg_guid g_albumBridgePlaylist(kAlbumBridgePlaylistGuid, GUID{});
 cfg_string g_albumSelectionKey(kAlbumSelectionKeyGuid, "");
 cfg_guid g_defaultPlaylist(kDefaultPlaylistGuid, GUID{});
 cfg_int g_playlistBrowserSplit(kPlaylistBrowserSplitGuid, 150);
+cfg_bool g_restorePlaylistView(kRestorePlaylistViewGuid, true);
+cfg_guid g_restorePlaylistGuid(kRestorePlaylistGuidGuid, GUID{});
+cfg_string g_restorePath(kRestorePathGuid, "");
+cfg_int g_restoreSubsong(kRestoreSubsongGuid, 0);
+cfg_string g_restoreGroupKey(kRestoreGroupKeyGuid, "");
+cfg_int g_restoreAnchor(kRestoreAnchorGuid, 0);
 
 std::mutex g_windowsMutex;
 std::vector<HWND> g_settingsWindows;
@@ -140,6 +159,7 @@ SettingsValues readSettings() {
         g_showReplayGain.get(), g_rightHeaderPermille.get(), g_rightColumnPermille.get(),
         g_themePreset.get(), g_colourMode.get()};
     stored.trackActivation = g_trackActivation.get();
+    stored.restorePlaylistView = g_restorePlaylistView.get();
     stored.rightPanelFollow = g_rightPanelFollow.get();
     stored.detailsMetadata = g_detailsMetadata.get();
     stored.detailsLocation = g_detailsLocation.get();
@@ -164,6 +184,7 @@ SettingsValues readSettings() {
         g_themePreset = static_cast<t_int32>(migration.values.themePreset);
         g_colourMode = static_cast<t_int32>(migration.values.colourMode);
         g_trackActivation = static_cast<t_int32>(migration.values.trackActivation);
+        g_restorePlaylistView = migration.values.restorePlaylistView;
         g_rightPanelFollow = static_cast<t_int32>(migration.values.rightPanelFollow);
         g_detailsMetadata = migration.values.detailsMetadata;
         g_detailsLocation = migration.values.detailsLocation;
@@ -196,6 +217,7 @@ void writeSettings(const SettingsValues& values) {
         values.showReplayGain, values.rightHeaderPermille, values.rightColumnPermille,
         static_cast<std::int64_t>(values.themePreset), static_cast<std::int64_t>(values.colourMode)};
     stored.trackActivation = static_cast<std::int64_t>(values.trackActivation);
+    stored.restorePlaylistView = values.restorePlaylistView;
     stored.rightPanelFollow = static_cast<std::int64_t>(values.rightPanelFollow);
     stored.detailsMetadata = values.detailsMetadata;
     stored.detailsLocation = values.detailsLocation;
@@ -219,6 +241,7 @@ void writeSettings(const SettingsValues& values) {
     g_themePreset = static_cast<t_int32>(normalized.values.themePreset);
     g_colourMode = static_cast<t_int32>(normalized.values.colourMode);
     g_trackActivation = static_cast<t_int32>(normalized.values.trackActivation);
+    g_restorePlaylistView = normalized.values.restorePlaylistView;
     g_rightPanelFollow = static_cast<t_int32>(normalized.values.rightPanelFollow);
     g_detailsMetadata = normalized.values.detailsMetadata;
     g_detailsLocation = normalized.values.detailsLocation;
@@ -320,6 +343,26 @@ void writePlaylistBrowserSettings(const PlaylistBrowserSettings& values) {
     g_defaultPlaylist = values.defaultPlaylistGuid;
     g_playlistBrowserSplit = normalizePlaylistBrowserSplitPermille(values.splitPermille);
     notifySettingsWindows();
+}
+
+PlaylistViewRestoreState readPlaylistViewRestoreState() {
+    PlaylistViewRestoreState value;
+    value.playlistGuid = g_restorePlaylistGuid.get();
+    value.path = g_restorePath.get().c_str();
+    value.subsong = static_cast<std::uint32_t>(std::max<t_int32>(0, g_restoreSubsong.get()));
+    value.groupKey = g_restoreGroupKey.get().c_str();
+    value.viewportAnchor = static_cast<std::size_t>(std::max<t_int32>(0, g_restoreAnchor.get()));
+    return value;
+}
+
+void writePlaylistViewRestoreState(const PlaylistViewRestoreState& value) {
+    g_restorePlaylistGuid = value.playlistGuid;
+    g_restorePath.set(value.path.c_str());
+    g_restoreSubsong = static_cast<t_int32>(std::min<std::uint32_t>(value.subsong,
+        static_cast<std::uint32_t>(std::numeric_limits<t_int32>::max())));
+    g_restoreGroupKey.set(value.groupKey.c_str());
+    g_restoreAnchor = static_cast<t_int32>(std::min<std::size_t>(value.viewportAnchor,
+        static_cast<std::size_t>(std::numeric_limits<t_int32>::max())));
 }
 
 void notifySettingsChanged() {

@@ -1,8 +1,8 @@
 # 播放定位与 Playlist View 恢复规格
 
-- 状态：已批准，可实现
-- 版本：0.1
-- 最后更新：2026-07-15
+- 状态：已验收
+- 版本：0.2
+- 最后更新：2026-07-16
 - 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
 - 对应路线：`21 实现播放定位与 Playlist View 恢复`
 
@@ -25,7 +25,6 @@
 入口包括：
 
 - 双击 Now Playing Header 中的 `Track Title`；
-- Now Playing Header 的右键菜单；
 - 稳定的 Refrain 主命令，供 foobar2000 快捷键系统绑定。
 
 双击 `Artwork View` 不执行本命令。
@@ -39,7 +38,7 @@
 5. 不向 Default Playlist 插入曲目，不改变自动列表规则，不触发播放。
 6. 目标列表消失时先服从现有 Default Playlist 修复规则；曲目不在目标列表时显示 `Track is not in the Default Playlist`。
 
-入口包括 Playlist View 曲目右键、Album Track List 曲目右键和 Now Playing Header 右键。
+入口为 foobar2000 原生 Track Actions 上下文命令。该命令以独立分组显示在 `Add to playback queue` 上方；Refrain 的 Now Playing Header、Playlist View 和 Album Track List 均打开完整的原生 Track Actions 菜单，不以自定义菜单隐藏原有命令。
 
 ## 3. Playlist View 恢复
 
@@ -76,3 +75,6 @@ Refrain 保存：
 - 2026-07-15：用户批准把“定位正在播放”和“前往 Default Playlist”统一为播放定位系统。
 - 2026-07-15：用户指定快速入口为双击 `Track Title`，不双击 Artwork View。
 - 2026-07-15：用户批准 Playlist View 恢复默认开启，并明确不影响 Album Browser；实际播放时间恢复继续由 foobar2000 核心负责。
+- 2026-07-16：实现使用设置版本 7 和独立稳定 GUID 保存播放列表 GUID、文件路径、子曲目、分组键及视口锚点；旧版本升级默认开启恢复。右键菜单冻结本地曲目句柄，提交前重新核对播放列表 GUID 与曲目身份。
+- 2026-07-16：按用户复查修正右键集成：右键中移除 `Show Now Playing`，恢复完整原生 Track Actions；`Show in Default Playlist` 注册为 `Add to playback queue` 上方的独立分组。
+- 2026-07-16：用户确认没有更多任务 21 测试并明确要求划勾，规格按最终实现验收。

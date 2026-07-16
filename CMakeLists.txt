@@ -43,6 +43,7 @@ add_library(foo_refrain MODULE
   src/playlist_view_model.h
   src/now_playing_state.h
   src/playback_layout.h
+  src/playback_location_model.h
   src/playback_order_icon.h
   src/now_playing_toolbar.cpp
   src/now_playing_preferences.cpp
@@ -113,6 +114,11 @@ if(BUILD_TESTING)
   target_include_directories(refrain_playback_layout_tests PRIVATE src)
   target_compile_options(refrain_playback_layout_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
   add_test(NAME playback_layout COMMAND refrain_playback_layout_tests)
+
+  add_executable(refrain_playback_location_model_tests tests/playback_location_model_tests.cpp)
+  target_include_directories(refrain_playback_location_model_tests PRIVATE src)
+  target_compile_options(refrain_playback_location_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_location_model COMMAND refrain_playback_location_model_tests)
 
   add_executable(refrain_playback_order_icon_tests tests/playback_order_icon_tests.cpp)
   target_include_directories(refrain_playback_order_icon_tests PRIVATE src)

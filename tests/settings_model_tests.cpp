@@ -22,6 +22,7 @@ int main() {
     expect(defaults.timeDisplay == TimeDisplayMode::total, "default time mode must be total");
     expect(defaults.showTooltips, "tooltips must default on");
     expect(defaults.showSettingsButton, "settings button must default on");
+    expect(defaults.restorePlaylistView, "playlist view restore must default on");
     expect(defaults.lyricsAutoSwitch, "lyrics auto switch must default on");
     expect(defaults.lowerRightView == LowerRightView::lyrics, "lower right view must default to lyrics");
     expect(!defaults.showReplayGain, "ReplayGain details must default off");
@@ -31,10 +32,11 @@ int main() {
     expect(defaults.colourMode == ColourMode::refrainPreset, "colour mode must default to Refrain preset");
 
     const auto firstRun = migrateSettings({0, 0, true, true, true, 0, false, 500, 230});
-    expect(firstRun.versionToKeep == 6, "version zero must migrate to six");
+    expect(firstRun.versionToKeep == 7, "version zero must migrate to seven");
     expect(firstRun.rewriteKnownValues, "version migration must be persisted");
+    expect(firstRun.values.restorePlaylistView, "old settings must enable playlist view restore");
 
-    const auto invalid = migrateSettings({6, 77, false, false, false, 77, true, 999, 999, 77, 77});
+    const auto invalid = migrateSettings({kCurrentSettingsVersion, 77, false, false, false, 77, true, 999, 999, 77, 77});
     expect(invalid.values.timeDisplay == TimeDisplayMode::total, "invalid enum must fall back to total");
     expect(invalid.rewriteKnownValues, "invalid current value must be repaired");
     expect(!invalid.values.showTooltips && !invalid.values.showSettingsButton, "valid booleans must survive repair");
@@ -45,7 +47,7 @@ int main() {
     expect(invalid.values.themePreset == ThemePreset::mist, "invalid theme must fall back to mist");
     expect(invalid.values.colourMode == ColourMode::refrainPreset, "invalid colour mode must fall back");
 
-    const auto remaining = migrateSettings({6, 1, true, false, false, 1, true, 640, 360, 3, 2});
+    const auto remaining = migrateSettings({kCurrentSettingsVersion, 1, true, false, false, 1, true, 640, 360, 3, 2});
     expect(remaining.values.timeDisplay == TimeDisplayMode::remaining, "remaining mode must survive");
     expect(!remaining.rewriteKnownValues, "valid current values must not be rewritten");
     expect(remaining.values.lowerRightView == LowerRightView::trackDetails, "details view must survive");
@@ -59,6 +61,15 @@ int main() {
         "right panel must safely default to playing track");
     expect(remaining.values.artworkSourceMask == kAllArtworkSources,
         "all artwork sources must default on");
+
+    auto versionSix = StoredSettings{};
+    versionSix.version = 6;
+    versionSix.restorePlaylistView = false;
+    const auto upgradedRestore = migrateSettings(versionSix);
+    expect(upgradedRestore.values.restorePlaylistView,
+        "version-six upgrade must enable playlist view restore by default");
+    expect(upgradedRestore.rewriteKnownValues,
+        "version-six upgrade must persist the new restore setting");
 
     const auto oldRefrain = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 0});
     const auto oldWindows = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 1});

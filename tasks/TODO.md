@@ -1,9 +1,9 @@
 # Refrain 项目 TODO 与提交路线
 
 - 最后更新：2026-07-16
-- 当前步骤：`20 建立 Refrain 临时图标系统`
-- 当前状态：已验收（待提交；下一步为 21 实现播放定位与 Playlist View 恢复）
-- 前置提交：`76b8c47 部分完成稳定性性能与生命周期验证`
+- 当前步骤：`21 实现播放定位与 Playlist View 恢复`
+- 当前状态：已验收（待提交）
+- 前置提交：`6d3ad8b 建立 Refrain 临时图标系统`
 - 使用方式：两位数字是路线编号；用户可用“编号 + 标题”指挥 Codex，Fork 提交标题使用编号后的文字
 
 ## 1. 如何使用这份 TODO
@@ -261,13 +261,14 @@
 - 验收记录：2026-07-16 用户明确要求把任务 20 改为临时图标、给步骤 20 划勾并准备进入步骤 21。Debug/Release 构建成功，两种配置各 12 项自动测试通过，手动导入组件已生成到 `dist`；当前变更等待用户提交。
 - 通过标准：现有按钮均有可辨认临时图形；Playback Order 七态独立；未来临时缺图有统一来源策略；正式图标退出当前发布路线。
 
-### [ ] 21 实现播放定位与 Playlist View 恢复
+### [x] 21 实现播放定位与 Playlist View 恢复
 
 - 前置：步骤 20 已提交；[`播放定位与 Playlist View 恢复规格`](../specs/modules/PLAYBACK_LOCATION_AND_RESTORE.md) 0.1 已获用户批准。
 - 目标：可以跨播放列表定位正在播放曲目，也可以把任意曲目带到 Default Playlist 中浏览完整专辑；重启后默认恢复 Playlist View 到上次播放曲目附近。
 - Codex 工作：实现 `Show Now Playing`、`Show in Default Playlist`、双击 Track Title、右键与稳定快捷键命令；处理隐藏 Album Bridge、自动列表、重复引用、目标消失和大列表查找；新增默认开启且只影响 Playlist View 的恢复设置与迁移。
 - 用户手动检查：从普通列表、自动列表、Album Browser 和 Default Playlist 播放；双击右侧歌曲名字定位；从不同入口前往 Default Playlist；测试不在目标列表、重复曲目、重启恢复、关闭设置及 Album Browser 不受影响。
 - 通过标准：定位不播放、不 Seek、不排序、不插入；恢复不建立第二套播放会话；失败有明确反馈，旧设置升级安全。
+- 验收记录：2026-07-16 完成两个定位命令、Track Title 双击、原生 Track Actions 集成及 Playlist View 恢复；按用户复查恢复完整右键内容，从右键移除 `Show Now Playing`，并将 `Show in Default Playlist` 作为 `Add to playback queue` 上方的独立分组。Debug/Release 各 13 项测试通过，组件包审计通过；用户确认没有更多测试并明确要求划勾，等待 Fork 提交。
 
 ### [ ] 22 建立 ESLyric 推荐默认设置
 
