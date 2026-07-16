@@ -23,6 +23,11 @@ int main() {
     assert(ratingCommandValue(0, 2) == 2);
     assert(ratingCommandValue(5, 0) == 0);
 
+    assert(artistAlbumLineFormat("$if2(%artist%,Unknown) | $if2(%album%,Unknown)")
+        == "$if2(%artist%,Unknown) | $if2(%album%,Unknown)");
+    assert(artistAlbumLineFormat("%title%\n%artist% | %album%") == "%artist% | %album%");
+    assert(artistAlbumLineFormat("%title%\r\n%artist% | %album%") == "%artist% | %album%");
+
     assert(menuPathMatches("Playback Statistics/Rating/5", "Playback Statistics/Rating/5"));
     assert(menuPathMatches("Utilities/Playback Statistics/Rating/5", "Playback Statistics/Rating/5"));
     assert(menuPathMatches("&Playback Statistics/&Rating/5", "Playback Statistics/Rating/5"));

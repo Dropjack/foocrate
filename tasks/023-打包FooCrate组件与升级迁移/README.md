@@ -128,6 +128,9 @@
 - 2026-07-16：M4A 评分修正版在 `build/release-1.0.0` 完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过。手动测试组件为 `dist/FooCrate-1.0.0.fb2k-component`，大小 401907 字节，SHA-256 `93E5D16F105491257457980CE276135DED965138FBFDE1572A64E88EDA60154F`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `D2875A136CD2AB45D7E8165B436133A4A044526ACE9AC2F3C58B86552B3DF393`。本轮保持版本 1.0.0 供人工复验；用户确认后再升至 1.0.1 并更新正式发布材料。
 - 2026-07-16：用户确认 Apple M4A/AAC/ALAC 评分显示、写入和清除均通过人工复验，FLAC 回归正常；批准将修复正式发布为 1.0.1。版本元数据、安装说明、README 和独立 1.0.1 Release Notes 同步更新；1.0.0 Release Notes 作为首版历史保留，1.0.0 FCL 因稳定 GUID 和布局格式未变继续兼容。
 - 2026-07-16：在全新 `build/release-1.0.1` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。正式组件为 `dist/FooCrate-1.0.1.fb2k-component`，大小 401905 字节，SHA-256 `46EACA4DB76DCA8435C06BF87508AAA082DA23332D867E497B0C735080973E6F`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `7DFC878AA3DAA30690C7EC1F4F4AC8F9D0220ABE92E9EB596A3DFC4463430511`。Windows FileVersion/ProductVersion 均为 1.0.1，ProductName、FileDescription 和 OriginalFilename 审计通过。`dist/FooCrate-1.0.1-SHA256SUMS.txt` 仅列本版组件，`dist/FooCrate-1.0.1-RELEASE-NOTES.md` 与仓库正式说明内容一致。
+- 2026-07-16：用户截图发现 Now Playing 的 `Artist | Album` 行显示为 `TitleArtist | Album`。根因是任务 17 的旧两行格式先整体交给 foobar2000 标题格式执行，执行结果不保留换行，之后才尝试提取第二行，导致两行被拼接。修正为编译前先从设置文本提取第二行；新单行 Artist/Album 格式保持原样。新增 LF、CRLF 和单行格式回归测试，保证 Track Title 只出现在独立标题行。
+- 2026-07-16：用户确认 Now Playing 第二行只显示 `Artist | Album`，歌名不再混入；批准将该修复正式发布为 1.0.2。本轮只更新必要版本元数据、安装入口、组件与哈希清单，不新增仓库 Release Notes 文件。
+- 2026-07-16：在全新 `build/release-1.0.2` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 403685 字节，SHA-256 `E84C6C4A8357013ACF9F104A91FD33851D9866EFE8EEA4A760A9E0D9BB640242`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `4F2960D0610AB6F15F06F5F4058EC4F37C801ED9916B362298DC3D61164A7D8D`。Windows FileVersion/ProductVersion 均为 1.0.2；`dist/FooCrate-1.0.2-SHA256SUMS.txt` 已生成。
 
 ## 改动文件
 
