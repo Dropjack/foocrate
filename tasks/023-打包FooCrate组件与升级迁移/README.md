@@ -15,7 +15,7 @@
 - 不把 ESLyric、Playback Statistics、Columns UI 或 Beefweb 二进制塞进 FooCrate 组件包。
 - 不把用户放在 `third_party` 的本地组件提交到 Git。
 - 不覆盖已有 Columns UI 布局、快捷键或 ESLyric 私有配置。
-- 不在本步骤发布 1.0.0；最终版本号、发布记录和全量回归属于步骤 24。
+- 本步骤生成版本号为 1.0.0 的正式候选组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
 
 ## 中文程序逻辑
 
@@ -120,6 +120,9 @@
 - 2026-07-16：启动恢复竞态修正版完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过。新包 `dist/FooCrate-0.1.0.fb2k-component` 大小 401136 字节，SHA-256 `1738272988B07877518C0AC43B1A9099D136F0957B5A022020B6B65F29D69D0B`；包内仅 `foo_crate.dll`，条目哈希与 Release DLL 一致。
 - 2026-07-16：用户再次复测仍回到 favpop 第一首。复核发现启动保护在恢复目标不匹配、seek 失败等路径没有解除，且曲目身份只在 `on_playback_new_track` 回调内读取；这会让旧 playlist GUID/item 长期保留，而新歌曲的时间继续写入旧记录。修正为所有退出路径都结束保护，切歌后通过窗口消息延迟读取 Playing Location，并在每 5 秒、暂停、seek 和关闭时重新保存完整 playlist GUID + item index + 曲目身份。恢复秒数同时限制在实际曲长以内。Debug/Release 各 14/14 测试通过；新包大小 401154 字节，SHA-256 `E24BAF68D8D0EBD5D4138827A4BF96EEB5118A2DE68A1EF46B5CF8472F556D48`，内容审计仍仅含 `foo_crate.dll`。
 - 2026-07-16：为避免前两版已污染的 `favpop/第一首 + 其他曲目时间` 继续影响复测，恢复记录增加独立格式版本；旧的无版本记录自动视为无效，升级后首次启动安全回首页，随后播放才建立新格式记录。最终 Debug/Release 各 14/14 通过；组件大小 401392 字节，SHA-256 `2A5069998F8CB1718D04CBDEC04D90D3E907113F1074AC5E171F3160FE8C9A94`，包内仅 `foo_crate.dll`。
+- 2026-07-16：完成 FooCrate 1.0.0 发布元数据审计。CMake、foobar2000 组件版本、稳定身份常量、Windows VERSIONINFO、测试和打包文件名统一为 `1.0.0`；产品总规格同步三档启动行为。改名后的维护文本通过严格 UTF-8 无 BOM 检查。
+- 2026-07-16：在全新 `build/release-1.0.0` 构建树完成 x64 Debug/Release；两种配置各 14/14 自动测试通过。正式候选包为 `dist/FooCrate-1.0.0.fb2k-component`，大小 401443 字节，SHA-256 `B0F266C27175C4E0C2456B84E4947D255C56233374AEE15A582F9F94B61C620A`。包内仅根目录 `foo_crate.dll`；条目与 Release DLL 的 SHA-256 均为 `6E7A5703FB1654D81CB9B51196CD7ED7FA018C9918D932803AAC9840B9725F33`。Windows FileVersion、ProductVersion、ProductName、FileDescription 与 OriginalFilename 审计通过。
+- 2026-07-16：`dist` 已整理为 1.0.0 组件、安装升级说明、发布说明和 SHA-256 清单；旧 0.1.0 组件及嵌有 `Refrain` 名称的旧 FCL 已从交付目录移除。当前仍需用户在改名后的 Columns UI 中重新导出 `.fcl` 并在 `foobar-test` 导入验证；仓库尚未声明项目许可证，公开发布前必须由用户决定许可证或明确保留全部权利。
 
 ## 改动文件
 
@@ -131,6 +134,9 @@
 - `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃和容量上限测试。
 - `src/playlist_interaction_model.h`：共享的五星排列与命中模型。
 - `tests/playlist_interaction_model_tests.cpp`：五星边缘、连续格和窄列缩放测试。
+- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.0 版本元数据与自动检查。
+- `scripts/package-component.ps1`、`scripts/prepare-release.ps1`：按版本生成正式组件、整理 `dist` 文档并生成 SHA-256 清单。
+- `docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.0.md`：依赖、安装、升级、卸载、回退、已知限制与发布说明。
 - `.gitignore`：忽略用户本地保存的第三方 `.fb2k-component`。
 - 本任务、任务入口和 TODO：记录步骤 23 的范围、状态和人工验收。
 
@@ -139,5 +145,6 @@
 - 五星采用 Foobox 的 5 个连续正方形交互模型，但由 FooCrate 原生 Direct2D 绘制，不复制 Foobox 的字体或位图资产。
 - ESLyric 和 Playback Statistics 维持可选独立组件；Columns UI 是 FooCrate 面板运行所需宿主。
 - 正式 FCL 是否包含足够的内部 ESLyric 实例数据，仍需在 `foobar-test` 完成导入/导出验证。
+- 现有 `dist/foocrate-0.1.0.fcl` 内仍含改名前的 `Refrain` 可见名称，禁止进入 FooCrate 1.0.0 正式产物；必须从改名后的 Columns UI 布局重新导出。
 - 任务 21 原先“实际播放时间恢复服从 foobar2000”的决定已被本任务中的用户新要求取代；FooCrate 现在正式负责上述三档启动行为。
 - Foobox 参考证据属于只读脚本观察：`D:\Dev\foobar2000\profile\foobox\script\js_panels\jsplaylist.js` 的 Enter 播放和 `WSHplaylist.js` 的 Now Playing 定位均使用 playlist item index；FooCrate 只复现可观察思路，不复制其 JavaScript 结构。

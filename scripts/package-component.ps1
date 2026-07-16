@@ -6,7 +6,10 @@ param(
   [string]$ComponentDll,
 
   [Parameter(Mandatory = $true)]
-  [string]$OutputDirectory
+  [string]$OutputDirectory,
+
+  [Parameter(Mandatory = $true)]
+  [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +19,10 @@ $dll = [IO.Path]::GetFullPath($ComponentDll)
 $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repo 'build')).TrimEnd('\')
 $distRoot = [IO.Path]::GetFullPath((Join-Path $repo 'dist')).TrimEnd('\')
+
+if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+  throw "Version must use major.minor.patch format: $Version"
+}
 
 if (-not $dll.StartsWith($buildRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
   throw "Component DLL must be inside the repository build directory: $dll"
@@ -38,7 +45,7 @@ if ([IO.Path]::GetFileName($dll) -cne 'foo_crate.dll') {
 }
 
 $staging = Join-Path $buildRoot 'package-staging'
-$package = Join-Path $output 'FooCrate-0.1.0.fb2k-component'
+$package = Join-Path $output "FooCrate-$Version.fb2k-component"
 
 if (Test-Path -LiteralPath $staging) {
   Remove-Item -LiteralPath $staging -Recurse -Force
