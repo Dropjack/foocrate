@@ -15,7 +15,7 @@ static_assert(foocrate::kComponentGuid.Data1 == 0x5aeac28d);
 
 DECLARE_COMPONENT_VERSION(
     "FooCrate",
-    "1.0.1",
+    "1.0.2",
     "Native integrated Columns UI component for foobar2000.\n"
     "Native playback controls, Front Cover summary, Playback Statistics rating, "
     "and versioned foobar2000 Preferences integration.");

@@ -5853,15 +5853,10 @@ private:
         m_artistAlbum = formatTargetField(m_artistScript, L"Unknown artist") + L" | "
             + formatTargetField(m_albumScript, L"Unknown album");
         titleformat_object::ptr summaryScript;
-        const auto summaryFormat = readSettings().nowPlayingSummaryFormat;
-        if (titleformat_compiler::get()->compile(summaryScript, summaryFormat.c_str())) {
+        const auto summaryFormat = artistAlbumLineFormat(readSettings().nowPlayingSummaryFormat);
+        if (!summaryFormat.empty() && titleformat_compiler::get()->compile(summaryScript, summaryFormat.c_str())) {
             const auto summary = formatTargetField(summaryScript, L"");
-            const auto separator = summary.find(L'\n');
-            if (separator == std::wstring::npos) { if (!summary.empty()) m_artistAlbum = summary; }
-            else {
-                const auto second = summary.substr(separator + 1);
-                if (!second.empty()) m_artistAlbum = second;
-            }
+            if (!summary.empty()) m_artistAlbum = summary;
         }
         const auto codec = formatTargetField(m_codecScript, L"Unknown codec");
         auto bitrate = formatTargetField(m_bitrateScript, L"Unknown bitrate");

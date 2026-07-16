@@ -57,6 +57,17 @@ enum class TopBarPlaybackState { stopped, playing, paused };
     return clicked > 0 && clicked == currentRating ? 0 : clicked;
 }
 
+[[nodiscard]] inline std::string artistAlbumLineFormat(std::string_view storedFormat) {
+    const auto separator = storedFormat.find_first_of("\r\n");
+    if (separator == std::string_view::npos) return std::string(storedFormat);
+    auto second = separator;
+    while (second < storedFormat.size()
+        && (storedFormat[second] == '\r' || storedFormat[second] == '\n')) {
+        ++second;
+    }
+    return std::string(storedFormat.substr(second));
+}
+
 [[nodiscard]] inline std::string normalizeMenuPath(std::string_view path) {
     std::string result;
     result.reserve(path.size());
