@@ -1,9 +1,9 @@
 # Refrain 项目 TODO 与提交路线
 
 - 最后更新：2026-07-16
-- 当前步骤：`21 实现播放定位与 Playlist View 恢复`
-- 当前状态：已验收（待提交）
-- 前置提交：`6d3ad8b 建立 Refrain 临时图标系统`
+- 当前步骤：`22 建立 ESLyric 推荐默认设置`
+- 当前状态：已验收，等待用户 Fork 提交
+- 前置提交：`382a073 实现播放定位与 Playlist View 恢复`
 - 使用方式：两位数字是路线编号；用户可用“编号 + 标题”指挥 Codex，Fork 提交标题使用编号后的文字
 
 ## 1. 如何使用这份 TODO
@@ -269,20 +269,23 @@
 - 用户手动检查：从普通列表、自动列表、Album Browser 和 Default Playlist 播放；双击右侧歌曲名字定位；从不同入口前往 Default Playlist；测试不在目标列表、重复曲目、重启恢复、关闭设置及 Album Browser 不受影响。
 - 通过标准：定位不播放、不 Seek、不排序、不插入；恢复不建立第二套播放会话；失败有明确反馈，旧设置升级安全。
 - 验收记录：2026-07-16 完成两个定位命令、Track Title 双击、原生 Track Actions 集成及 Playlist View 恢复；按用户复查恢复完整右键内容，从右键移除 `Show Now Playing`，并将 `Show in Default Playlist` 作为 `Add to playback queue` 上方的独立分组。Debug/Release 各 13 项测试通过，组件包审计通过；用户确认没有更多测试并明确要求划勾，等待 Fork 提交。
+- 提交记录：用户已提交为 `382a073 实现播放定位与 Playlist View 恢复`；工作树干净后开始步骤 22。
 
-### [ ] 22 建立 ESLyric 推荐默认设置
+### [x] 22 建立 ESLyric 推荐默认设置
 
 - 前置：步骤 21 已提交；[`ESLyric 推荐默认设置规格`](../specs/modules/ESLYRIC_RECOMMENDED_DEFAULTS.md) 完成三态隔离验证并获得用户对完整默认清单的批准。
 - 目标：全新 Refrain/ESLyric 面板可以采用一套协调的完整推荐设置，同时绝不覆盖已有用户配置，用户仍可随时从 ESLyric 右键修改。
 - Codex 工作：验证 Columns UI `export_config/import_config` 在全新、已配置和升级三态下的行为；只使用正式实例配置接口制作不透明预设；加入明确的首次应用/保留现有/主动重新应用规则；继续独立运行时同步背景色。
 - 用户手动检查：干净实例采用推荐值；已有设置安装 Refrain 后保持；右键修改跨重启保留；主动重新应用有确认；ESLyric 缺失或版本不兼容时安全降级。
 - 通过标准：不解析或覆盖私有 `.cfg`，不捆绑 ESLyric，不接管歌词源/路径等用户数据；推荐预设可重复验证且不会每次启动回写。
+- 验收记录：2026-07-16 正式实例导出仅得到 6 字节，确认完整 ESLyric 显示预设不可安全移植，因此取消私有配置覆盖。实现背景、普通歌词与当前歌词高亮同步：普通歌词至少 4.5:1，高亮至少 7:1；Playlist 设置升级为 RPV3，默认 profile 使用 Album Artist / Album / Disc；快捷键全局私有配置保持不变。Debug/Release 各 13 项测试通过，用户确认人工测试无问题并要求任务 22 划勾，等待以本标题提交。
 
 ### [ ] 23 打包 Refrain 组件与升级迁移
 
 - 前置：步骤 22 已提交；第三方再分发条件已核清。
 - 目标：产生普通用户可以安装、升级、卸载和回退的正式 `.fb2k-component` 包。
 - Codex 工作：完成 Release 打包、版本元数据、许可证、依赖检测、安装说明、可选布局导入、配置迁移、卸载/回退说明、包内容审计和校验和；明确 ESLyric/Playback Statistics 独立安装，不覆盖现有 Columns UI 布局。
+- 待办：以 Columns UI 正式 `.fcl`（不是 `.fth`）提供可选布局导入；在 `foobar-test` 验证导出、导入及升级。当前 `dist/refrain-0.1.0.fcl` 已确认包含 Refrain 面板 GUID，但尚未包含 Refrain 内部 ESLyric 的正式实例配置块；需要决定修复转发或明确该设置由用户在 ESLyric 右键单独保存。
 - 用户手动检查：在 `foobar-test` 从干净状态安装、建立布局、播放；升级旧配置；卸载 Refrain；重新安装；确认快捷键、播放列表、列/分组/主题等应保留数据按规格处理。
 - 通过标准：包内只有获准文件；不包含 foobar2000 或未许可第三方二进制；安装无需 EXE；失败和缺依赖提示清楚；回退路径可执行。
 

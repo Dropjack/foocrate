@@ -48,9 +48,10 @@ using DllGetClassObjectProc = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*
     return result;
 }
 
-[[nodiscard]] HRESULT setEsLyricBackground(IDispatch* panels, std::uint32_t argb) noexcept {
+[[nodiscard]] HRESULT setEsLyricColor(
+    IDispatch* panels, const wchar_t* methodName, std::uint32_t argb) noexcept {
     DISPID method{};
-    auto result = dispatchId(panels, L"SetBackgroundColor", method);
+    auto result = dispatchId(panels, methodName, method);
     if (FAILED(result)) return result;
 
     VARIANTARG argument;
@@ -173,6 +174,16 @@ bool LyricsHost::create(HWND parent, const uie::window_host_ptr& upstream, const
     }
 
     try {
+        if (m_instanceConfig.get_size() > 0) {
+            abort_callback_dummy abort;
+            if (m_instanceConfigPortable) {
+                panel->import_config_from_ptr(
+                    m_instanceConfig.get_ptr(), m_instanceConfig.get_size(), abort);
+            } else {
+                panel->set_config_from_ptr(
+                    m_instanceConfig.get_ptr(), m_instanceConfig.get_size(), abort);
+            }
+        }
         const ui_helpers::window_position_t position(bounds);
         const auto child = panel->create_or_transfer_window(parent, host, position);
         if (!child || !IsWindow(child)) {
@@ -188,7 +199,7 @@ bool LyricsHost::create(HWND parent, const uie::window_host_ptr& upstream, const
         m_statusText.clear();
         resize(bounds);
         setVisible(m_visible);
-        if (!applyBackgroundColor()) {
+        if (!applyThemeColors()) {
             FB2K_console_formatter() << "Refrain: ESLyric background synchronization is unavailable; "
                                         "enable pref.script.expose or check ESLyric compatibility.";
         }
@@ -198,6 +209,25 @@ bool LyricsHost::create(HWND parent, const uie::window_host_ptr& upstream, const
         host->detach();
         return false;
     }
+}
+
+void LyricsHost::setInstanceConfig(const void* data, t_size size, bool portable) {
+    if (size > 0 && !data) throw pfc::exception_invalid_params();
+    m_instanceConfig.set_data_fromptr(static_cast<const t_uint8*>(data), size);
+    m_instanceConfigPortable = portable;
+}
+
+bool LyricsHost::getInstanceConfig(
+    pfc::array_t<t_uint8>& output, abort_callback& abort, bool portable) const {
+    output.set_size(0);
+    if (m_panel.is_valid()) {
+        if (portable) m_panel->export_config_to_array(output, abort, true);
+        else m_panel->get_config_to_array(output, abort, true);
+        return true;
+    }
+    if (m_instanceConfig.get_size() == 0 || m_instanceConfigPortable != portable) return false;
+    output.set_data_fromptr(m_instanceConfig.get_ptr(), m_instanceConfig.get_size());
+    return true;
 }
 
 void LyricsHost::destroy() noexcept {
@@ -231,12 +261,15 @@ void LyricsHost::setVisible(bool visible) noexcept {
     if (m_child && IsWindow(m_child)) ShowWindow(m_child, visible ? SW_SHOWNA : SW_HIDE);
 }
 
-void LyricsHost::setBackgroundColor(std::uint32_t argb) noexcept {
-    m_backgroundArgb = argb;
-    if (available()) (void)applyBackgroundColor();
+void LyricsHost::setThemeColors(std::uint32_t backgroundArgb, std::uint32_t normalArgb,
+    std::uint32_t highlightArgb) noexcept {
+    m_backgroundArgb = backgroundArgb;
+    m_normalArgb = normalArgb;
+    m_highlightArgb = highlightArgb;
+    if (available()) (void)applyThemeColors();
 }
 
-bool LyricsHost::applyBackgroundColor() const noexcept {
+bool LyricsHost::applyThemeColors() const noexcept {
     if (!m_child || !IsWindow(m_child)) return false;
     const auto module = reinterpret_cast<HMODULE>(GetWindowLongPtrW(m_child, GWLP_HINSTANCE));
     if (!module) return false;
@@ -255,7 +288,12 @@ bool LyricsHost::applyBackgroundColor() const noexcept {
     ComPtr<IDispatch> panels;
     result = esLyricPanelCollection(control.Get(), panels);
     if (FAILED(result) || !panels) return false;
-    return SUCCEEDED(setEsLyricBackground(panels.Get(), m_backgroundArgb));
+    const auto background = setEsLyricColor(panels.Get(), L"SetBackgroundColor", m_backgroundArgb);
+    const auto normal = setEsLyricColor(panels.Get(), L"SetTextColor", m_normalArgb);
+    const auto highlight = setEsLyricColor(panels.Get(), L"SetTextHighlightColor", m_highlightArgb);
+    (void)normal;
+    (void)highlight;
+    return SUCCEEDED(background);
 }
 
 void LyricsHost::forwardMessage(UINT message, WPARAM wp, LPARAM lp) const noexcept {

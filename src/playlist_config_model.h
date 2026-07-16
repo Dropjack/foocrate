@@ -64,7 +64,7 @@ struct ProfileColumn {
 struct LayoutProfile {
     std::string id;
     std::string label;
-    std::string groupId{"builtin.album.simple"};
+    std::string groupId{"builtin.album.disc"};
     TrackRowLayout trackRowLayout{TrackRowLayout::standard};
     GroupHeaderStyle groupHeaderStyle{GroupHeaderStyle::detailed};
     bool autoCollapse{};
@@ -82,7 +82,7 @@ struct PlaylistProfileAssignment {
 
 struct PlaylistViewSettings {
     std::int32_t version{2};
-    std::string activeGroupId{"builtin.album.simple"};
+    std::string activeGroupId{"builtin.album.disc"};
     bool autoCollapse{};
     bool collapseByDefault{};
     std::vector<GroupDefinition> groups;
@@ -92,7 +92,7 @@ struct PlaylistViewSettings {
     bool operator==(const PlaylistViewSettings&) const = default;
 };
 
-inline constexpr std::int32_t kPlaylistViewSettingsVersion = 2;
+inline constexpr std::int32_t kPlaylistViewSettingsVersion = 3;
 
 [[nodiscard]] inline std::vector<GroupDefinition> defaultGroupDefinitions() {
     return {
@@ -274,7 +274,7 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
         if (found == value.groups.end()) { value.groups.push_back(preset); groupIds.insert(preset.id); }
         else *found = preset;
     }
-    if (!groupIds.contains(value.activeGroupId)) value.activeGroupId = "builtin.album.simple";
+    if (!groupIds.contains(value.activeGroupId)) value.activeGroupId = "builtin.album.disc";
 
     std::unordered_set<std::string> columnIds;
     std::erase_if(value.columns, [&](ColumnDefinition& column) {
@@ -316,7 +316,7 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
         playlist_config_detail::limit(profile.id, 96); playlist_config_detail::limit(profile.label, 128);
         playlist_config_detail::limit(profile.groupId, 96);
         if (profile.id.empty() || profile.label.empty() || !profileIds.insert(profile.id).second) return true;
-        if (!groupIds.contains(profile.groupId)) profile.groupId = "builtin.album.simple";
+        if (!groupIds.contains(profile.groupId)) profile.groupId = "builtin.album.disc";
         if (profile.trackRowLayout < TrackRowLayout::compact || profile.trackRowLayout > TrackRowLayout::twoLine)
             profile.trackRowLayout = TrackRowLayout::standard;
         if (profile.groupHeaderStyle < GroupHeaderStyle::detailed || profile.groupHeaderStyle > GroupHeaderStyle::compactLine)
@@ -385,7 +385,7 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
 [[nodiscard]] inline std::string serializePlaylistViewSettings(const PlaylistViewSettings& input) {
     const auto value = normalizePlaylistViewSettings(input);
     auto encoded = [](std::string_view text) { return playlist_config_detail::encode(text); };
-    std::string out = "RPV2\nS\t" + encoded(value.activeGroupId) + "\t" + (value.autoCollapse ? "1" : "0")
+    std::string out = "RPV3\nS\t" + encoded(value.activeGroupId) + "\t" + (value.autoCollapse ? "1" : "0")
         + "\t" + (value.collapseByDefault ? "1" : "0") + "\n";
     for (const auto& group : value.groups) {
         out += "G\t" + encoded(group.id) + "\t" + encoded(group.label) + "\t" + encoded(group.keyFormat)
@@ -416,8 +416,10 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
 }
 
 [[nodiscard]] inline PlaylistViewSettings deserializePlaylistViewSettings(std::string_view text) {
+    const auto version3 = text.starts_with("RPV3\n");
     const auto version2 = text.starts_with("RPV2\n");
-    if (!version2 && !text.starts_with("RPV1\n")) return defaultPlaylistViewSettings();
+    const auto modern = version3 || version2;
+    if (!modern && !text.starts_with("RPV1\n")) return defaultPlaylistViewSettings();
     PlaylistViewSettings value;
     value.groups.clear(); value.columns.clear();
     for (const auto line : playlist_config_detail::split(text.substr(5), '\n')) {
@@ -440,13 +442,13 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
             if (!playlist_config_detail::number(fields[9], artwork)) continue;
             group.artwork = static_cast<GroupArtworkSource>(artwork); group.builtIn = fields[10] == "1";
             value.groups.push_back(std::move(group));
-        } else if (fields[0] == "C" && ((!version2 && fields.size() == 10) || (version2 && fields.size() == 11))) {
+        } else if (fields[0] == "C" && ((!modern && fields.size() == 10) || (modern && fields.size() == 11))) {
             ColumnDefinition column;
             if (!playlist_config_detail::decode(fields[1], column.id)
                 || !playlist_config_detail::decode(fields[2], column.label)
                 || !playlist_config_detail::decode(fields[3], column.displayFormat)) continue;
-            const auto sortIndex = version2 ? 5U : 4U;
-            if (version2 && !playlist_config_detail::decode(fields[4], column.secondaryDisplayFormat)) continue;
+            const auto sortIndex = modern ? 5U : 4U;
+            if (modern && !playlist_config_detail::decode(fields[4], column.secondaryDisplayFormat)) continue;
             if (!playlist_config_detail::decode(fields[sortIndex], column.sortFormat)) continue;
             int alignment{}; int width{};
             if (!playlist_config_detail::number(fields[sortIndex + 1], alignment)
@@ -454,7 +456,7 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
             column.alignment = static_cast<ColumnAlignment>(alignment); column.visible = fields[sortIndex + 2] == "1";
             column.widthWeight = width; column.builtIn = fields[sortIndex + 4] == "1"; column.cover = fields[sortIndex + 5] == "1";
             value.columns.push_back(std::move(column));
-        } else if (version2 && fields[0] == "P" && fields.size() == 9) {
+        } else if (modern && fields[0] == "P" && fields.size() == 9) {
             LayoutProfile profile;
             if (!playlist_config_detail::decode(fields[1], profile.id)
                 || !playlist_config_detail::decode(fields[2], profile.label)
@@ -466,7 +468,7 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
             profile.groupHeaderStyle = static_cast<GroupHeaderStyle>(header);
             profile.autoCollapse = fields[6] == "1"; profile.collapseByDefault = fields[7] == "1";
             profile.builtIn = fields[8] == "1"; value.profiles.push_back(std::move(profile));
-        } else if (version2 && fields[0] == "PC" && fields.size() == 5) {
+        } else if (modern && fields[0] == "PC" && fields.size() == 5) {
             std::string profileId; ProfileColumn column;
             if (!playlist_config_detail::decode(fields[1], profileId)
                 || !playlist_config_detail::decode(fields[2], column.columnId)
@@ -476,11 +478,19 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
                 return candidate.id == profileId;
             });
             if (profile != value.profiles.end()) profile->columns.push_back(std::move(column));
-        } else if (version2 && fields[0] == "A" && fields.size() == 3) {
+        } else if (modern && fields[0] == "A" && fields.size() == 3) {
             PlaylistProfileAssignment assignment;
             if (playlist_config_detail::decode(fields[1], assignment.playlistGuid)
                 && playlist_config_detail::decode(fields[2], assignment.profileId))
                 value.assignments.push_back(std::move(assignment));
+        }
+    }
+    if (!version3) {
+        if (value.activeGroupId == "builtin.album.simple") value.activeGroupId = "builtin.album.disc";
+        const auto profile = std::find_if(value.profiles.begin(), value.profiles.end(),
+            [](const auto& candidate) { return candidate.id == "builtin.default"; });
+        if (profile != value.profiles.end() && profile->groupId == "builtin.album.simple") {
+            profile->groupId = "builtin.album.disc";
         }
     }
     return normalizePlaylistViewSettings(std::move(value));

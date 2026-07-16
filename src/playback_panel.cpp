@@ -81,6 +81,8 @@ using Microsoft::WRL::ComPtr;
 }
 
 constexpr GUID kPlaybackPanelGuid{0x9e26e4b0, 0x41a9, 0x4b08, {0xa3, 0x55, 0x74, 0x55, 0x10, 0x82, 0xc5, 0xf2}};
+constexpr std::uint32_t kPanelConfigMagic{0x31434652U}; // RFC1
+constexpr std::uint32_t kPanelConfigVersion{1U};
 constexpr UINT kRefreshMessage = WM_APP + 0x421;
 constexpr UINT kArtworkReadyMessage = WM_APP + 0x423;
 constexpr UINT kLyricsMiddleClickMessage = WM_APP + 0x424;
@@ -472,6 +474,18 @@ public:
         return true;
     }
     unsigned get_type() const override { return uie::type_panel | uie::type_layout; }
+    void set_config(stream_reader* reader, t_size size, abort_callback& abort) override {
+        readPanelConfig(reader, size, abort, false);
+    }
+    void get_config(stream_writer* writer, abort_callback& abort) const override {
+        writePanelConfig(writer, abort, false);
+    }
+    void import_config(stream_reader* reader, t_size size, abort_callback& abort) override {
+        readPanelConfig(reader, size, abort, true);
+    }
+    void export_config(stream_writer* writer, abort_callback& abort) const override {
+        writePanelConfig(writer, abort, true);
+    }
 
     uie::container_window_v3_config get_window_config() override {
         auto config = uie::container_window_v3_config{L"Refrain.PlaybackShell", false, CS_DBLCLKS};
@@ -926,6 +940,36 @@ public:
     void on_library_initialized() override { refreshAlbumLibrarySource(); }
 
 private:
+    void readPanelConfig(
+        stream_reader* reader, t_size size, abort_callback& abort, bool portable) {
+        if (!reader || size == 0) {
+            m_lyricsHost.setInstanceConfig(nullptr, 0, portable);
+            return;
+        }
+        constexpr t_size headerSize = sizeof(std::uint32_t) * 3;
+        if (size < headerSize) return;
+        const auto magic = reader->read_lendian_t<std::uint32_t>(abort);
+        const auto version = reader->read_lendian_t<std::uint32_t>(abort);
+        const auto configSize = reader->read_lendian_t<std::uint32_t>(abort);
+        if (magic != kPanelConfigMagic || version != kPanelConfigVersion
+            || configSize > size - headerSize) return;
+        pfc::array_t<t_uint8> config;
+        config.set_size(configSize);
+        if (configSize > 0) reader->read_object(config.get_ptr(), configSize, abort);
+        m_lyricsHost.setInstanceConfig(config.get_ptr(), config.get_size(), portable);
+    }
+
+    void writePanelConfig(
+        stream_writer* writer, abort_callback& abort, bool portable) const {
+        if (!writer) return;
+        pfc::array_t<t_uint8> config;
+        if (!m_lyricsHost.getInstanceConfig(config, abort, portable) || config.get_size() == 0) return;
+        writer->write_lendian_t(kPanelConfigMagic, abort);
+        writer->write_lendian_t(kPanelConfigVersion, abort);
+        writer->write_lendian_t(pfc::downcast_guarded<std::uint32_t>(config.get_size()), abort);
+        writer->write_object(config.get_ptr(), config.get_size(), abort);
+    }
+
     class DropTargetImpl : public ImplementCOMRefCounter<IDropTarget> {
     public:
         explicit DropTargetImpl(PlaybackPanel* owner) : m_owner(owner) {}
@@ -1015,7 +1059,9 @@ private:
     }
 
     void createLyricsHost(HWND wnd) {
-        m_lyricsHost.setBackgroundColor(0xFF000000u | rgbValue(m_themePalette.backgroundBase));
+        m_lyricsHost.setThemeColors(0xFF000000u | rgbValue(m_themePalette.backgroundBase),
+            0xFF000000u | rgbValue(m_themePalette.lyricsNormal),
+            0xFF000000u | rgbValue(m_themePalette.lyricsHighlight));
         (void)m_lyricsHost.create(wnd, get_host(), lowerRightPixels(wnd), kLyricsMiddleClickMessage);
         syncLyricsHost(wnd);
     }
@@ -4020,7 +4066,9 @@ private:
 
     void updateThemePalette() {
         m_themePalette = resolveThemePalette();
-        m_lyricsHost.setBackgroundColor(0xFF000000u | rgbValue(m_themePalette.backgroundBase));
+        m_lyricsHost.setThemeColors(0xFF000000u | rgbValue(m_themePalette.backgroundBase),
+            0xFF000000u | rgbValue(m_themePalette.lyricsNormal),
+            0xFF000000u | rgbValue(m_themePalette.lyricsHighlight));
     }
 
     void releaseThemeBrushes() noexcept {

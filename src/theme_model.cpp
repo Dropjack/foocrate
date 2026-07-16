@@ -92,6 +92,88 @@ struct HslColor {
     return result;
 }
 
+[[nodiscard]] RgbColor ensureReadableHighlight(
+    RgbColor candidate, RgbColor background, bool dark) noexcept {
+    auto hsl = toHsl(candidate);
+    hsl.saturation = std::clamp(hsl.saturation, 0.42, 0.90);
+    hsl.lightness = dark ? std::clamp(hsl.lightness, 0.58, 0.82)
+                         : std::clamp(hsl.lightness, 0.18, 0.46);
+    auto result = fromHsl(hsl);
+    for (int attempt = 0; attempt < 16 && contrastRatio(result, background) < 7.0; ++attempt) {
+        hsl.lightness += dark ? 0.035 : -0.035;
+        hsl.lightness = std::clamp(hsl.lightness, 0.04, 0.96);
+        result = fromHsl(hsl);
+    }
+    return result;
+}
+
+[[nodiscard]] RgbColor subduedReadableText(
+    RgbColor foreground, RgbColor background) noexcept {
+    RgbColor result = foreground;
+    for (double amount = 0.50; amount <= 1.001; amount += 0.025) {
+        const auto candidate = mix(background, foreground, amount);
+        if (contrastRatio(candidate, background) >= 4.5) return candidate;
+        result = candidate;
+    }
+    return contrastRatio(result, background) >= 4.5 ? result : foreground;
+}
+
+[[nodiscard]] double hueDistance(double first, double second) noexcept {
+    const auto distance = std::abs(first - second);
+    return std::min(distance, 360.0 - distance);
+}
+
+[[nodiscard]] RgbColor extractArtworkHighlight(std::span<const std::uint8_t> pixels,
+    std::uint32_t width, std::uint32_t height, RgbColor primary, RgbColor background,
+    const ThemePalette& fallback) noexcept {
+    const auto expected = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4ULL;
+    if (width == 0 || height == 0 || expected > pixels.size()) return fallback.lyricsHighlight;
+    std::array<double, 4096> scores{};
+    const auto pixelCount = static_cast<std::uint64_t>(width) * height;
+    const auto step = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(
+        std::sqrt(static_cast<double>(pixelCount) / 4096.0)));
+    for (std::uint64_t index = 0; index < pixelCount; index += step) {
+        const auto offset = static_cast<std::size_t>(index * 4ULL);
+        const auto alpha = pixels[offset + 3];
+        if (alpha < 128) continue;
+        const auto unpremultiply = [alpha](std::uint8_t value) {
+            return alpha == 255 ? value : static_cast<std::uint8_t>(std::min(255U,
+                (static_cast<unsigned>(value) * 255U + alpha / 2U) / alpha));
+        };
+        const RgbColor colour{unpremultiply(pixels[offset + 2]),
+            unpremultiply(pixels[offset + 1]), unpremultiply(pixels[offset])};
+        const auto hsl = toHsl(colour);
+        if (hsl.lightness < 0.08 || hsl.lightness > 0.92 || hsl.saturation < 0.18) continue;
+        const auto bucket = static_cast<std::size_t>((colour.red >> 4U) << 8U
+            | (colour.green >> 4U) << 4U | (colour.blue >> 4U));
+        scores[bucket] += 0.5 + hsl.saturation;
+    }
+
+    const auto primaryHue = toHsl(primary).hue;
+    double bestScore{};
+    RgbColor best{};
+    bool found{};
+    for (std::size_t bucket = 0; bucket < scores.size(); ++bucket) {
+        if (scores[bucket] <= 0.0) continue;
+        const RgbColor raw{static_cast<std::uint8_t>(((bucket >> 8U) & 0xFU) * 17U),
+            static_cast<std::uint8_t>(((bucket >> 4U) & 0xFU) * 17U),
+            static_cast<std::uint8_t>((bucket & 0xFU) * 17U)};
+        const auto distance = hueDistance(primaryHue, toHsl(raw).hue);
+        if (distance < 60.0) continue;
+        const auto candidate = ensureReadableHighlight(raw, background, fallback.dark);
+        if (contrastRatio(candidate, background) < 7.0) continue;
+        const auto score = scores[bucket] * (0.5 + distance / 180.0);
+        if (!found || score > bestScore) {
+            bestScore = score;
+            best = candidate;
+            found = true;
+        }
+    }
+    if (found) return best;
+    const auto safe = ensureReadableHighlight(fallback.lyricsHighlight, background, fallback.dark);
+    return contrastRatio(safe, background) >= 7.0 ? safe : fallback.textPrimary;
+}
+
 } // namespace
 
 double contrastRatio(RgbColor first, RgbColor second) noexcept {
@@ -110,23 +192,23 @@ ThemePalette presetPalette(ThemePreset preset) noexcept {
         return {false, rgb(0xF4F1EA), rgb(0xEEE9DF), rgb(0xDDD7CC), rgb(0xFFFCF7),
             rgb(0x252A2E), rgb(0x6F6B64), rgb(0xA5A099), rgb(0x252A2E), rgb(0xC9C1B4),
             rgb(0xE7A43B), rgb(0xF0B34F), rgb(0xECE6DB), rgb(0xE2DBCF), rgb(0xB66D27),
-            rgb(0x586D8F), rgb(0xA8443A)};
+            rgb(0x586D8F), rgb(0xA8443A), rgb(0x2B4C7D), rgb(0x6F6B64)};
     case ThemePreset::pine:
         return {true, rgb(0x151B1A), rgb(0x1D2623), rgb(0x27322E), rgb(0x303C37),
             rgb(0xEDF4F0), rgb(0xAEBBB5), rgb(0x707C77), rgb(0x102019), rgb(0x3B4843),
             rgb(0x6FA58C), rgb(0x80B89F), rgb(0x23302B), rgb(0x2C4338), rgb(0x8EC2AA),
-            rgb(0x7FA8D9), rgb(0xE27878)};
+            rgb(0x7FA8D9), rgb(0xE27878), rgb(0x86BDF2), rgb(0xAEBBB5)};
     case ThemePreset::ink:
         return {true, rgb(0x111820), rgb(0x18232E), rgb(0x21303D), rgb(0x2B3A48),
             rgb(0xF0F4F7), rgb(0xAAB7C2), rgb(0x6F7E89), rgb(0x241A09), rgb(0x394958),
             rgb(0xE4A94F), rgb(0xF0B95F), rgb(0x202D39), rgb(0x314254), rgb(0xF4C46F),
-            rgb(0x7FB1E3), rgb(0xE27972)};
+            rgb(0x7FB1E3), rgb(0xE27972), rgb(0x7FB1E3), rgb(0xAAB7C2)};
     case ThemePreset::mist:
     default:
         return {false, rgb(0xEEF4F7), rgb(0xF3F5F2), rgb(0xE4EAE7), rgb(0xFFFFFF),
             rgb(0x1F2A2A), rgb(0x63706E), rgb(0xA7B1AE), rgb(0xFFFFFF), rgb(0xC9D4D0),
             rgb(0x4F7F6A), rgb(0x5F927B), rgb(0xE8EFEC), rgb(0xDCE6E2), rgb(0x2E5FA8),
-            rgb(0x2E5FA8), rgb(0xB34444)};
+            rgb(0x2E5FA8), rgb(0xB34444), rgb(0x244C87), rgb(0x63706E)};
     }
 }
 
@@ -159,6 +241,12 @@ ThemePalette deriveExternalPalette(RgbColor background, RgbColor foreground, Rgb
         ? selectionText : bestAccentText(result.accent);
     result.defaultPlaylist = contrastRatio(focus, background) >= 4.5 ? focus : foreground;
     result.error = contrastRatio(reference.error, background) >= 4.5 ? reference.error : foreground;
+    result.lyricsNormal = subduedReadableText(foreground, background);
+    result.lyricsHighlight = ensureReadableHighlight(focus, background, dark);
+    if (contrastRatio(result.lyricsHighlight, background) < 7.0) {
+        result.lyricsHighlight = ensureReadableHighlight(reference.lyricsHighlight, background, dark);
+    }
+    if (contrastRatio(result.lyricsHighlight, background) < 7.0) result.lyricsHighlight = foreground;
     return result;
 }
 
@@ -246,6 +334,9 @@ std::optional<ThemePalette> extractArtworkTheme(std::span<const std::uint8_t> pi
     auto palette = deriveExternalPalette(background, reference.textPrimary, accent,
         bestAccentText(accent), accent, dark);
     palette = applyAccent(palette, accent);
+    palette.lyricsHighlight = extractArtworkHighlight(
+        pixels, width, height, accent, background, reference);
+    palette.lyricsNormal = subduedReadableText(palette.textPrimary, background);
     return palette;
 }
 

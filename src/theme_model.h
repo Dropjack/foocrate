@@ -46,6 +46,8 @@ struct ThemePalette {
     RgbColor focus{};
     RgbColor defaultPlaylist{};
     RgbColor error{};
+    RgbColor lyricsHighlight{};
+    RgbColor lyricsNormal{};
 };
 
 [[nodiscard]] constexpr RgbColor rgb(std::uint32_t value) noexcept {

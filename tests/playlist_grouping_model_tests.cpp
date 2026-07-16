@@ -51,6 +51,9 @@ int main() {
         "large grouped playlists must retain last-track lookup");
 
     auto settings = defaultPlaylistViewSettings();
+    expect(settings.activeGroupId == "builtin.album.disc"
+            && !settings.profiles.empty() && settings.profiles.front().groupId == "builtin.album.disc",
+        "new and unassigned playlists must use album artist/date/album/disc by default");
     const auto albumDisc = std::find_if(settings.groups.begin(), settings.groups.end(),
         [](const auto& group) { return group.id == "builtin.album.disc"; });
     expect(albumDisc != settings.groups.end() && albumDisc->sortFormat == kAlbumArtistYearAlbumSort,
@@ -66,14 +69,23 @@ int main() {
     profile.columns[1].visible = false; profiled.profiles.push_back(profile);
     profiled.assignments.push_back({"{00000000-0000-0000-0000-000000000001}", profile.id});
     const auto profiledRestored = deserializePlaylistViewSettings(serializePlaylistViewSettings(profiled));
-    expect(profiledRestored == normalizePlaylistViewSettings(profiled), "RPV2 profiles and assignments must round trip");
+    expect(profiledRestored == normalizePlaylistViewSettings(profiled), "RPV3 profiles and assignments must round trip");
+    auto legacyDefault = defaultPlaylistViewSettings();
+    legacyDefault.activeGroupId = "builtin.album.simple";
+    legacyDefault.profiles.front().groupId = "builtin.album.simple";
+    auto legacyText = serializePlaylistViewSettings(legacyDefault);
+    legacyText.replace(0, 4, "RPV2");
+    const auto migratedDefault = deserializePlaylistViewSettings(legacyText);
+    expect(migratedDefault.activeGroupId == "builtin.album.disc"
+            && migratedDefault.profiles.front().groupId == "builtin.album.disc",
+        "RPV2 default profiles must migrate once to album artist/date/album/disc");
     const auto effective = applyLayoutProfile(profiledRestored, profile.id);
     expect(!effective.columns[1].visible, "profile column visibility must be applied");
     auto broken = defaultPlaylistViewSettings();
     broken.columns.clear();
     broken.activeGroupId = "missing";
     broken = normalizePlaylistViewSettings(std::move(broken));
-    expect(broken.activeGroupId == "builtin.album.simple", "missing active group must fall back");
+    expect(broken.activeGroupId == "builtin.album.disc", "missing active group must fall back");
     expect(!broken.columns.empty(), "missing built-in columns must be restored");
     const auto state = std::find_if(broken.columns.begin(), broken.columns.end(),
         [](const auto& column) { return column.id == "builtin.state"; });

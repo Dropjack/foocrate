@@ -38,6 +38,12 @@ int main() {
             "accent foreground must meet normal-text contrast");
         expect(contrastRatio(palette->error, palette->backgroundBase) >= 4.5,
             "error text must meet normal-text contrast");
+        expect(palette->lyricsHighlight != palette->accent,
+            "preset lyric highlight must use a contrasting second colour");
+        expect(contrastRatio(palette->lyricsNormal, palette->backgroundBase) >= 4.5,
+            "preset normal lyrics must remain readable");
+        expect(contrastRatio(palette->lyricsHighlight, palette->backgroundBase) >= 7.0,
+            "preset lyric highlight must meet enhanced contrast");
     }
 
     const auto custom = applyAccent(mist, rgb(0xFF00FF));
@@ -69,6 +75,22 @@ int main() {
         "artwork theme primary text must remain readable");
     expect(artworkTheme && contrastRatio(artworkTheme->textSecondary, artworkTheme->backgroundBase) >= 4.5,
         "artwork theme secondary text must remain readable");
+    expect(artworkTheme
+            && contrastRatio(artworkTheme->lyricsNormal, artworkTheme->backgroundBase) >= 4.5,
+        "artwork normal lyrics must remain readable");
+    std::array<std::uint8_t, 32> twoColourArtwork{
+        0x20, 0x60, 0xD0, 0xFF, 0x20, 0x60, 0xD0, 0xFF,
+        0x20, 0x60, 0xD0, 0xFF, 0x20, 0x60, 0xD0, 0xFF,
+        0xD0, 0x60, 0x20, 0xFF, 0xD0, 0x60, 0x20, 0xFF,
+        0xD0, 0x60, 0x20, 0xFF, 0xD0, 0x60, 0x20, 0xFF};
+    const auto contrastingArtworkTheme = extractArtworkTheme(twoColourArtwork, 4, 2);
+    expect(contrastingArtworkTheme
+            && contrastingArtworkTheme->lyricsHighlight != contrastingArtworkTheme->accent,
+        "artwork lyric highlight must prefer a distinct second artwork colour");
+    expect(contrastingArtworkTheme
+            && contrastRatio(contrastingArtworkTheme->lyricsHighlight,
+                contrastingArtworkTheme->backgroundBase) >= 7.0,
+        "artwork lyric highlight must meet enhanced contrast");
     const auto greyTheme = extractArtworkTheme(grey, 2, 2);
     expect(greyTheme.has_value(), "greyscale artwork must still produce a neutral base theme");
     expect(!extractArtworkTheme({}, 0, 0).has_value(), "missing artwork must not produce a stale theme");
