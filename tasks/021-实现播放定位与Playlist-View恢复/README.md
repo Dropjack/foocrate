@@ -2,7 +2,7 @@
 
 - 状态：可实现
 - 对应规格：[`../../specs/modules/PLAYBACK_LOCATION_AND_RESTORE.md`](../../specs/modules/PLAYBACK_LOCATION_AND_RESTORE.md) 0.1（已批准）
-- 前置任务：[`../020-替换Refrain正式图标资源/README.md`](../020-替换Refrain正式图标资源/README.md)
+- 前置任务：[`../020-建立Refrain临时图标系统/README.md`](../020-建立Refrain临时图标系统/README.md)（已验收）
 - Fork 提交标题：`实现播放定位与 Playlist View 恢复`
 - 最后更新：2026-07-15
 

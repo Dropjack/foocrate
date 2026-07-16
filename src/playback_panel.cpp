@@ -5,6 +5,7 @@
 #include "lyrics_host.h"
 #include "now_playing_state.h"
 #include "playback_layout.h"
+#include "playback_order_icon.h"
 #include "playback_state.h"
 #include "playlist_view_model.h"
 #include "playlist_config_model.h"
@@ -5869,22 +5870,21 @@ private:
             break;
         case ControlId::queueToggle: {
             const auto iconBrush = m_queueMode ? m_accent.Get() : brush;
-            for (int row = -1; row <= 1; ++row) {
+            drawTriangle(D2D1::Point2F(cx - 10.0F, cy - 10.0F),
+                D2D1::Point2F(cx - 10.0F, cy - 2.0F),
+                D2D1::Point2F(cx - 4.0F, cy - 6.0F), iconBrush);
+            m_renderTarget->DrawLine(D2D1::Point2F(cx - 1.0F, cy - 6.0F),
+                D2D1::Point2F(cx + 9.0F, cy - 6.0F), iconBrush, 1.7F);
+            for (int row = 0; row <= 1; ++row) {
                 const auto y = cy + static_cast<float>(row) * 6.0F;
                 m_renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 8.0F, y), 1.5F, 1.5F), iconBrush);
-                m_renderTarget->DrawLine(D2D1::Point2F(cx - 4.0F, y), D2D1::Point2F(cx + 9.0F, y), iconBrush, 1.7F);
+                m_renderTarget->DrawLine(D2D1::Point2F(cx - 4.0F, y),
+                    D2D1::Point2F(cx + 9.0F, y), iconBrush, 1.7F);
             }
             break;
         }
         case ControlId::playbackOrder:
-            m_renderTarget->DrawLine(D2D1::Point2F(cx - 8.0F, cy - 6.0F),
-                D2D1::Point2F(cx + 7.0F, cy - 6.0F), brush, 1.8F);
-            drawTriangle(D2D1::Point2F(cx + 10.0F, cy - 6.0F),
-                D2D1::Point2F(cx + 5.0F, cy - 10.0F), D2D1::Point2F(cx + 5.0F, cy - 2.0F), brush);
-            m_renderTarget->DrawLine(D2D1::Point2F(cx + 8.0F, cy + 6.0F),
-                D2D1::Point2F(cx - 7.0F, cy + 6.0F), brush, 1.8F);
-            drawTriangle(D2D1::Point2F(cx - 10.0F, cy + 6.0F),
-                D2D1::Point2F(cx - 5.0F, cy + 2.0F), D2D1::Point2F(cx - 5.0F, cy + 10.0F), brush);
+            drawPlaybackOrderIcon(cx, cy, brush);
             break;
         case ControlId::outputDevice:
             m_renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(
@@ -5895,6 +5895,88 @@ private:
                 D2D1::Point2F(cx + 5.0F, cy + 10.0F), brush, 1.7F);
             break;
         default:
+            break;
+        }
+    }
+
+    void drawPlaybackOrderIcon(float cx, float cy, ID2D1Brush* brush) {
+        const auto api = playlist_manager::get();
+        const auto active = api->playback_order_get_active();
+        const auto kind = playbackOrderIconKind(active);
+        const auto line = [&](float x1, float y1, float x2, float y2, float width = 1.7F) {
+            m_renderTarget->DrawLine(D2D1::Point2F(cx + x1, cy + y1),
+                D2D1::Point2F(cx + x2, cy + y2), brush, width);
+        };
+        const auto rightArrow = [&](float x, float y) {
+            drawTriangle(D2D1::Point2F(cx + x + 4.0F, cy + y),
+                D2D1::Point2F(cx + x, cy + y - 3.5F), D2D1::Point2F(cx + x, cy + y + 3.5F), brush);
+        };
+        const auto leftArrow = [&](float x, float y) {
+            drawTriangle(D2D1::Point2F(cx + x - 4.0F, cy + y),
+                D2D1::Point2F(cx + x, cy + y - 3.5F), D2D1::Point2F(cx + x, cy + y + 3.5F), brush);
+        };
+        const auto drawRepeat = [&] {
+            line(-7.0F, -6.0F, 6.0F, -6.0F);
+            rightArrow(6.0F, -6.0F);
+            line(7.0F, 6.0F, -6.0F, 6.0F);
+            leftArrow(-6.0F, 6.0F);
+            line(-10.0F, -2.0F, -10.0F, 2.0F);
+            line(10.0F, -2.0F, 10.0F, 2.0F);
+        };
+        const auto drawShuffle = [&] {
+            line(-9.0F, -6.0F, -5.0F, -6.0F);
+            line(-5.0F, -6.0F, 5.0F, 6.0F);
+            line(5.0F, 6.0F, 7.0F, 6.0F);
+            rightArrow(7.0F, 6.0F);
+            line(-9.0F, 6.0F, -5.0F, 6.0F);
+            line(-5.0F, 6.0F, 5.0F, -6.0F);
+            line(5.0F, -6.0F, 7.0F, -6.0F);
+            rightArrow(7.0F, -6.0F);
+        };
+
+        switch (kind) {
+        case PlaybackOrderIconKind::defaultOrder:
+            for (const auto y : {-7.0F, 0.0F, 7.0F}) {
+                line(-9.0F, y, 6.0F, y);
+                rightArrow(6.0F, y);
+            }
+            break;
+        case PlaybackOrderIconKind::repeatPlaylist:
+            drawRepeat();
+            break;
+        case PlaybackOrderIconKind::repeatTrack:
+            drawRepeat();
+            line(-1.5F, -2.0F, 1.0F, -4.0F, 1.9F);
+            line(1.0F, -4.0F, 1.0F, 4.0F, 1.9F);
+            line(-2.0F, 4.0F, 4.0F, 4.0F, 1.9F);
+            break;
+        case PlaybackOrderIconKind::random:
+            line(-9.0F, -7.0F, -3.0F, -7.0F);
+            line(-3.0F, -7.0F, 4.0F, 0.0F);
+            line(4.0F, 0.0F, 7.0F, 0.0F);
+            rightArrow(7.0F, 0.0F);
+            line(-9.0F, 7.0F, -3.0F, 7.0F);
+            line(-3.0F, 7.0F, 1.0F, 3.0F);
+            line(1.0F, -3.0F, 4.0F, -6.0F);
+            line(4.0F, -6.0F, 7.0F, -6.0F);
+            rightArrow(7.0F, -6.0F);
+            break;
+        case PlaybackOrderIconKind::shuffleTracks:
+            drawShuffle();
+            break;
+        case PlaybackOrderIconKind::shuffleAlbums:
+            drawShuffle();
+            m_renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 2.5F, 2.5F), brush, 1.5F);
+            break;
+        case PlaybackOrderIconKind::shuffleFolders:
+            drawShuffle();
+            m_renderTarget->DrawRectangle(D2D1::RectF(cx - 3.0F, cy - 2.0F,
+                cx + 3.0F, cy + 3.0F), brush, 1.4F);
+            line(-3.0F, -2.0F, -1.0F, -4.0F, 1.4F);
+            line(-1.0F, -4.0F, 2.0F, -4.0F, 1.4F);
+            break;
+        case PlaybackOrderIconKind::other:
+            drawRepeat();
             break;
         }
     }

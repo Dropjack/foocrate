@@ -34,6 +34,25 @@ $CTest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 
 Invoke them with `& $CMake` and `& $CTest`. If either recorded path does not exist, report the environment mismatch and inspect `docs/DEVELOPMENT_SETUP.md`; do not fall back to a bare `cmake` or `ctest` command.
 
+# Three-attempt stop and user escalation protocol
+
+This rule applies to every operation, including network access, permission-dependent actions, tool invocation, build, test, deployment, inspection, and external application control.
+
+1. After the same operation or the same blocking condition has failed three times, stop the current task immediately. The original attempt counts as the first attempt; therefore, make at most three total attempts, not three retries after the first failure.
+2. Do not continue with more attempts, silently wait and retry, or switch to a lower-quality, less reliable, less complete, or otherwise inferior fallback approach.
+3. Tell the user what failed, the relevant error or blocking condition, what was attempted in each of the three attempts, and exactly what user action, permission, credential, network change, screenshot, or other input is needed to resume with the best available approach.
+4. Resume only after the user supplies the requested help or explicitly gives new instructions.
+5. A materially different failure starts a new three-attempt count only when it is genuinely independent of the original blocking condition. Renaming or slightly varying the same unsuccessful action does not reset the count.
+
+# Component build output and manual installation handoff
+
+Whenever a Refrain component build is prepared for user inspection or manual testing:
+
+1. Codex must build the appropriate Release component and generate the installable `.fb2k-component` file. This is a component build output for manual import, not the formal release-packaging work tracked by the release task.
+2. Codex must place the finished component file in the repository `dist` directory and report its exact path to the user.
+3. Codex must verify that the component file exists and contains the expected Refrain component DLL before handing it off. Do not create unrelated release bundles, installers, or deployment artifacts.
+4. The user will import or install the component file manually. Do not install, load, copy, or deploy it into any foobar2000 instance unless the user explicitly requests that separate action.
+
 # Screenshot checkpoint protocol
 
 At any visual or UX checkpoint, make at most one screenshot attempt and inspect that result before doing more work.

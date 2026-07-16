@@ -1,8 +1,8 @@
 # Foobox Basic 默认视觉模块规格
 
 - 状态：已验收
-- 版本：1.0
-- 最后更新：2026-07-15
+- 版本：1.2
+- 最后更新：2026-07-16
 - 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
 - 对应路线：`15 实现 Foobox Basic 默认视觉`
 
@@ -116,3 +116,11 @@
 
 - Refrain 不提供 Playlist Filter；`Playlists` 标题下方直接开始播放列表行，不保留输入框、清除按钮、空白容器或隐藏状态。
 - 此决定覆盖此前关于 Filter 高度、灰框、文字居中和清除按钮 SVG 的视觉方案。
+
+## 11. Playback Order 图标状态
+
+- Playback Order 按钮不再对所有播放顺序使用同一个通用图形；图标必须跟随 foobar2000 当前活动播放顺序即时变化。
+- 首版覆盖 foobar2000/Foobox 已有的七种标准语义：`Default`、`Repeat (playlist)`、`Repeat (track)`、`Random`、`Shuffle (tracks)`、`Shuffle (albums)` 和 `Shuffle (folders)`。
+- 七种图标必须只改变状态表达，不改变按钮命中区、菜单、tooltip、键盘焦点或 foobar2000 的播放顺序状态。
+- 未识别的第三方播放顺序使用明确的通用 Playback Order 图标；不得显示空白，也不得错误冒充七种标准语义之一。
+- 当前原生绘制作为 1.0 路线的临时图标，先冻结七种语义与状态切换。后续功能缺少临时图标时统一参考 Remix Icon；正式图标由用户在项目完成、生成组件版本后自行替换，不改变映射和命令行为。
