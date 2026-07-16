@@ -8,13 +8,13 @@
 
 ## 任务目标
 
-完成中央播放列表最后一组日常操作：查看和管理真实播放队列，在普通列表内拖动重排，从资源管理器和其他 foobar2000 面板拖入/拖出曲目，并直接点击列表五星评分。所有结果都必须落到 foobar2000 或 Playback Statistics 的真实数据中，不能只改变 Refrain 的显示。
+完成中央播放列表最后一组日常操作：查看和管理真实播放队列，在普通列表内拖动重排，从资源管理器和其他 foobar2000 面板拖入/拖出曲目，并直接点击列表五星评分。所有结果都必须落到 foobar2000 或 Playback Statistics 的真实数据中，不能只改变 FooCrate 的显示。
 
 ## 明确不做
 
 - 不创建 Foobox 的 `Queue Content` 临时播放列表；用户已接受这一边界。
 - 不建立私有评分数据库，也不把评分写进音频文件标签。
-- 不提前实现步骤 12 的 `Playlist Browser`；Refrain 内部可见的跨播放列表落点随左栏出现后接入。
+- 不提前实现步骤 12 的 `Playlist Browser`；FooCrate 内部可见的跨播放列表落点随左栏出现后接入。
 - 不提前修改步骤 14–16 的按钮布局、右栏比例、字体、歌词或主题视觉。
 - 不把自动/锁定列表伪装成可重排、可插入的普通列表。
 
@@ -61,7 +61,7 @@
 - 输入：资源管理器文件/文件夹、兼容 foobar2000 面板曲目和当前选择。
 - 动作：异步解析拖入；生成标准拖出数据对象；根据系统 Copy/Move 结果安全提交。
 - 产物：插入反馈、禁止状态和失败不删来源的跨面板拖放。
-- 用户检查方法：从资源管理器拖入，从 Refrain 拖到兼容面板，测试 Copy、Move、拒绝、Esc 和目标中途变化。
+- 用户检查方法：从资源管理器拖入，从 FooCrate 拖到兼容面板，测试 Copy、Move、拒绝、Esc 和目标中途变化。
 - 通过标准：目标准确；Move 只有确证成功才删来源；UI 线程不因目录解析卡住。
 - 状态：已完成
 
@@ -116,7 +116,7 @@
 
 - 右侧显示 Playback Queue 时，只有真正双击队列行才消费该事件；中央 Playlist View 的双击继续执行其真实曲目默认动作。
 - 主列表鼠标按下时复制稳定的显示行身份，后续选择回调或自动折叠重建显示行不会破坏双击与拖动目标。
-- 指针跨出 Playlist View 右边界即启动标准 OLE，不再要求额外越过 8 像素；同一 Refrain 面板生成的冻结选择直接被识别为可投放到 Playback Queue，不依赖外部文件格式二次探测。
+- 指针跨出 Playlist View 右边界即启动标准 OLE，不再要求额外越过 8 像素；同一 FooCrate 面板生成的冻结选择直接被识别为可投放到 Playback Queue，不依赖外部文件格式二次探测。
 - Group By 只组织显示；手动且未被 foobar2000 锁定的列表仍按真实列表索引自由重排。
 
 ## 第三轮验收反馈与根因
@@ -135,7 +135,7 @@
 - `cmake --build build/vs2022-x64 --config Release`：通过，启用 `/W4 /WX`。
 - `ctest --test-dir build/vs2022-x64 -C Debug --output-on-failure`：7/7 通过。
 - `ctest --test-dir build/vs2022-x64 -C Release --output-on-failure`：7/7 通过。
-- `powershell -File tests/verify-package.ps1 -PackagePath dist/Refrain-0.1.0.fb2k-component`：`PACKAGE_AUDIT_OK`。
+- `powershell -File tests/verify-package.ps1 -PackagePath dist/FooCrate-0.1.0.fb2k-component`：`PACKAGE_AUDIT_OK`。
 - `git diff --check`：通过。
 - Release DLL SHA-256：`D0094ECE96B5FB370818CD3D1E23723C7C7069840CE1875F6D0964BCFC2775F8`。
 - 组件包 SHA-256：`76D7A8782F49B7156C67582C0C1B586E0626C5D55322DDCD19731E89E2219282`。
@@ -157,7 +157,7 @@
 4. 从中央 Playlist View 把单项或多项拖到可见的 Playback Queue；确认按选择顺序加入、来源列表不变，而且同一曲目可以重复排队。
 5. 在普通手动列表内拖动单项、连续/非连续多选，尤其复测“向列表顶部拖”的原问题：只能移动，曲目总数不变，不能复制出第二份；Esc 取消、Undo 恢复。自动/锁定列表及左侧 Playlist Browser 的完整人工验收留到步骤 12。
 6. 从资源管理器向普通手动列表拖入文件或文件夹；再次拖入同一个精确曲目时应跳过重复并显示简短状态，不能产生新的列表重复项。测试失败或取消时不得留下半完成插入。
-7. 保持包含组封面的列表播放至少 30 秒，并执行拖动进度、切歌和评分；组封面不能每秒闪烁或反复出现 Loading，F5 仍可主动刷新。随后回归列表 Rating 点击/清除、右上五星、分组、折叠和列配置。跨标准 Columns UI 播放列表面板的 OLE Copy/Move 可作为兼容性附加检查；Refrain 左侧播放列表名称落点属于步骤 12。
+7. 保持包含组封面的列表播放至少 30 秒，并执行拖动进度、切歌和评分；组封面不能每秒闪烁或反复出现 Loading，F5 仍可主动刷新。随后回归列表 Rating 点击/清除、右上五星、分组、折叠和列配置。跨标准 Columns UI 播放列表面板的 OLE Copy/Move 可作为兼容性附加检查；FooCrate 左侧播放列表名称落点属于步骤 12。
 
 ## 改动文件
 

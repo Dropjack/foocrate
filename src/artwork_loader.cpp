@@ -13,7 +13,7 @@
 #include <limits>
 #include <optional>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -241,4 +241,4 @@ std::optional<ThemePalette> loadArtworkTheme(
     }
 }
 
-} // namespace refrain
+} // namespace foocrate

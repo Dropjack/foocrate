@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 enum class TopBarPlaybackState { stopped, playing, paused };
 
@@ -82,4 +82,4 @@ enum class TopBarPlaybackState { stopped, playing, paused };
         && normalizedActual.ends_with(normalizedExpected);
 }
 
-} // namespace refrain
+} // namespace foocrate

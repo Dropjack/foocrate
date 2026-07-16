@@ -1,7 +1,7 @@
 #include "playlist_view_model.h"
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     if (visibleRowCapacity(100.0F, 25.0F) != 4) return 1;
     if (visibleRowCapacity(0.0F, 25.0F) != 0) return 2;

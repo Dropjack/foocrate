@@ -3,7 +3,7 @@
 #include <array>
 #include <cstddef>
 
-namespace refrain {
+namespace foocrate {
 
 inline constexpr float kCompactTrackHeaderHeight = 28.0F;
 inline constexpr float kCompactTrackRowHeight = 26.0F;
@@ -30,4 +30,4 @@ struct CompactTrackColumn {
     return left + width * fraction;
 }
 
-} // namespace refrain
+} // namespace foocrate

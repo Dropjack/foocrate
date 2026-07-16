@@ -3,7 +3,7 @@
 #include <cassert>
 
 int main() {
-    using refrain::AlbumSourceTrack;
+    using foocrate::AlbumSourceTrack;
 
     const std::vector<AlbumSourceTrack> tracks{
         {0, "Same", "Artist A", "Second", "Artist A", "2020", 1, 2},
@@ -14,7 +14,7 @@ int main() {
         {5, "", "", "Loose one", "Guest", "", 0, 0},
         {6, "", "", "Loose two", "Guest", "", 0, 0},
     };
-    const auto albums = refrain::buildAlbumBrowserAlbums(tracks);
+    const auto albums = foocrate::buildAlbumBrowserAlbums(tracks);
     assert(albums.size() == 5);
     assert(albums[0].album == "Multi");
     assert((albums[0].sourceIndices == std::vector<std::size_t>{4, 3}));
@@ -29,7 +29,7 @@ int main() {
         {9, "Partial", "Band", "Track 3", "Band", "", 1, 3},
         {7, "Partial", "Band", "Track 1", "Band", "", 1, 1},
     };
-    const auto partial = refrain::buildAlbumBrowserAlbums(subset);
+    const auto partial = foocrate::buildAlbumBrowserAlbums(subset);
     assert(partial.size() == 1);
     assert((partial[0].sourceIndices == std::vector<std::size_t>{7, 9}));
 
@@ -41,7 +41,7 @@ int main() {
             "Track " + std::to_string(index), "Artist", "2025", 1,
             static_cast<unsigned>(index % 10 + 1)});
     }
-    const auto largeAlbums = refrain::buildAlbumBrowserAlbums(large);
+    const auto largeAlbums = foocrate::buildAlbumBrowserAlbums(large);
     assert(largeAlbums.size() == 5000);
     std::size_t largeTrackCount{};
     for (const auto& album : largeAlbums) largeTrackCount += album.sourceIndices.size();

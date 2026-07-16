@@ -21,8 +21,8 @@ if (-not $dll.StartsWith($buildRoot + '\', [StringComparison]::OrdinalIgnoreCase
   throw "Component DLL must be inside the repository build directory: $dll"
 }
 
-if ($dll -notmatch '[\\/]Release[\\/]foo_refrain\.dll$') {
-  throw "Only a Release foo_refrain.dll can be packaged: $dll"
+if ($dll -notmatch '[\\/]Release[\\/]foo_crate\.dll$') {
+  throw "Only a Release foo_crate.dll can be packaged: $dll"
 }
 
 if (-not $output.Equals($distRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -33,12 +33,12 @@ if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
   throw "Component DLL does not exist: $dll"
 }
 
-if ([IO.Path]::GetFileName($dll) -cne 'foo_refrain.dll') {
+if ([IO.Path]::GetFileName($dll) -cne 'foo_crate.dll') {
   throw "Unexpected component filename: $dll"
 }
 
 $staging = Join-Path $buildRoot 'package-staging'
-$package = Join-Path $output 'Refrain-0.1.0.fb2k-component'
+$package = Join-Path $output 'FooCrate-0.1.0.fb2k-component'
 
 if (Test-Path -LiteralPath $staging) {
   Remove-Item -LiteralPath $staging -Recurse -Force
@@ -46,7 +46,7 @@ if (Test-Path -LiteralPath $staging) {
 
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-Copy-Item -LiteralPath $dll -Destination (Join-Path $staging 'foo_refrain.dll')
+Copy-Item -LiteralPath $dll -Destination (Join-Path $staging 'foo_crate.dll')
 
 if (Test-Path -LiteralPath $package) {
   Remove-Item -LiteralPath $package -Force
@@ -62,7 +62,7 @@ try {
   $archive.Dispose()
 }
 
-if ($entries.Count -ne 1 -or $entries[0] -cne 'foo_refrain.dll') {
+if ($entries.Count -ne 1 -or $entries[0] -cne 'foo_crate.dll') {
   throw "Unexpected package contents: $($entries -join ', ')"
 }
 

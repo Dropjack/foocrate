@@ -23,7 +23,7 @@
 1. 输入来自 foobar2000 Media Library 快照或用户选择的稳定播放列表 GUID，以及对应的 library、playlist、metadb 和 album-art 回调。
 2. 程序保存当前 Workspace、来源身份、专辑归组结果、所选专辑、两栏分隔比例、虚拟滚动位置、曲目选择和带代次的封面缓存；媒体库、播放列表和曲目元数据仍由 foobar2000 持有。
 3. 切换来源时先冻结新来源身份并增加代次，再取得真实曲目、按批准规则归为 Album、排序并选择可恢复的专辑；旧代次封面和刷新结果全部丢弃。
-4. 点击封面只更新右侧 Album Track Header/List；双击或 Enter 创建/复用锁定的 `Refrain Album View` 核心桥接并开始仅限当前专辑的顺序或随机会话，随后恢复来源活动列表；右键交给正式 foobar2000 上下文菜单。
+4. 点击封面只更新右侧 Album Track Header/List；双击或 Enter 创建/复用锁定的 `FooCrate Album View` 核心桥接并开始仅限当前专辑的顺序或随机会话，随后恢复来源活动列表；右键交给正式 foobar2000 上下文菜单。
 5. 左下同时提供 Playlist/Album 两个互斥 Workspace 入口，当前项显示灰底；它们只替换顶栏与 Playback Bar 之间的内容，返回 Playlist Workspace 后恢复原有主列表、右栏和队列状态。
 6. 保存分隔比例和进程内来源状态；重启来源留给步骤 12 的 `Default Playlist` 设置。来源消失、媒体库关闭、空来源、缺标签/封面、加载失败、窗口销毁和结果晚到时显示明确状态并保持其他 Workspace 可用。
 
@@ -96,15 +96,15 @@
 - 2026-07-14：只读检查归档截图和 Foobox `jssb.js`；确认截图的 Album 标题顺序、右侧曲目列表和 Foobox `Library View` 工作列表事实。尚未构建或部署功能代码。
 - 2026-07-14：新增纯 `Album Browser` 模型测试，覆盖同名不同 Album Artist、多碟排序、缺 Album 独立 Single 和来源子集；Debug/Release 全量构建均通过，MSVC `/W4 /WX` 未产生新增警告。
 - 2026-07-14：8 项 CTest 全部通过：component identity、playback state、settings、now playing、playlist view、playlist grouping、playlist interaction、album browser model。
-- 2026-07-14：Release 包审计通过，包只含根目录 `foo_refrain.dll`；产物为 `dist/Refrain-0.1.0.fb2k-component`。
-- 2026-07-14：只部署到 `.local/foobar-dev/profile/user-components-x64/foo_refrain`。一次强制结束烟雾进程导致下一次进入 foobar2000 恢复启动且不加载用户组件；随后正常关闭并重新启动，进程确认同时加载允许目录中的 `foo_ui_columns.dll`、`foo_uie_eslyric.dll` 和最新 `foo_refrain.dll`。人工验收实例现保持可见，不再由 Codex 操作。
+- 2026-07-14：Release 包审计通过，包只含根目录 `foo_crate.dll`；产物为 `dist/FooCrate-0.1.0.fb2k-component`。
+- 2026-07-14：只部署到 `.local/foobar-dev/profile/user-components-x64/foo_crate`。一次强制结束烟雾进程导致下一次进入 foobar2000 恢复启动且不加载用户组件；随后正常关闭并重新启动，进程确认同时加载允许目录中的 `foo_ui_columns.dll`、`foo_uie_eslyric.dll` 和最新 `foo_crate.dll`。人工验收实例现保持可见，不再由 Codex 操作。
 - 2026-07-14：用户首轮验收确认检查点 1–5、8、9 通过；Playlist Workspace 往返恢复也通过。检查点 6 改由步骤 12 的 `Default Playlist` 处理。检查点 7 发现 Album Track List 双击不播放、右键 Play 正常；另发现部分专辑封面反复闪烁，任务退回实现中修正。
 - 2026-07-14：双击播放根因是桥接列表在调用 foobar2000 默认动作前已经加锁，锁定列表会接管默认动作；现改为播放成功后立即加锁。部分封面闪烁根因是 Album Grid 把封面按 1024 px 解码，少量封面即可耗尽 64 MiB 缓存并互相驱逐；现改为 320 px 缩略图、160 项上限和最近使用优先淘汰。
-- 2026-07-14：修正版 Debug/Release 均在 `/W4 /WX` 下构建通过；两套各 8 项 CTest 全部通过。Release 包仅含根目录 `foo_refrain.dll`，包 SHA-256 为 `8468C87C06CA9B07E3981750D77C0FFC66279A672A03D037BD6443DC56EA9DF0`。
-- 2026-07-14：开发实例正常关闭后重新部署并可见启动；进程确认加载允许目录中的 Refrain、Columns UI 和 ESLyric。部署 DLL SHA-256 为 `E73918077D56E9263CEBF66E3758EF009FFAF3CA2AD20B29922BCA7C660CB2F3`。
+- 2026-07-14：修正版 Debug/Release 均在 `/W4 /WX` 下构建通过；两套各 8 项 CTest 全部通过。Release 包仅含根目录 `foo_crate.dll`，包 SHA-256 为 `8468C87C06CA9B07E3981750D77C0FFC66279A672A03D037BD6443DC56EA9DF0`。
+- 2026-07-14：开发实例正常关闭后重新部署并可见启动；进程确认加载允许目录中的 FooCrate、Columns UI 和 ESLyric。部署 DLL SHA-256 为 `E73918077D56E9263CEBF66E3758EF009FFAF3CA2AD20B29922BCA7C660CB2F3`。
 - 2026-07-14：第二轮人工复验确认封面不再闪烁。双击会播放 Playlist Workspace 的同索引歌曲，右键 Play 播放正确且上一首/下一首正常；确认剩余问题是默认动作尚未真正开始前过早恢复活动列表，进入第二轮窄修正。
 - 2026-07-14：双击第二轮修正版在默认动作解析期间保持桥接列表活动，收到新曲回调后再经窗口消息恢复来源，避免在播放回调内修改列表状态。Debug/Release 均构建通过，两套各 8 项 CTest 全部通过。
-- 2026-07-14：Release 包仍只含根目录 `foo_refrain.dll`，包 SHA-256 为 `6EC0438B461D212F4618708A0C1F036493320233A82F1EF0824EB0E34599C2AB`；开发实例正常关闭、部署和可见重启，部署 DLL SHA-256 为 `AD92A39B51FA8CFF90BB7E2163A2C44AA217992C04B0815EA1B71E5E1DA9AC65`，Refrain、Columns UI、ESLyric 均已加载。
+- 2026-07-14：Release 包仍只含根目录 `foo_crate.dll`，包 SHA-256 为 `6EC0438B461D212F4618708A0C1F036493320233A82F1EF0824EB0E34599C2AB`；开发实例正常关闭、部署和可见重启，部署 DLL SHA-256 为 `AD92A39B51FA8CFF90BB7E2163A2C44AA217992C04B0815EA1B71E5E1DA9AC65`，FooCrate、Columns UI、ESLyric 均已加载。
 - 2026-07-14：用户最终确认双击播放正确曲目，上一首/下一首保持在当前专辑内，返回 Playlist Workspace 后仍显示原播放列表；此前封面不闪烁也已确认，任务 11 正式验收通过。
 
 ## 人工验收步骤
@@ -116,9 +116,9 @@
 5. 快速滚动大量封面并连续切换来源；确认只出现对应单元的 Loading/No cover，没有旧来源封面串位、全页狂闪或界面卡死。
 6. 单击封面切换右侧，拖动中间边界后返回 Playlist Workspace 再回来；确认结构不能拖走、比例和本进程来源/专辑状态保存。重启后的来源将在步骤 12 按 `Default Playlist` 决定，本步骤不再验收“恢复上次来源”。
 7. 在右侧用单击、Ctrl/Shift、方向键、Home/End、Ctrl+A 和右键菜单检查选择；Delete 不应删除或改动来源，拖动也不应重排或添加曲目。
-8. 在 foobar Playback Order 选择普通顺序，从某专辑第六首双击播放；确认 `Refrain Album View` 只在真正播放时创建、内容是完整有序专辑、前五首仍在，Previous 能回到第五首，返回 Playlist Workspace 显示原来源而非桥接列表。
+8. 在 foobar Playback Order 选择普通顺序，从某专辑第六首双击播放；确认 `FooCrate Album View` 只在真正播放时创建、内容是完整有序专辑、前五首仍在，Previous 能回到第五首，返回 Playlist Workspace 显示原来源而非桥接列表。
 9. 在 foobar Playback Order 选择 Random/Shuffle，再从任意曲目开始；确认播放只在当前专辑内且本轮不重复，不进入正式 Playback Queue；专辑末尾停止，不跨到来源中的下一张专辑。
-10. 播放专辑期间切到 Playlist Workspace，检查上一首/下一首仍在该专辑；随后从原播放列表双击另一首歌，确认专辑会话结束且 foobar 原 Playback Order 恢复。最后尝试在原生播放列表标签中增删/重排/删除 `Refrain Album View`，应被 Refrain 锁拒绝。
+10. 播放专辑期间切到 Playlist Workspace，检查上一首/下一首仍在该专辑；随后从原播放列表双击另一首歌，确认专辑会话结束且 foobar 原 Playback Order 恢复。最后尝试在原生播放列表标签中增删/重排/删除 `FooCrate Album View`，应被 FooCrate 锁拒绝。
 
 ## 改动文件
 
@@ -133,4 +133,4 @@
 
 ## 决策与未决问题
 
-用户已决定左下同时提供 Playlist/Album 两个按钮，临时图标可由实现选择，当前 Workspace 按钮显示灰底，未来 Workspace 入口继续加入这里。专辑只按 Album + Album Artist metadata 归组；右侧是当前来源交集产生、固定排序且不可编辑的智能结果视图。唯一真实 `Refrain Album View` 使用持久化 GUID 并锁定编辑，只在实际播放时更新；Playlist Workspace 始终恢复来源列表。Album Playback Session 只在当前专辑内顺序或随机一次，结束后停止，不自动跨回来源续播。重启来源改由步骤 12 的 `Default Playlist` 设置决定。全部可见行为已由用户验收。
+用户已决定左下同时提供 Playlist/Album 两个按钮，临时图标可由实现选择，当前 Workspace 按钮显示灰底，未来 Workspace 入口继续加入这里。专辑只按 Album + Album Artist metadata 归组；右侧是当前来源交集产生、固定排序且不可编辑的智能结果视图。唯一真实 `FooCrate Album View` 使用持久化 GUID 并锁定编辑，只在实际播放时更新；Playlist Workspace 始终恢复来源列表。Album Playback Session 只在当前专辑内顺序或随机一次，结束后停止，不自动跨回来源续播。重启来源改由步骤 12 的 `Default Playlist` 设置决定。全部可见行为已由用户验收。

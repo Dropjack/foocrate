@@ -11,17 +11,17 @@
 
 本模块补齐 `Playlist View` 的播放队列、拖放和列表内评分，使当前列表可以完成日常排队、整理、导入、导出与评分。步骤 08、09 已验收的数据源、虚拟化、选择、分组、折叠、列配置、排序和正式上下文菜单继续有效；本模块不建立第二份可编辑播放列表。
 
-步骤 12 才会加入 Refrain 自己的左侧 `Playlist Browser`。因此步骤 10 可以完成标准 OLE 跨面板拖放能力，但当前 Refrain 窗口内尚没有第二个可见播放列表落点；这项结构关系必须按第 11 节核准，不能用隐藏热区或临时布局冒充最终交互。
+步骤 12 才会加入 FooCrate 自己的左侧 `Playlist Browser`。因此步骤 10 可以完成标准 OLE 跨面板拖放能力，但当前 FooCrate 窗口内尚没有第二个可见播放列表落点；这项结构关系必须按第 11 节核准，不能用隐藏热区或临时布局冒充最终交互。
 
 ## 2. 播放队列显示与入口
 
 1. 在内置列库中正式加入 `State / Queue`。未排队项目显示正常播放状态；排队项目显示一基序号，正在播放标记与队列序号使用不同的非颜色线索。
 2. 同一真实列表项目被重复加入队列时，单元格显示第一个序号和附加数量，例如 `2 +2`；完整序号出现在提示文本和队列面板中。
-3. `playback_queue_callback` 只触发重新读取真实队列；Refrain 不缓存一份可以脱离 foobar2000 单独变化的队列。
+3. `playback_queue_callback` 只触发重新读取真实队列；FooCrate 不缓存一份可以脱离 foobar2000 单独变化的队列。
 4. 队列管理区不使用独立浮动窗口。推荐让播放列表工作区的整个固定右栏在 `Now Playing Panel` 与 `Playback Queue Panel` 之间切换：前者仍包含完整 `Now Playing Header` 和 Lyrics/Track Details，后者使用整列高度显示队列标题、曲目列表、拖动重排、移除所选和清空。切换只替换右栏内容，不改变右栏宽度或三栏拓扑。
 5. 队列项目双击或按 Enter 会立即播放该项并消费它；其他队列项保持原有相对顺序。右键菜单提供 `Play now`、`Remove selected`、`Clear playback queue`，并保留适用的正式曲目菜单；主面板不暴露 Remove/Clear 按钮，Delete 删除所选项。
-6. 项目右键继续使用 foobar2000 正式上下文菜单，其中已有的 `Add to playback queue`、`Remove from playback queue` 等组件命令不被 Refrain 替换。
-7. 不采用 Foobox 的 `Queue Content` 临时播放列表方案，避免创建、占用或删除用户播放列表；不复制当前列表来模拟未来顺序。步骤 10 不实现 Playback Order 控件；步骤 14 按最新决定把 foobar2000 自身持有的正式播放顺序入口迁入 Refrain 右下角，但仍不建立第二套规则。
+6. 项目右键继续使用 foobar2000 正式上下文菜单，其中已有的 `Add to playback queue`、`Remove from playback queue` 等组件命令不被 FooCrate 替换。
+7. 不采用 Foobox 的 `Queue Content` 临时播放列表方案，避免创建、占用或删除用户播放列表；不复制当前列表来模拟未来顺序。步骤 10 不实现 Playback Order 控件；步骤 14 按最新决定把 foobar2000 自身持有的正式播放顺序入口迁入 FooCrate 右下角，但仍不建立第二套规则。
 
 ## 3. 队列修改安全
 
@@ -59,7 +59,7 @@
 - 使用 `ole_interaction::create_dataobject()` 生成标准 foobar2000 曲目数据对象，交给系统 `DoDragDrop`；目标决定 Copy、Move 或拒绝。
 - Copy 成功不修改来源。Move 只有在目标确认成功且来源 GUID、项目集合和顺序仍匹配时才删除来源，并先建立 Undo；任何不确定状态都保留来源。
 - 可以拖到资源管理器或其他兼容 foobar2000 面板；目标不支持相应格式时显示禁止状态，不私自导出或复制音频文件。
-- 步骤 10 完成跨面板引擎和与其他播放列表面板的复制/移动；Refrain 自己的可见“拖到另一个播放列表名称”落点随步骤 12 的 `Playlist Browser` 接入同一引擎。
+- 步骤 10 完成跨面板引擎和与其他播放列表面板的复制/移动；FooCrate 自己的可见“拖到另一个播放列表名称”落点随步骤 12 的 `Playlist Browser` 接入同一引擎。
 - 中央 Playlist View 拖到可见 Playback Queue 时按所选顺序加入真实队列，允许同一曲目重复排队，来源列表不删除。
 
 ## 6. 列表内五星评分
@@ -67,7 +67,7 @@
 1. `Rating` 列继续读取 Playback Statistics 暴露的 `%rating%`，与右上 `Now Playing Header` 使用同一事实来源。
 2. 鼠标悬停显示将要写入的 1–5 星；按下并松开仍位于同一星级区域才提交，拖出、Esc、失焦或列表变化均取消。
 3. 单击第 N 星只给被点击的那一行写入 N 星，即使当前存在多选；再次单击已生效的同一颗星清除评分。这与 Foobox 已观察行为一致，也避免一次误改大量自动列表入口。
-4. 写入调用 Playback Statistics 正式 `Rating/N` 或 `Rating/<not set>` 命令；不写音频文件 `RATING` 标签，不建立 Refrain 私有评分数据库。
+4. 写入调用 Playback Statistics 正式 `Rating/N` 或 `Rating/<not set>` 命令；不写音频文件 `RATING` 标签，不建立 FooCrate 私有评分数据库。
 5. 写入后等待真实元数据/统计回调刷新列表、右上五星和自动播放列表；命令缺失或失败时恢复真实值并显示非阻塞错误，不先画成成功。
 6. 键盘与批量评分继续由正式上下文菜单/用户全局快捷键承担；本步骤不增加第二套快捷键。
 
@@ -113,10 +113,10 @@
 ## 11. 待核准决定
 
 1. **队列界面（已核准）**：采用 `State / Queue` 列 + 整个右栏 `Playback Queue Panel`，不使用浮动窗口，也不创建 Foobox 的 `Queue Content` 临时播放列表。底部右侧 `Playback Tools` 最左增加队列/列表按钮：单击以队列替换整个 `Now Playing Panel`，再次单击完整恢复此前的 Now Playing Header、Lyrics/Track Details 和上下比例。队列模式中中键不切换隐藏内容；返回 Now Playing 后，中键语义保持不变。切歌和停止不强制关闭用户主动打开的队列；重启不恢复队列模式。队列曲目区与步骤 11 的 Album Track Header/List 共用视图资源，但不共享数据状态。
-2. **跨列表阶段边界（已核准）**：步骤 10 完成标准 OLE 拖入/拖出和跨兼容面板 Copy/Move；Refrain 窗口内拖到另一个播放列表名称的最终落点在步骤 12 左侧 `Playlist Browser` 出现时接入，不制作临时目标选择器。
+2. **跨列表阶段边界（已核准）**：步骤 10 完成标准 OLE 拖入/拖出和跨兼容面板 Copy/Move；FooCrate 窗口内拖到另一个播放列表名称的最终落点在步骤 12 左侧 `Playlist Browser` 出现时接入，不制作临时目标选择器。
 3. **评分点击规则（已核准）**：采用 Foobox 行为——只修改点击行，再点当前星级清除；无论多选都不批量写入，并且只写 Playback Statistics。
 4. **验收修正规则（已核准）**：手动列表内部拖动遵循 Foobox 的 Move；自动/锁定列表遵循 foobar2000 正式锁定过滤。Playlist View 自身不因同源 OLE 失败复制曲目，外部拖入手动列表跳过已有精确项目；重复播放只在 Playback Queue 中允许。队列双击/Enter 立即播放并消费该项，Remove/Clear 移入右键菜单，Playlist View 可直接拖入队列。
-5. **阶段边界（已核准）**：步骤 12 才显示 Playlist Browser，并在那里人工验收拖到播放列表名称、手动/智能列表管理与类型提示。步骤 10 不制作临时侧栏，也不实现 Playback Order UI；步骤 14 的最新决定只为 foobar2000 自带规则增加 Refrain 风格入口，不改变本任务的队列语义。
+5. **阶段边界（已核准）**：步骤 12 才显示 Playlist Browser，并在那里人工验收拖到播放列表名称、手动/智能列表管理与类型提示。步骤 10 不制作临时侧栏，也不实现 Playback Order UI；步骤 14 的最新决定只为 foobar2000 自带规则增加 FooCrate 风格入口，不改变本任务的队列语义。
 
 ## 12. 决策记录
 

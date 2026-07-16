@@ -12,8 +12,8 @@
 - 固定位置是 `Playlist Workspace` 左侧，顺序为 `Playlist Browser | Playlist View | Right Side Panel`。
 - 面板不能拖走、交换、浮动或隐藏，只能调整与 Playlist View 的左右边界。
 - 显示 foobar2000 的真实普通/自动播放列表、名称和项目数；区分当前活动、正在播放、管理选中和锁定/保留状态。
-- FavPop、FavScore 等现有自动列表的名称、查询和内容继续由用户及 foobar2000 管理，Refrain 不重建或覆盖。
-- `Refrain Album View` 是步骤 11 已批准的唯一保留工作列表，使用稳定 GUID 识别，不能仅靠名称判断。
+- FavPop、FavScore 等现有自动列表的名称、查询和内容继续由用户及 foobar2000 管理，FooCrate 不重建或覆盖。
+- `FooCrate Album View` 是步骤 11 已批准的唯一保留工作列表，使用稳定 GUID 识别，不能仅靠名称判断。
 - 步骤 13 曾实现播放列表名称 Filter 和原生 Album List 入口；任务 15 的最新决定已完整移除 Filter，只保留 foobar2000 `Ctrl+F` 边界和原生 Album List 入口。
 - 不增加 Foobox 的电台、搜索结果列表管理器或强制置顶 `Library` 自动列表。用户在 0.1 核对中明确要求加入 Foobox 原理的预设自动列表；具体模板范围仍见第 8 节。
 
@@ -25,7 +25,7 @@
 - `jsspm.js` 使用正式自动列表判断，不靠名称；自动列表拒绝曲目拖入，并提供 Properties 与 Convert to Normal。
 - 单击列表会激活；支持 Ctrl/Shift 多选、批量重排、内联重命名和删除确认。
 - Foobox 双击播放列表名称会取某个焦点索引直接播放；空白区域接收曲目会创建 `Dragged Items`。
-- Foobox 还会创建/置顶 `Library` 自动列表，并提供预设自动列表、电台、搜索历史和内容清理菜单；这些超出 Refrain 已批准范围。
+- Foobox 还会创建/置顶 `Library` 自动列表，并提供预设自动列表、电台、搜索历史和内容清理菜单；这些超出 FooCrate 已批准范围。
 
 ### 2.2 SDK 能力与限制
 
@@ -33,7 +33,7 @@
 - `autoplaylist_manager::is_client_present()` / `query_client()` 可可靠识别自动列表；客户端可报告属性 UI 是否可用并提供配置。
 - 自动列表复制查询需要按客户端 GUID 找到对应 factory 并重建配置；第三方 provider 缺失时不能可靠复制，必须禁用并说明。
 - playlist lock 的 filter mask 决定是否允许添加、移除、重排、替换、改名和删除列表；UI 不能只按“自动/普通”二分后假定权限。
-- 播放列表全局顺序由 foobar2000 持有；Refrain 的拖动排序必须提交完整 permutation，并用回调结果刷新。
+- 播放列表全局顺序由 foobar2000 持有；FooCrate 的拖动排序必须提交完整 permutation，并用回调结果刷新。
 
 ## 3. 推荐的类型与状态模型
 
@@ -44,7 +44,7 @@
 | Active | 中央 Playlist View 当前显示的列表 |
 | Playing | foobar2000 当前播放上下文所属列表 |
 | Selected | 侧栏正在用于批量管理的列表 |
-| Reserved/Locked | Refrain 保留或其他组件限制修改的列表 |
+| Reserved/Locked | FooCrate 保留或其他组件限制修改的列表 |
 
 自动列表是类型；锁定是权限。二者可能重叠，但不能视为同一概念。
 
@@ -55,7 +55,7 @@ Default Playlist 还需要独立于上述状态的持久视觉标识。任务 12
 
 ## 4. 任务 12 与步骤 13 的界面边界
 
-任务 12 不在左栏表面放 `+` 或其他新建按钮。新建、载入与保存入口统一进入右键菜单；标题下面直接显示播放列表虚拟列表。任务 15 的最新边界明确 Refrain 不提供 Filter 或其隐藏占位；Album List 仍从底部独立入口打开。
+任务 12 不在左栏表面放 `+` 或其他新建按钮。新建、载入与保存入口统一进入右键菜单；标题下面直接显示播放列表虚拟列表。任务 15 的最新边界明确 FooCrate 不提供 Filter 或其隐藏占位；Album List 仍从底部独立入口打开。
 
 ## 5. 自动列表安全原则
 
@@ -75,9 +75,9 @@ Default Playlist 还需要独立于上述状态的持久视觉标识。任务 12
 
 ## 7. Default Playlist 已核准基础
 
-Playlist Workspace 与 Album Workspace 共用一个永久 `Default Playlist`。用户可在播放列表行右键选择 `Set as Default Playlist`，也可在 Refrain Preferences 的播放列表子页通过下拉框设置；两处写入同一个播放列表 GUID，而不是名称或索引。每个 foobar2000 进程只应用一次：启动进入 Playlist Workspace，中央活动列表与 Album Workspace 首次来源都使用它；重新创建 Refrain 面板不能再次强制切换。
+Playlist Workspace 与 Album Workspace 共用一个永久 `Default Playlist`。用户可在播放列表行右键选择 `Set as Default Playlist`，也可在 FooCrate Preferences 的播放列表子页通过下拉框设置；两处写入同一个播放列表 GUID，而不是名称或索引。每个 foobar2000 进程只应用一次：启动进入 Playlist Workspace，中央活动列表与 Album Workspace 首次来源都使用它；重新创建 FooCrate 面板不能再次强制切换。
 
-外部 `.m3u8` 或 `.fpl` 必须先通过 foobar2000 载入为内部播放列表，随后即可设为 Default。Refrain 不修改外部文件加标签，也不保存一个会在每次启动时重复导入的文件路径。只要该内部列表仍存在，其 GUID 就持续有效；删除并重新载入后需重新设置。
+外部 `.m3u8` 或 `.fpl` 必须先通过 foobar2000 载入为内部播放列表，随后即可设为 Default。FooCrate 不修改外部文件加标签，也不保存一个会在每次启动时重复导入的文件路径。只要该内部列表仍存在，其 GUID 就持续有效；删除并重新载入后需重新设置。
 
 Default 被删除时回退到第一个非保留播放列表；若完全没有可用列表则创建一个普通 `Default Playlist` 并更新设置。
 
@@ -97,7 +97,7 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 
 ### 8.3 新建入口（部分核准）
 
-- A（被用户修改后核准）：不显示 `+`。右键 `Add Playlist…` 子菜单提供 `New Playlist`、`New Autoplaylist…` 和 `Preset Autoplaylists`。自动列表由 Refrain 提供查询/排序模板，再调用 foobar2000 正式 autoplaylist API 创建和持续计算；Refrain 不自建查询引擎。
+- A（被用户修改后核准）：不显示 `+`。右键 `Add Playlist…` 子菜单提供 `New Playlist`、`New Autoplaylist…` 和 `Preset Autoplaylists`。自动列表由 FooCrate 提供查询/排序模板，再调用 foobar2000 正式 autoplaylist API 创建和持续计算；FooCrate 不自建查询引擎。
 - B：任务 12 只允许新建普通列表，自动列表继续从 foobar2000 其他入口创建。
 
 ### 8.4 点击、多选与双击（已核准）
@@ -112,7 +112,7 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 - B：自动列表只允许激活和 Properties，其他管理必须去 foobar2000 原生界面。
 - C：允许 Rename/Delete，但不提供 Duplicate/Convert。
 
-### 8.6 `Refrain Album View`（已核准）
+### 8.6 `FooCrate Album View`（已核准）
 
 - A：在侧栏可见，显示保留/锁图标和项目数；允许激活查看，但禁止设为默认、改名、复制、删除、重排和接收曲目。
 - B（用户核准）：完全隐藏，不占 Playlist Browser 主视觉空间；Album Workspace 继续通过来源下拉切换用户播放列表。底层桥接列表仍可能出现在 foobar2000 原生播放列表 UI 中。
@@ -146,11 +146,11 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 
 ### 8.12 预设自动列表模板（已核准）
 
-采用 Foobox 同义模板：Library (full)、Never played、History（最近一周）、Played often、Recently added（最近 12 周）、Unrated、Rated 1–5；排除 Favorites (mood) 和网络电台。查询完全使用 foobar2000 标准查询语法，默认排序使用 `%album% | %discnumber% | %tracknumber% | %title%`，再由 `autoplaylist_manager::add_client_simple()` 交给核心持续计算。Refrain 不发明“通配符规则”或第二套查询引擎。
+采用 Foobox 同义模板：Library (full)、Never played、History（最近一周）、Played often、Recently added（最近 12 周）、Unrated、Rated 1–5；排除 Favorites (mood) 和网络电台。查询完全使用 foobar2000 标准查询语法，默认排序使用 `%album% | %discnumber% | %tracknumber% | %title%`，再由 `autoplaylist_manager::add_client_simple()` 交给核心持续计算。FooCrate 不发明“通配符规则”或第二套查询引擎。
 
 ### 8.13 右键背景菜单与外部列表（已核准）
 
-背景菜单采用：`Add Playlist…`（New Playlist / New Autoplaylist / Preset Autoplaylists）、`Load Playlist…`、`Save All Playlists…`。单行生命周期菜单另提供 `Save This Playlist…`。载入 `.m3u8/.fpl` 后可通过行菜单 `Set as Default Playlist`，外部文件本身不写入 Refrain 标签。
+背景菜单采用：`Add Playlist…`（New Playlist / New Autoplaylist / Preset Autoplaylists）、`Load Playlist…`、`Save All Playlists…`。单行生命周期菜单另提供 `Save This Playlist…`。载入 `.m3u8/.fpl` 后可通过行菜单 `Set as Default Playlist`，外部文件本身不写入 FooCrate 标签。
 
 ### 8.14 重复曲目与 `Dragged Items`（已核准）
 
@@ -160,8 +160,8 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 ## 9. 决策记录
 
 - 2026-07-14：步骤 11 已提交为 `b924747`，步骤 12 启动。
-- 2026-07-14：只读证据表明 Foobox 的 Playlist Manager 范围大于 Refrain 产品边界；0.1 草案保留播放列表生命周期与真实类型管理，把搜索/Filter/Album List 留给步骤 13，并排除电台、预设智能列表和强制 Library 自动列表。
-- 2026-07-14：用户核准单一永久 Default、删除回退、多选/无双击播放、删除确认、永远 Copy、空白拖放建表、精简生命周期菜单和 15% 有界宽度；要求所有创建入口进入右键菜单，并新增 Foobox 原理的预设自动列表。`Refrain Album View` 改为在 Refrain 侧栏隐藏。自动列表规则管理、预设范围、Load/Save 菜单和重复项/新表命名仍待收尾核准。
+- 2026-07-14：只读证据表明 Foobox 的 Playlist Manager 范围大于 FooCrate 产品边界；0.1 草案保留播放列表生命周期与真实类型管理，把搜索/Filter/Album List 留给步骤 13，并排除电台、预设智能列表和强制 Library 自动列表。
+- 2026-07-14：用户核准单一永久 Default、删除回退、多选/无双击播放、删除确认、永远 Copy、空白拖放建表、精简生命周期菜单和 15% 有界宽度；要求所有创建入口进入右键菜单，并新增 Foobox 原理的预设自动列表。`FooCrate Album View` 改为在 FooCrate 侧栏隐藏。自动列表规则管理、预设范围、Load/Save 菜单和重复项/新表命名仍待收尾核准。
 - 2026-07-14：用户接受规则管理菜单；核准非 Mood 的 Foobox 同义预设、foobar2000 标准查询/标题格式语法、背景 Add/Load/Save、单行 Save This、全普通列表精确去重，以及唯一命名并立即激活的 `Dragged Items`。0.2 无未决产品问题，进入实现。
 - 2026-07-14：用户要求 Default Playlist 与其他列表颜色不同；任务 12 暂定灰蓝色 `#5F7495`，最终色值留到主题与多套配色阶段调整，但保留独立视觉语义。
 - 2026-07-14：用户完成任务 12 人工验收，确认未发现逻辑问题并接受当前 Default Playlist 颜色；模块规格 0.2 标记为已验收，后续只在主题阶段调整视觉参数。

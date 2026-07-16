@@ -2,13 +2,13 @@
 
 - 状态：待讨论
 - 对应规格：[`../../specs/modules/MINI_PLAYER.md`](../../specs/modules/MINI_PLAYER.md) 0.1（概念已批准）
-- 前置任务：`24 发布 Refrain 1.0.0`
+- 前置任务：`24 发布 FooCrate 1.0.0`
 - Fork 提交标题：`实现原生 Mini Player`
 - 最后更新：2026-07-15
 
 ## 任务目标
 
-提供一个从 Refrain 主界面进入的原生独立 Mini Player，支持“播放条+封面”和“隐藏封面的紧凑播放条”两个形态，并与主界面共享真实播放状态。
+提供一个从 FooCrate 主界面进入的原生独立 Mini Player，支持“播放条+封面”和“隐藏封面的紧凑播放条”两个形态，并与主界面共享真实播放状态。
 
 ## 明确不做
 

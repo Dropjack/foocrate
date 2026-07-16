@@ -18,23 +18,23 @@ try {
   $archive.Dispose()
 }
 
-if ($entries.Count -ne 1 -or $entries[0] -cne 'foo_refrain.dll') {
+if ($entries.Count -ne 1 -or $entries[0] -cne 'foo_crate.dll') {
   throw "Package audit failed: $($entries -join ', ')"
 }
 
-$simulationRoot = Join-Path ([IO.Path]::GetTempPath()) ("refrain-package-" + [Guid]::NewGuid().ToString('N'))
-$componentRoot = Join-Path $simulationRoot 'profile\user-components-x64\foo_refrain'
+$simulationRoot = Join-Path ([IO.Path]::GetTempPath()) ("foocrate-package-" + [Guid]::NewGuid().ToString('N'))
+$componentRoot = Join-Path $simulationRoot 'profile\user-components-x64\foo_crate'
 
 try {
   New-Item -ItemType Directory -Path $componentRoot -Force | Out-Null
   [IO.Compression.ZipFile]::ExtractToDirectory($package, $componentRoot)
 
-  $installedDll = Join-Path $componentRoot 'foo_refrain.dll'
+  $installedDll = Join-Path $componentRoot 'foo_crate.dll'
   $installedFiles = @(Get-ChildItem -LiteralPath $componentRoot -File -Recurse)
   $installedDirectories = @(Get-ChildItem -LiteralPath $componentRoot -Directory -Recurse)
 
   if (-not (Test-Path -LiteralPath $installedDll -PathType Leaf)) {
-    throw "Package install simulation did not place foo_refrain.dll at the component root: $componentRoot"
+    throw "Package install simulation did not place foo_crate.dll at the component root: $componentRoot"
   }
 
   if ($installedFiles.Count -ne 1 -or $installedDirectories.Count -ne 0) {

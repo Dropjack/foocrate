@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace refrain::layout {
+namespace foocrate::layout {
 
 struct PlaybackBarVerticalMetrics {
     static constexpr float height = 68.0F;
@@ -130,4 +130,4 @@ struct AlbumCoverWallMetrics {
 
 static_assert(PlaybackBarVerticalMetrics::controlsFit());
 
-} // namespace refrain::layout
+} // namespace foocrate::layout

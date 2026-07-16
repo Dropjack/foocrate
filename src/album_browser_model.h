@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 struct AlbumSourceTrack {
     std::size_t sourceIndex{};
@@ -110,4 +110,4 @@ struct AlbumBrowserAlbum {
     return albums;
 }
 
-} // namespace refrain
+} // namespace foocrate

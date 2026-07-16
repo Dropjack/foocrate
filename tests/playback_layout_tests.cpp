@@ -4,10 +4,10 @@
 
 int main()
 {
-    using Metrics = refrain::layout::PlaybackBarVerticalMetrics;
-    using Chrome = refrain::layout::InteriorChromeMetrics;
-    using Header = refrain::layout::NowPlayingHeaderMetrics;
-    using Wall = refrain::layout::AlbumCoverWallMetrics;
+    using Metrics = foocrate::layout::PlaybackBarVerticalMetrics;
+    using Chrome = foocrate::layout::InteriorChromeMetrics;
+    using Header = foocrate::layout::NowPlayingHeaderMetrics;
+    using Wall = foocrate::layout::AlbumCoverWallMetrics;
 
     static_assert(Metrics::height == 68.0F);
     static_assert(Metrics::controlsFit());

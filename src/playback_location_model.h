@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 
-namespace refrain {
+namespace foocrate {
 
 [[nodiscard]] constexpr std::size_t restoredPlaylistTopRow(std::size_t displayRow,
     std::size_t viewportAnchor, std::size_t rowCount, std::size_t visibleCapacity) noexcept {
@@ -13,4 +13,4 @@ namespace refrain {
     return std::min(candidate, maximum);
 }
 
-} // namespace refrain
+} // namespace foocrate

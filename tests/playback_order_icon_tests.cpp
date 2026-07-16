@@ -15,8 +15,8 @@ void expect(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using refrain::PlaybackOrderIconKind;
-    using refrain::playbackOrderIconKind;
+    using foocrate::PlaybackOrderIconKind;
+    using foocrate::playbackOrderIconKind;
 
     expect(playbackOrderIconKind(0) == PlaybackOrderIconKind::defaultOrder, "Default icon mapping failed");
     expect(playbackOrderIconKind(1) == PlaybackOrderIconKind::repeatPlaylist, "Repeat playlist icon mapping failed");

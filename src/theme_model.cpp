@@ -5,7 +5,7 @@
 #include <cmath>
 #include <limits>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 struct HslColor {
@@ -340,4 +340,4 @@ std::optional<ThemePalette> extractArtworkTheme(std::span<const std::uint8_t> pi
     return palette;
 }
 
-} // namespace refrain
+} // namespace foocrate

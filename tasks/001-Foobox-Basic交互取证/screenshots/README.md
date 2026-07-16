@@ -27,7 +27,7 @@
 | `主窗口可以调整边界但不能拖拽移动.jpg` | 固定区域拓扑与可调整分隔尺寸 |
 | `信息板的主界面.jpg` | `Track Details View` 与 `Lyrics View` 共用右下位置 |
 | `封面浏览器.jpg` | `Album Cover Browser Workspace`：左侧专辑封面网格和右侧专辑曲目列表；Foobox 的非 Album 模式仅作排除证据 |
-| `独立设置页面.jpg` | 仅盘点 Foobox 可配置项；不作为 Refrain 内嵌设置页要求 |
+| `独立设置页面.jpg` | 仅盘点 Foobox 可配置项；不作为 FooCrate 内嵌设置页要求 |
 
 ## 截图要求
 

@@ -1,4 +1,4 @@
-# Refrain 开发环境与运行边界
+# FooCrate 开发环境与运行边界
 
 - 最后核对日期：2026-07-13
 - 作用：记录可以从新会话直接复核和使用的本机环境、第三方版本、实例边界、构建入口和部署规则
@@ -8,9 +8,9 @@
 
 | 路径 | 用途 | 是否允许写入 |
 | --- | --- | --- |
-| `D:\Dev\Refrain` | 项目根目录和 Git 仓库 | 允许，在当前任务范围内修改 |
-| `D:\Dev\Refrain\.local\foobar-dev` | 人工开发调试实例 | 允许部署和修改，但不得提交其运行数据 |
-| `D:\Dev\Refrain\.local\foobar-test` | 自动或隔离验证实例 | 允许部署和修改，但不得提交其运行数据 |
+| `D:\Dev\FooCrate` | 项目根目录和 Git 仓库 | 允许，在当前任务范围内修改 |
+| `D:\Dev\FooCrate\.local\foobar-dev` | 人工开发调试实例 | 允许部署和修改，但不得提交其运行数据 |
+| `D:\Dev\FooCrate\.local\foobar-test` | 自动或隔离验证实例 | 允许部署和修改，但不得提交其运行数据 |
 | `D:\Dev\foobar2000` | Foobox 行为与文件证据参考 | 严格只读，不部署、不保存设置、不清理 |
 | C 盘日常 foobar2000 | 用户日常听歌与正式媒体库 | 完全不在项目范围内，不读取配置、不部署、不修改 |
 
@@ -59,7 +59,7 @@
 - 来源说明：`third_party/sdk-readme.html`
 - 许可证：`third_party/sdk-license.txt`
 
-仓库保留官方 SDK 的完整可构建源码、工程和原许可证。官方包中的预编译 `.dll`、`.lib` 不进入 Git；需要的库由源码构建到已忽略的构建目录。项目不得修改第三方 SDK 源码来迁就 Refrain。
+仓库保留官方 SDK 的完整可构建源码、工程和原许可证。官方包中的预编译 `.dll`、`.lib` 不进入 Git；需要的库由源码构建到已忽略的构建目录。项目不得修改第三方 SDK 源码来迁就 FooCrate。
 
 ### 3.2 Columns UI SDK
 
@@ -90,26 +90,26 @@ ESLyric 的版本来自 DLL 版本资源；Playback Statistics DLL 没有 Window
 
 ### 4.1 第三方组件更新边界
 
-- Refrain 只维护兼容性，不成为 ESLyric 或 Playback Statistics 的下载器、镜像或自动更新器。
+- FooCrate 只维护兼容性，不成为 ESLyric 或 Playback Statistics 的下载器、镜像或自动更新器。
 - Playback Statistics 托管于 foobar2000 官方组件仓库，可优先使用 foobar2000 的 `Help > Check for updated components` 或 Preferences 的 Components 页面检查更新。
 - ESLyric 由其 GitHub Releases 独立发布，不在 foobar2000 官方组件仓库时由用户从作者发布页取得 `.fb2k-component`，通过 Components 页面安装更新。
-- 用户不必更新这些组件，也不必在它们每次发布时重新测试或重新打包 Refrain；一个验证可用的版本组合可以长期冻结使用。
-- 用户自行更新后，Refrain 以所需能力是否仍存在为运行判断，不因版本号高于基线就拒绝启动。缺少歌词面板、评分命令或 `%rating%` 行为实际改变时，对应功能进入不兼容状态并提示，其他功能继续使用。
-- 只有更新后发生真实故障，或者准备发布新的 Refrain 版本时，维护流程才使用 `foobar-dev` 和 `foobar-test` 复现、修复与回归。日常用户更新不要求保留或运行这两个实例。
-- Refrain 的正式版本说明记录发布时实际测试的基线组合。这是可复现证据，不是要求用户永远停留在该版本，也不是要求项目追随每一次上游发布。
+- 用户不必更新这些组件，也不必在它们每次发布时重新测试或重新打包 FooCrate；一个验证可用的版本组合可以长期冻结使用。
+- 用户自行更新后，FooCrate 以所需能力是否仍存在为运行判断，不因版本号高于基线就拒绝启动。缺少歌词面板、评分命令或 `%rating%` 行为实际改变时，对应功能进入不兼容状态并提示，其他功能继续使用。
+- 只有更新后发生真实故障，或者准备发布新的 FooCrate 版本时，维护流程才使用 `foobar-dev` 和 `foobar-test` 复现、修复与回归。日常用户更新不要求保留或运行这两个实例。
+- FooCrate 的正式版本说明记录发布时实际测试的基线组合。这是可复现证据，不是要求用户永远停留在该版本，也不是要求项目追随每一次上游发布。
 
 ### 4.2 开发目录不是运行依赖
 
-正式 `.fb2k-component` 安装到 C 盘日常 foobar2000 后，运行只需要该实例中的 Refrain、Columns UI 及用户选择启用的外部组件。`D:\Dev\Refrain`、源代码、SDK、构建目录、`foobar-dev` 和 `foobar-test` 都不是运行时依赖。
+正式 `.fb2k-component` 安装到 C 盘日常 foobar2000 后，运行只需要该实例中的 FooCrate、Columns UI 及用户选择启用的外部组件。`D:\Dev\FooCrate`、源代码、SDK、构建目录、`foobar-dev` 和 `foobar-test` 都不是运行时依赖。
 
-项目完成后可以把源代码推送到 Git 远端或制作源码归档，再删除本机 D 盘工作副本；已安装的 Refrain 仍可继续使用。只有将来需要修改、重新构建或调查兼容故障时，才重新克隆/恢复项目并建立隔离实例。
+项目完成后可以把源代码推送到 Git 远端或制作源码归档，再删除本机 D 盘工作副本；已安装的 FooCrate 仍可继续使用。只有将来需要修改、重新构建或调查兼容故障时，才重新克隆/恢复项目并建立隔离实例。
 
 ### 4.3 第三方再分发状态
 
-- Columns UI 官方组件页将项目标为开源，但 Refrain 仍不重复打包其运行时二进制，用户从官方渠道独立安装。
-- Playback Statistics 官方组件页提供下载，但未发现授予 Refrain 再分发其二进制的明确许可。
+- Columns UI 官方组件页将项目标为开源，但 FooCrate 仍不重复打包其运行时二进制，用户从官方渠道独立安装。
+- Playback Statistics 官方组件页提供下载，但未发现授予 FooCrate 再分发其二进制的明确许可。
 - ESLyric 作者 release 仓库未列出明确的二进制再分发许可。
-- 因此 Refrain 当前对三者均采用“记录权威来源、检测安装状态、用户独立安装”的方案。未来若要合包，必须先取得并保存明确授权，不能把公开下载误认为再分发许可。
+- 因此 FooCrate 当前对三者均采用“记录权威来源、检测安装状态、用户独立安装”的方案。未来若要合包，必须先取得并保存明确授权，不能把公开下载误认为再分发许可。
 
 ## 5. 测试期间如何避免影响日常听歌环境
 
@@ -152,9 +152,9 @@ $ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 
 产物位于已忽略的 `build/vs2022-x64`：
 
-- Debug DLL：`Debug/foo_refrain.dll`；
-- Release DLL：`Release/foo_refrain.dll`；
-- 方便用户找到的安装包：仓库根目录 `dist/Refrain-0.1.0.fb2k-component`。
+- Debug DLL：`Debug/foo_crate.dll`；
+- Release DLL：`Release/foo_crate.dll`；
+- 方便用户找到的安装包：仓库根目录 `dist/FooCrate-0.1.0.fb2k-component`。
 
 `dist/` 与 `build/` 一样被 Git 忽略。`build/` 保存编译中间产物，`dist/` 只保存用户可以直接安装的最终包；人工安装时不需要再进入多层构建目录。
 
@@ -163,21 +163,21 @@ $ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 ```powershell
 & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-component.ps1 `
   -Instance dev `
-  -ComponentDll build/vs2022-x64/Release/foo_refrain.dll
+  -ComponentDll build/vs2022-x64/Release/foo_crate.dll
 ```
 
-脚本只接受 `dev` 或 `test`，只接受仓库 `build/` 内名为 `foo_refrain.dll` 的文件，并把绝对目标限制在 `.local/foobar-dev` 或 `.local/foobar-test`。它不能接收 C 盘或参考目录作为目标，也没有日常实例回退路径。
+脚本只接受 `dev` 或 `test`，只接受仓库 `build/` 内名为 `foo_crate.dll` 的文件，并把绝对目标限制在 `.local/foobar-dev` 或 `.local/foobar-test`。它不能接收 C 盘或参考目录作为目标，也没有日常实例回退路径。
 
 已验证的工程形态：
 
 1. 构建目标为 Windows x64 的 foobar2000 组件 DLL。
 2. Debug 与 Release 都必须可构建；Release 用于最终打包，Debug 用于开发实例诊断。
 3. 最终主要交付物是 `.fb2k-component` 组件包，而不是独立 EXE 安装器。
-4. 用户通过 foobar2000 的 Components 页面或打开 `.fb2k-component` 安装 Refrain；不能要求手工把开发 DLL 复制进日常安装。
+4. 用户通过 foobar2000 的 Components 页面或打开 `.fb2k-component` 安装 FooCrate；不能要求手工把开发 DLL 复制进日常安装。
 5. 如果 Columns UI 无法在不覆盖用户配置的前提下自动建立完整根布局，则额外提供明确版本的布局导入文件，并把导入、升级和回滚写入安装说明。不能未经确认覆盖用户现有 Columns UI 布局。
-6. ESLyric、Playback Statistics 等第三方组件独立安装。除非其再分发许可经过明确核对，否则不得塞入 Refrain 包。
+6. ESLyric、Playback Statistics 等第三方组件独立安装。除非其再分发许可经过明确核对，否则不得塞入 FooCrate 包。
 
-步骤 03 的包只包含根目录下的 `foo_refrain.dll`。foobar2000 x64 会把包内容解压到 `profile/user-components-x64/foo_refrain/`，因此包内不得再增加 `x64/` 目录；否则 DLL 会落到多余的嵌套目录而无法加载。SDK 构建会输出临时 `shared.dll` 以产生与 foobar2000 自带 `shared.dll` 匹配的导入库，但打包和部署脚本不会复制该临时 DLL。
+步骤 03 的包只包含根目录下的 `foo_crate.dll`。foobar2000 x64 会把包内容解压到 `profile/user-components-x64/foo_crate/`，因此包内不得再增加 `x64/` 目录；否则 DLL 会落到多余的嵌套目录而无法加载。SDK 构建会输出临时 `shared.dll` 以产生与 foobar2000 自带 `shared.dll` 匹配的导入库，但打包和部署脚本不会复制该临时 DLL。
 
 ## 7. 环境复核命令原则
 

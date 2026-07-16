@@ -8,13 +8,13 @@
 
 ## 任务目标
 
-让用户在播放列表较多时按名称快速收窄左栏，同时从底部左侧打开熟悉的 foobar2000 原生 Album List。歌曲搜索继续使用 foobar2000 的 `Ctrl+F`，Refrain 不重复实现或改变它。
+让用户在播放列表较多时按名称快速收窄左栏，同时从底部左侧打开熟悉的 foobar2000 原生 Album List。歌曲搜索继续使用 foobar2000 的 `Ctrl+F`，FooCrate 不重复实现或改变它。
 
 > 最新产品边界（2026-07-14）：本任务当时实现并验收的 Playlist Filter 已在任务 15 完整删除，不是隐藏。下面关于 Filter 的内容只保留为历史实施与验收记录；当前有效规则见模块规格 0.3。`Ctrl+F` 与原生 Album List 入口继续保留。
 
 ## 明确不做
 
-- 不实现 Refrain 歌曲搜索、搜索结果播放列表或搜索历史。
+- 不实现 FooCrate 歌曲搜索、搜索结果播放列表或搜索历史。
 - 不接管 `Ctrl+F`，不改变用户的 foobar2000 快捷键配置。
 - 不嵌入或重写 Album List，不加入 ReFacets、JS Smooth Browser 或第二份媒体库。
 - 不在本任务制作最终图标、颜色和精确间距。
@@ -73,7 +73,7 @@
 - 2026-07-14：只读确认 Foobox 底部 `LibBtn` 调用 `Library/Album List`；`jsspm.js` 把列表名称 Filter 与歌曲搜索分开；SDK 支持正式命令查找、执行和失败返回。
 - 2026-07-14：名称 Filter 使用原生 Windows 编辑框实现，加入仅按钮清除、无匹配、实时外部变化、筛选期禁止重排/空白建表及 `Ctrl+F` 快捷键转交；Album List 使用正式主菜单命令查找与执行，缺失时明确提示。
 - 2026-07-14：修复 Filter 每次文本变化都无条件取消重命名、进而把焦点移回主面板的问题；现在仅在重命名编辑器确实存在时取消重命名，Filter 可在任意输入法下连续输入，并移除 Esc 清空行为。
-- 2026-07-14：焦点修复后 `x64 Debug`、`x64 Release` 均在 `/W4 /WX` 下构建成功；Debug/Release 各 9/9 自动测试通过。组件包 `dist/Refrain-0.1.0.fb2k-component` 已重新生成，SHA-256 为 `D9800137A1C264771334FB77BD09AF69AADB58AB7E723A19D44F14CA2B248BCF`。
+- 2026-07-14：焦点修复后 `x64 Debug`、`x64 Release` 均在 `/W4 /WX` 下构建成功；Debug/Release 各 9/9 自动测试通过。组件包 `dist/FooCrate-0.1.0.fb2k-component` 已重新生成，SHA-256 为 `D9800137A1C264771334FB77BD09AF69AADB58AB7E723A19D44F14CA2B248BCF`。
 - 2026-07-14：修复后的 Release DLL 已只部署到 `.local/foobar-dev`，构建与部署 DLL SHA-256 同为 `3D24BEC4CA071C743C07FE3C056ABD3662F64FB1BCC3065C011C41D62988D9EE`；等待用户人工确认连续输入、输入法组合及仅 `×` 清空行为。
 - 2026-07-14：用户提供开发实例截图，确认 Filter 与左下 Playlist Workspace、Album Workspace、Album List、Settings 四按钮的布局无覆盖。为避免干扰用户前台游戏，后续可见检查由用户操作或提供截图，Codex 不循环抢占前台窗口。
 - 2026-07-14：用户复测确认任务 13 验收通过，包括任意输入法连续输入不丢焦点、Esc 保留筛选文字、仅 `×` 清空，以及此前已确认的其余筛选与 Album List 行为；任务状态更新为已验收，等待用户提交。

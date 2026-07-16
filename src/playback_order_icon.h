@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace refrain {
+namespace foocrate {
 
 enum class PlaybackOrderIconKind {
     defaultOrder,
@@ -28,4 +28,4 @@ enum class PlaybackOrderIconKind {
     }
 }
 
-} // namespace refrain
+} // namespace foocrate

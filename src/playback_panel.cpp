@@ -50,7 +50,7 @@
 #include <columns_ui-sdk-8.1.0/ui_extension.h>
 #include <foobar2000/SDK/foobar2000.h>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -139,9 +139,9 @@ class ShowNowPlayingCommand : public mainmenu_commands {
 public:
     t_uint32 get_command_count() override { return 1; }
     GUID get_command(t_uint32) override { return kShowNowPlayingCommandGuid; }
-    void get_name(t_uint32, pfc::string_base& out) override { out = "Refrain: Show Now Playing"; }
+    void get_name(t_uint32, pfc::string_base& out) override { out = "FooCrate: Show Now Playing"; }
     bool get_description(t_uint32, pfc::string_base& out) override {
-        out = "Show the real foobar2000 playing item in Refrain Playlist View";
+        out = "Show the real foobar2000 playing item in FooCrate Playlist View";
         return true;
     }
     GUID get_parent() override { return mainmenu_groups::view; }
@@ -151,8 +151,8 @@ public:
         if (!g_queueWindows.empty()) {
             PostMessage(g_queueWindows.front(), kShowNowPlayingMessage, 0, 0);
         } else {
-            MessageBoxW(nullptr, L"Open a Refrain panel before using Show Now Playing.",
-                L"Refrain", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(nullptr, L"Open a FooCrate panel before using Show Now Playing.",
+                L"FooCrate", MB_OK | MB_ICONINFORMATION);
         }
     }
 };
@@ -176,8 +176,8 @@ public:
         if (items.get_count() == 0) return;
         std::erase_if(g_queueWindows, [](HWND window) { return !IsWindow(window); });
         if (g_queueWindows.empty()) {
-            MessageBoxW(nullptr, L"Open a Refrain panel before using Show in Default Playlist.",
-                L"Refrain", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(nullptr, L"Open a FooCrate panel before using Show in Default Playlist.",
+                L"FooCrate", MB_OK | MB_ICONINFORMATION);
             return;
         }
         auto frozenTarget = items[0];
@@ -199,7 +199,7 @@ public:
     bool execute_default_action(t_size) override { return false; }
     void on_playlist_index_change(t_size index) override { m_index = index; }
     void on_playlist_remove() override { m_index = SIZE_MAX; }
-    void get_lock_name(pfc::string_base& out) override { out = "Refrain Album View"; }
+    void get_lock_name(pfc::string_base& out) override { out = "FooCrate Album View"; }
     void show_ui() override {}
     t_uint32 get_filter_mask() override {
         return filter_add | filter_remove | filter_reorder | filter_replace | filter_rename | filter_remove_playlist;
@@ -471,14 +471,14 @@ public:
     }
 
     const GUID& get_extension_guid() const override { return kPlaybackPanelGuid; }
-    void get_name(pfc::string_base& out) const override { out = "Refrain"; }
+    void get_name(pfc::string_base& out) const override { out = "FooCrate"; }
     void get_category(pfc::string_base& out) const override { out = "Panels"; }
     bool get_short_name(pfc::string_base& out) const override {
-        out = "Refrain";
+        out = "FooCrate";
         return true;
     }
     bool get_description(pfc::string_base& out) const override {
-        out = "Native Refrain playback shell and synchronized playback controls";
+        out = "Native FooCrate playback shell and synchronized playback controls";
         return true;
     }
     unsigned get_type() const override { return uie::type_panel | uie::type_layout; }
@@ -496,7 +496,7 @@ public:
     }
 
     uie::container_window_v3_config get_window_config() override {
-        auto config = uie::container_window_v3_config{L"Refrain.PlaybackShell", false, CS_DBLCLKS};
+        auto config = uie::container_window_v3_config{L"FooCrate.PlaybackShell", false, CS_DBLCLKS};
         config.window_styles |= WS_TABSTOP;
         config.class_cursor = IDC_ARROW;
         return config;
@@ -1584,7 +1584,7 @@ private:
             || !sameGuid(api->playlist_get_guid(m_activePlaylist), playlistGuid)
             || *revalidated >= m_playlistItems.get_count()
             || !sameTrack(m_playlistItems[*revalidated], target)) {
-            if (reportFailure) showStatus(L"The playlist changed before Refrain could show the track.");
+            if (reportFailure) showStatus(L"The playlist changed before FooCrate could show the track.");
             return false;
         }
         api->playlist_set_selection(m_activePlaylist, pfc::bit_array_true(), pfc::bit_array_false());
@@ -2167,14 +2167,14 @@ private:
         pfc::string8 name;
         if (playlist == SIZE_MAX) {
             for (t_size index = 0; index < api->get_playlist_count(); ++index) {
-                if (api->playlist_get_name(index, name) && std::strcmp(name.c_str(), "Refrain Album View") == 0
+                if (api->playlist_get_name(index, name) && std::strcmp(name.c_str(), "FooCrate Album View") == 0
                     && !api->playlist_lock_is_present(index)) {
                     playlist = index;
                     break;
                 }
             }
         }
-        if (playlist == SIZE_MAX) playlist = api->create_playlist("Refrain Album View", SIZE_MAX, SIZE_MAX);
+        if (playlist == SIZE_MAX) playlist = api->create_playlist("FooCrate Album View", SIZE_MAX, SIZE_MAX);
         if (playlist == SIZE_MAX) return SIZE_MAX;
         saved.bridgeGuid = playlist_manager_v5::get()->playlist_get_guid(playlist);
         writeAlbumBrowserSettings(saved);
@@ -2247,11 +2247,11 @@ private:
         auto api = playlist_manager::get();
         const auto bridge = ensureAlbumBridgePlaylist();
         if (bridge == SIZE_MAX) {
-            showStatus(L"Refrain Album View is locked by another component.");
+            showStatus(L"FooCrate Album View is locked by another component.");
             return;
         }
         if (!api->playlist_add_items(bridge, handles, pfc::bit_array_false())) {
-            showStatus(L"foobar2000 could not prepare Refrain Album View.");
+            showStatus(L"foobar2000 could not prepare FooCrate Album View.");
             return;
         }
         m_albumBridgePlaylist = bridge;
@@ -2272,7 +2272,7 @@ private:
             if (started) playback_control::get()->stop();
             endAlbumPlaybackSession();
             showStatus(started
-                ? L"Refrain could not protect its album playback list."
+                ? L"FooCrate could not protect its album playback list."
                 : L"foobar2000 could not start this album.");
             restoreAlbumSourceAfterPlaybackStart();
         }
@@ -2627,7 +2627,7 @@ private:
         auto api = playlist_manager::get();
         api->playlist_undo_backup(m_activePlaylist);
         if (!api->playlist_reorder_items(m_activePlaylist, order.data(), order.size())) {
-            MessageBoxW(get_wnd(), L"foobar2000 could not reorder this playlist.", L"Refrain", MB_OK | MB_ICONWARNING);
+            MessageBoxW(get_wnd(), L"foobar2000 could not reorder this playlist.", L"FooCrate", MB_OK | MB_ICONWARNING);
         }
         rebuildPlaylistSnapshot(true);
     }
@@ -2688,7 +2688,7 @@ private:
         if (!found || !mainmenu_commands::g_execute(command)) {
             MessageBoxW(get_wnd(),
                 L"foobar2000's Album List command is unavailable. Check that the Album List component is installed.",
-                L"Refrain", MB_OK | MB_ICONINFORMATION);
+                L"FooCrate", MB_OK | MB_ICONINFORMATION);
         }
     }
 
@@ -2792,10 +2792,10 @@ private:
         } catch (const std::exception& error) {
             const auto message = L"foobar2000 could not switch the output device.\r\n\r\n"
                 + utf8ToWide(error.what());
-            MessageBoxW(wnd, message.c_str(), L"Refrain - Output Device", MB_OK | MB_ICONERROR);
+            MessageBoxW(wnd, message.c_str(), L"FooCrate - Output Device", MB_OK | MB_ICONERROR);
         } catch (...) {
             MessageBoxW(wnd, L"foobar2000 could not switch the output device.",
-                L"Refrain - Output Device", MB_OK | MB_ICONERROR);
+                L"FooCrate - Output Device", MB_OK | MB_ICONERROR);
         }
     }
 
@@ -2997,7 +2997,7 @@ private:
         }
         if (!api->reorder(order.data(), order.size())) {
             MessageBoxW(get_wnd(), L"foobar2000 could not reorder these playlists.",
-                L"Refrain", MB_OK | MB_ICONWARNING);
+                L"FooCrate", MB_OK | MB_ICONWARNING);
         }
         refreshPlaylistBrowserSnapshot();
     }
@@ -3091,7 +3091,7 @@ private:
         const auto duplicate = utf8.empty() ? SIZE_MAX : api->find_playlist(utf8.c_str(), utf8.size());
         if (name.empty() || (duplicate != SIZE_MAX && duplicate != target)) {
             MessageBoxW(get_wnd(), name.empty() ? L"Playlist name cannot be empty."
-                : L"A playlist with this name already exists.", L"Refrain", MB_OK | MB_ICONWARNING);
+                : L"A playlist with this name already exists.", L"FooCrate", MB_OK | MB_ICONWARNING);
             m_playlistRenameCommitting = false;
             SetFocus(m_playlistRenameEdit);
             SendMessageW(m_playlistRenameEdit, EM_SETSEL, 0, -1);
@@ -3101,7 +3101,7 @@ private:
                 && (api->playlist_lock_get_filter_mask(target) & playlist_lock::filter_rename) != 0)
             || !api->playlist_rename(target, utf8.c_str(), utf8.size())) {
             MessageBoxW(get_wnd(), L"The playlist changed or rejected this name.",
-                L"Refrain", MB_OK | MB_ICONWARNING);
+                L"FooCrate", MB_OK | MB_ICONWARNING);
             m_playlistRenameCommitting = false;
             SetFocus(m_playlistRenameEdit);
             return;
@@ -3133,7 +3133,7 @@ private:
         }
         if (warning) message += L"\r\nThis includes the active, playing, or default playlist.";
         message += L"\r\nAudio files will not be deleted.";
-        if (MessageBoxW(get_wnd(), message.c_str(), L"Refrain", MB_YESNO | MB_ICONWARNING
+        if (MessageBoxW(get_wnd(), message.c_str(), L"FooCrate", MB_YESNO | MB_ICONWARNING
                 | MB_DEFBUTTON2) != IDYES) return;
         auto api = playlist_manager_v5::get();
         pfc::bit_array_bittable mask;
@@ -3151,7 +3151,7 @@ private:
         }
         if (!any || !api->remove_playlists(mask)) {
             MessageBoxW(get_wnd(), L"No selected playlist could be deleted. A lock or external change may prevent it.",
-                L"Refrain", MB_OK | MB_ICONINFORMATION);
+                L"FooCrate", MB_OK | MB_ICONINFORMATION);
         }
         refreshPlaylistBrowserSnapshot();
         repairDefaultPlaylist();
@@ -3198,7 +3198,7 @@ private:
             }
             if (factory.is_empty()) {
                 MessageBoxW(get_wnd(), L"This autoplaylist provider cannot recreate its rules, so Duplicate Rules is unavailable.",
-                    L"Refrain", MB_OK | MB_ICONINFORMATION);
+                    L"FooCrate", MB_OK | MB_ICONINFORMATION);
                 return false;
             }
             pfc::array_t<t_uint8> configuration;
@@ -3220,7 +3220,7 @@ private:
             refreshPlaylistBrowserSnapshot();
             return true;
         } catch (const std::exception& error) {
-            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Duplicate Rules",
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"FooCrate - Duplicate Rules",
                 MB_OK | MB_ICONWARNING);
             return false;
         }
@@ -3239,10 +3239,10 @@ private:
             autoplaylist_manager::get()->remove_client(currentSource);
             if (!playlist_manager::get()->remove_playlist(currentSource)) {
                 MessageBoxW(get_wnd(), L"The manual snapshot was created, but the original autoplaylist could not be removed.",
-                    L"Refrain", MB_OK | MB_ICONINFORMATION);
+                    L"FooCrate", MB_OK | MB_ICONINFORMATION);
             }
         } catch (const std::exception& error) {
-            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Freeze as Manual Playlist",
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"FooCrate - Freeze as Manual Playlist",
                 MB_OK | MB_ICONWARNING);
         }
         playlist_manager::get()->set_active_playlist(created);
@@ -3270,7 +3270,7 @@ private:
             refreshPlaylistBrowserSnapshot();
             return true;
         } catch (const std::exception& error) {
-            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"Refrain - Autoplaylist",
+            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"FooCrate - Autoplaylist",
                 MB_OK | MB_ICONWARNING);
             return false;
         }
@@ -3855,7 +3855,7 @@ private:
     bool sortActivePlaylist(const std::string& format, bool descending = false) {
         if (format.empty() || m_activePlaylist == SIZE_MAX || m_playlistItems.get_count() < 2) return true;
         if (!playlistCanReorder()) {
-            MessageBoxW(get_wnd(), L"This playlist does not allow item reordering.", L"Refrain", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(get_wnd(), L"This playlist does not allow item reordering.", L"FooCrate", MB_OK | MB_ICONINFORMATION);
             return false;
         }
         auto api = playlist_manager::get();
@@ -3873,7 +3873,7 @@ private:
             sorted = api->playlist_sort_by_format(m_activePlaylist, format.c_str(), false);
         }
         if (!sorted) {
-            MessageBoxW(get_wnd(), L"foobar2000 could not sort this playlist.", L"Refrain", MB_OK | MB_ICONWARNING);
+            MessageBoxW(get_wnd(), L"foobar2000 could not sort this playlist.", L"FooCrate", MB_OK | MB_ICONWARNING);
             return false;
         }
         rebuildPlaylistSnapshot(true);
@@ -4277,7 +4277,7 @@ private:
             return applyAccent(palette, fromColorRef(GetSysColor(COLOR_HIGHLIGHT)));
         case ColourMode::albumArtwork:
             return m_artworkTheme.value_or(presetPalette(ThemePreset::mist));
-        case ColourMode::refrainPreset:
+        case ColourMode::foocratePreset:
         default:
             return palette;
         }
@@ -4818,7 +4818,7 @@ private:
             }
             SetBkMode(paintStruct.hdc, TRANSPARENT);
             SetTextColor(paintStruct.hdc, RGB(error.red, error.green, error.blue));
-            DrawTextW(paintStruct.hdc, L"Refrain rendering unavailable", -1, &client,
+            DrawTextW(paintStruct.hdc, L"FooCrate rendering unavailable", -1, &client,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             EndPaint(wnd, &paintStruct);
             return;
@@ -7344,7 +7344,7 @@ private:
         auto api = playlist_manager_v5::get();
         pfc::string8 name;
         for (t_size index = 0; index < api->get_playlist_count(); ++index) {
-            if (!api->playlist_get_name(index, name) || std::strcmp(name.c_str(), "Refrain Album View") == 0) continue;
+            if (!api->playlist_get_name(index, name) || std::strcmp(name.c_str(), "FooCrate Album View") == 0) continue;
             playlistGuids.push_back(api->playlist_get_guid(index));
             const auto checked = m_albumSourceKind == AlbumSourceKind::playlist
                 && InlineIsEqualGUID(playlistGuids.back(), m_albumSourcePlaylistGuid);
@@ -7586,7 +7586,7 @@ private:
         case ControlId::next: api->userNext(); break;
         case ControlId::stop: api->userStop(); break;
         case ControlId::mute: api->userMute(); break;
-        case ControlId::settings: showRefrainPreferences(); break;
+        case ControlId::settings: showFooCratePreferences(); break;
         case ControlId::playlistWorkspace: setWorkspace(Workspace::playlist); break;
         case ControlId::albumWorkspace: setWorkspace(Workspace::album); break;
         case ControlId::albumList: openAlbumList(); break;
@@ -7739,7 +7739,7 @@ private:
             case ControlId::stop: m_tooltipText = L"Stop"; break;
             case ControlId::mute: m_tooltipText = m_state.muted() ? L"Unmute" : L"Mute"; break;
             case ControlId::volume: m_tooltipText = L"Volume (mouse wheel supported)"; break;
-            case ControlId::settings: m_tooltipText = L"Refrain settings"; break;
+            case ControlId::settings: m_tooltipText = L"FooCrate settings"; break;
             case ControlId::queueToggle: m_tooltipText = m_queueMode ? L"Show now playing" : L"Show playback queue"; break;
             case ControlId::playbackOrder: m_tooltipText = L"Playback Order: " + playbackOrderName(); break;
             case ControlId::outputDevice: m_tooltipText = L"Output Device: " + outputDeviceName(); break;
@@ -8035,4 +8035,4 @@ uie::window_factory<PlaybackPanel> g_playbackPanelFactory;
 
 void ensurePlaybackPanelLinked() noexcept {}
 
-} // namespace refrain
+} // namespace foocrate

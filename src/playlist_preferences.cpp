@@ -13,7 +13,7 @@
 #include <string>
 #include <utility>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 enum ControlId : int {
@@ -116,7 +116,7 @@ public:
                 api->playlist_undo_backup(playlist);
                 if (!api->playlist_sort_by_format(playlist, newGroup->sortFormat.c_str(), false)) {
                     MessageBoxW(m_window, L"foobar2000 could not sort the active playlist, so the grouping change was not applied.",
-                        L"Refrain", MB_OK | MB_ICONWARNING);
+                        L"FooCrate", MB_OK | MB_ICONWARNING);
                     return;
                 }
             }
@@ -549,12 +549,12 @@ private:
         else if (id == newProfile && notification == BN_CLICKED) { storeProfile(); LayoutProfile profile; profile.id = "custom.profile." + std::to_string(GetTickCount64()); profile.label = "New profile"; profile.groupId = m_draft.activeGroupId; for (const auto& column : m_draft.columns) profile.columns.push_back({column.id, column.visible, column.widthWeight}); m_draft.profiles.push_back(std::move(profile)); rebuildProfileCombo(); loadProfile(m_draft.profiles.size() - 1); }
         else if (id == copyProfile && notification == BN_CLICKED && m_profileIndex < m_draft.profiles.size()) { storeProfile(); auto copy = m_draft.profiles[m_profileIndex]; copy.id = "custom.profile." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; m_draft.profiles.push_back(std::move(copy)); rebuildProfileCombo(); loadProfile(m_draft.profiles.size() - 1); }
         else if ((id == profileUp || id == profileDown) && m_profileIndex < m_draft.profiles.size()) { storeProfile(); const auto target = static_cast<std::ptrdiff_t>(m_profileIndex) + (id == profileUp ? -1 : 1); if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.profiles.size())) { std::swap(m_draft.profiles[m_profileIndex], m_draft.profiles[static_cast<std::size_t>(target)]); m_profileIndex = static_cast<std::size_t>(target); rebuildProfileCombo(); loadProfile(m_profileIndex); } }
-        else if (id == deleteProfile && notification == BN_CLICKED && m_profileIndex < m_draft.profiles.size() && !m_draft.profiles[m_profileIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this layout profile? Assigned playlists will use Default.", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.profiles[m_profileIndex].id; std::erase_if(m_draft.assignments, [&](const auto& a){ return a.profileId == removed; }); m_draft.profiles.erase(m_draft.profiles.begin() + static_cast<std::ptrdiff_t>(m_profileIndex)); rebuildProfileCombo(); loadProfile(0); } }
+        else if (id == deleteProfile && notification == BN_CLICKED && m_profileIndex < m_draft.profiles.size() && !m_draft.profiles[m_profileIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this layout profile? Assigned playlists will use Default.", L"FooCrate", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.profiles[m_profileIndex].id; std::erase_if(m_draft.assignments, [&](const auto& a){ return a.profileId == removed; }); m_draft.profiles.erase(m_draft.profiles.begin() + static_cast<std::ptrdiff_t>(m_profileIndex)); rebuildProfileCombo(); loadProfile(0); } }
         else if (id == groupPreset && notification == CBN_SELCHANGE) { storeGroup(); const auto index = static_cast<std::size_t>(SendMessageW(m_groupCombo, CB_GETCURSEL, 0, 0)); m_draft.activeGroupId = m_draft.groups[index].id; loadGroup(index); }
         else if (id == newGroup && notification == BN_CLICKED) { auto group = defaultGroupDefinitions().front(); group.id = "custom.group." + std::to_string(GetTickCount64()); group.label = "New group"; group.builtIn = false; m_draft.groups.push_back(std::move(group)); rebuildGroupCombo(); loadGroup(m_draft.groups.size() - 1); }
         else if (id == copyGroup && notification == BN_CLICKED) { storeGroup(); auto copy = m_draft.groups[m_groupIndex]; copy.id = "custom.group." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; m_draft.groups.push_back(std::move(copy)); m_draft.activeGroupId = m_draft.groups.back().id; rebuildGroupCombo(); loadGroup(m_draft.groups.size() - 1); }
         else if ((id == groupUp || id == groupDown) && m_groupIndex < m_draft.groups.size()) { storeGroup(); const auto target = static_cast<std::ptrdiff_t>(m_groupIndex) + (id == groupUp ? -1 : 1); if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.groups.size())) { std::swap(m_draft.groups[m_groupIndex], m_draft.groups[static_cast<std::size_t>(target)]); m_groupIndex = static_cast<std::size_t>(target); rebuildGroupCombo(); loadGroup(m_groupIndex); } }
-        else if (id == deleteGroup && notification == BN_CLICKED && m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this group definition?", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.groups[m_groupIndex].id; m_draft.groups.erase(m_draft.groups.begin() + static_cast<std::ptrdiff_t>(m_groupIndex)); if (m_draft.activeGroupId == removed) m_draft.activeGroupId = "builtin.album.simple"; for (auto& p : m_draft.profiles) if (p.groupId == removed) p.groupId = "builtin.album.simple"; rebuildGroupCombo(); loadGroup(0); } }
+        else if (id == deleteGroup && notification == BN_CLICKED && m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this group definition?", L"FooCrate", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.groups[m_groupIndex].id; m_draft.groups.erase(m_draft.groups.begin() + static_cast<std::ptrdiff_t>(m_groupIndex)); if (m_draft.activeGroupId == removed) m_draft.activeGroupId = "builtin.album.simple"; for (auto& p : m_draft.profiles) if (p.groupId == removed) p.groupId = "builtin.album.simple"; rebuildGroupCombo(); loadGroup(0); } }
         else if ((id == autoCollapse || id == collapseDefault) && notification == BN_CLICKED) notifyChanged();
         else if (id == groupPreset && notification == CBN_EDITCHANGE) {
             if (m_groupIndex < m_draft.groups.size() && !m_draft.groups[m_groupIndex].builtIn)
@@ -564,7 +564,7 @@ private:
         else if (id == newColumn && notification == BN_CLICKED) { ColumnDefinition column{"custom.column." + std::to_string(GetTickCount64()), "New column", "$if2(%title%,$filename_ext(%path%))", "", "", ColumnAlignment::leading, true, 800, false, false}; m_draft.columns.push_back(std::move(column)); rebuildColumnList(); loadColumn(m_draft.columns.size() - 1); }
         else if (id == columnUp || id == columnDown) { storeColumn(); const auto direction = id == columnUp ? -1 : 1; const auto target = static_cast<std::ptrdiff_t>(m_columnIndex) + direction; if (target >= 0 && target < static_cast<std::ptrdiff_t>(m_draft.columns.size()) && !m_draft.columns[m_columnIndex].cover && !m_draft.columns[static_cast<std::size_t>(target)].cover) { std::swap(m_draft.columns[m_columnIndex], m_draft.columns[static_cast<std::size_t>(target)]); m_columnIndex = static_cast<std::size_t>(target); rebuildColumnList(); loadColumn(m_columnIndex); } }
         else if (id == copyColumn && notification == BN_CLICKED) { storeColumn(); auto copy = m_draft.columns[m_columnIndex]; copy.id = "custom.column." + std::to_string(GetTickCount64()); copy.label += " (copy)"; copy.builtIn = false; copy.cover = false; m_draft.columns.push_back(std::move(copy)); rebuildColumnList(); loadColumn(m_draft.columns.size() - 1); }
-        else if (id == deleteColumn && notification == BN_CLICKED && m_columnIndex < m_draft.columns.size() && !m_draft.columns[m_columnIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this column definition?", L"Refrain", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.columns[m_columnIndex].id; m_draft.columns.erase(m_draft.columns.begin() + static_cast<std::ptrdiff_t>(m_columnIndex)); for (auto& p : m_draft.profiles) std::erase_if(p.columns, [&](const auto& c){ return c.columnId == removed; }); rebuildColumnList(); loadColumn(0); } }
+        else if (id == deleteColumn && notification == BN_CLICKED && m_columnIndex < m_draft.columns.size() && !m_draft.columns[m_columnIndex].builtIn) { if (MessageBoxW(m_window, L"Delete this column definition?", L"FooCrate", MB_YESNO | MB_ICONWARNING) == IDYES) { const auto removed = m_draft.columns[m_columnIndex].id; m_draft.columns.erase(m_draft.columns.begin() + static_cast<std::ptrdiff_t>(m_columnIndex)); for (auto& p : m_draft.profiles) std::erase_if(p.columns, [&](const auto& c){ return c.columnId == removed; }); rebuildColumnList(); loadColumn(0); } }
         else if (notification == EN_CHANGE || notification == CBN_SELCHANGE) notifyChanged();
     }
     bool onNotify(const NMHDR& header) {
@@ -607,4 +607,4 @@ public:
 preferences_page_factory_t<PlaylistSettingsPage> g_playlistSettingsPageFactory;
 
 } // namespace
-} // namespace refrain
+} // namespace foocrate

@@ -1,14 +1,14 @@
-# 017-重构 Refrain 设置菜单与配置界面
+# 017-重构 FooCrate 设置菜单与配置界面
 
 - 状态：已验收
 - 对应规格：[`../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md`](../../specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md) 0.4（已批准）
 - 前置任务：[`../016-实现深浅主题与强调色系统/README.md`](../016-实现深浅主题与强调色系统/README.md)（已提交为 `bfcd5a4 实现深浅主题与强调色系统`）
-- Fork 提交标题：`重构 Refrain 设置菜单与配置界面`
+- Fork 提交标题：`重构 FooCrate 设置菜单与配置界面`
 - 最后更新：2026-07-15
 
 ## 任务目标
 
-单独重新审视 Refrain 的全部设置入口和设置页，不把它当作 DPI 修补。用户可以逐项决定哪些设置保留、新增、减少、合并或改名，再共同确定导航、分区、操作按钮和编辑区域布局。最终页面在常用窗口尺寸和 100%/125%/150% 缩放下都能完整阅读和操作，并保持既有设置数据、Apply/Cancel/Reset 和主题预览语义。
+单独重新审视 FooCrate 的全部设置入口和设置页，不把它当作 DPI 修补。用户可以逐项决定哪些设置保留、新增、减少、合并或改名，再共同确定导航、分区、操作按钮和编辑区域布局。最终页面在常用窗口尺寸和 100%/125%/150% 缩放下都能完整阅读和操作，并保持既有设置数据、Apply/Cancel/Reset 和主题预览语义。
 
 ## 当前截图证据
 
@@ -33,7 +33,7 @@
 
 ## 中文程序逻辑
 
-1. 程序从现有主 Refrain、Playlist View 和 Playlist Browser Preferences 页面建立唯一设置项清单，记录字段身份、默认值、当前入口、依赖关系和保存位置。
+1. 程序从现有主 FooCrate、Playlist View 和 Playlist Browser Preferences 页面建立唯一设置项清单，记录字段身份、默认值、当前入口、依赖关系和保存位置。
 2. 用户逐项决定保留、新增、删除、合并和改名后，规格为每个设置确定所属页面、分区、编辑控件、启用条件和帮助说明。
 3. 页面打开时读取已保存值形成草稿；跨分区导航只切换可见编辑区域，不丢失草稿，也不提前持久化。
 4. 新增、复制、删除、排序分组或列时只修改草稿。删除内置或正在使用对象时按批准规则禁止或确认，取消后恢复原状态。
@@ -93,21 +93,21 @@
 - 2026-07-15：用户要求把设置菜单作为独立任务处理；新增任务 17，原 DPI/无障碍、稳定性、打包和发布顺延为任务 18–21。任务 16 状态保持实现完成待验收。
 - 2026-07-15：确认任务 16 已提交为 `bfcd5a4 实现深浅主题与强调色系统`，工作树干净，任务 17 正式进入规格核对。用户已重置 `D:\Dev\foobar2000` 的 Foobox 范例，允许继续只读取证。
 - 2026-07-15：只读盘点 Foobox 主设置五页、右侧 InfoArt/Properties、Album Cover Browser、Playlist Manager 和 Search 的持久属性及菜单选项。确认 Foobox 同时暴露产品行为与脚本内部参数，不能逐项照搬。
-- 2026-07-15：创建设置规格 0.1，完整记录 Foobox 设置、Refrain 已有设置和建议处理。A 级建议包括响应式 Playlist View、完整 Group/Column 管理、详情区段、右栏跟随对象、列表密度、激活动作、封面 Fit/Fill 和专辑网格密度；Layout profiles、多封面轮播和顶部摘要格式等待用户决定。
+- 2026-07-15：创建设置规格 0.1，完整记录 Foobox 设置、FooCrate 已有设置和建议处理。A 级建议包括响应式 Playlist View、完整 Group/Column 管理、详情区段、右栏跟随对象、列表密度、激活动作、封面 Fit/Fill 和专辑网格密度；Layout profiles、多封面轮播和顶部摘要格式等待用户决定。
 - 2026-07-15：用户批准 Group/Column 的完整管理操作：New、Duplicate、Move up、Move down、Delete；内置项保持不可删除，用户项删除前明确确认。
 - 2026-07-15：用户批准长标题格式大编辑区与原位错误；Track Details 五类区段显隐；Activate track 先实现后体验决定；Album tile size 三档由实现确定；Front/Back/Disc/Artist 多封面轮播必须加入。
 - 2026-07-15：用户最初冻结全局封面规则为等比 Fill；随后在 Playlist View 实机校准时明确把组封面改为完整等比显示。当前规则为 Album Browser/右侧大封面 Fill，Playlist View Cover 完整显示；全部绝不拉伸且不暴露开关。
 - 2026-07-15：曲目行布局暂定 Compact / Standard；若实现 Foobox 式 Secondary display format，则第三档改为 Two-line。右栏跟随和响应式重排等待解释后决定；分组展开时 2 DIP 分隔线与当前详细组头作为候选，不增加任意高度数值。
-- 2026-07-15：用户批准 `Track row layout: Compact / Standard / Two-line`，Two-line 的默认附加字段与 Foobox 一致并由 Refrain C++ 独立实现；批准 Playlist View 按宽度响应式重排；批准 Right panel follows 的完整行为并固定动态主题继续跟随播放项。
+- 2026-07-15：用户批准 `Track row layout: Compact / Standard / Two-line`，Two-line 的默认附加字段与 Foobox 一致并由 FooCrate C++ 独立实现；批准 Playlist View 按宽度响应式重排；批准 Right panel follows 的完整行为并固定动态主题继续跟随播放项。
 - 2026-07-15：用户用已归档的 `tasks/001-Foobox-Basic交互取证/screenshots/compact expanded分割线预览.jpg` 明确 Group header 两档：Detailed 展开/折叠均用当前 26 DIP 详细组头；Compact line 展开/折叠均以组文字开头、右字段结尾，中间绘制 2 DIP 横线，同时保留正常命中高度。
 - 2026-07-15：用户批准多封面轮播的行为和设置：Front/Back/Disc/Artist、默认开启、20 秒、缺失跳过；主题固定从 Front 或第一个可用来源取色。用户确认此前提出的七项说明已经全部回答。
 - 2026-07-15：用户批准完整 Layout profiles 与每播放列表分配；批准在 Advanced 区编辑 Now Playing summary format；批准 Album Browser 始终显示专辑总数而不增加开关。设置功能清单至此闭合，进入页面树与两层 profile 模型核对。
 - 2026-07-15：用户批准五页 Preferences 树、Playlist View 三标签页和“全局定义库 + profile 引用”两层模型，并授权开始实现；首轮先完成功能，随后依据用户截图校准超出页面部分的比例和尺寸。
-- 2026-07-15：完成首轮实现：设置版本升级到 6，Playlist View 配置升级为可迁移的 RPV2；Preferences 树拆为 Refrain、Now Playing & Details、Playlist View、Browsers、Dependencies 五页，Playlist View 提供 Layout profiles / Groups / Columns 三标签页及完整增删、复制、排序、确认删除和原位格式错误。
+- 2026-07-15：完成首轮实现：设置版本升级到 6，Playlist View 配置升级为可迁移的 RPV2；Preferences 树拆为 FooCrate、Now Playing & Details、Playlist View、Browsers、Dependencies 五页，Playlist View 提供 Layout profiles / Groups / Columns 三标签页及完整增删、复制、排序、确认删除和原位格式错误。
 - 2026-07-15：运行行为已接入 Play / Add to queue、右栏跟随、五类 Track Details 显隐、Compact / Standard / Two-line、Detailed / Compact line、每播放列表 profile、三档专辑网格、专辑总数、多封面轮播与可编辑摘要格式；封面均保持比例，Playlist View 的完整显示例外由后续实机校准补充，播放中主题取色不随右栏选择改变。
 - 2026-07-15：Debug 与 Release 均构建成功；两种配置下 11/11 自动测试通过。Release DLL 已部署到 `.local/foobar-dev`，等待用户提供设置页溢出截图后校准比例和尺寸。
 - 2026-07-15：按实机反馈取消独立 `Browsers` Preferences 子页，并取消 Playlist View 的独立 Columns 标签页；`Default playlist` 与 `Album tile size` 改放到 Cover Browser 正式命名的 `Album Source Selector` 行最右侧，以固定宽度连续下拉栏直接显示和修改当前值。
-- 2026-07-15：用户截图确认 Compact line 的横线会穿过长标题和右侧 Genre/Year。只读核对 Foobox `WSHplaylist.js` 后确认其核心是先测量左右字段再把横线填入中间剩余空间；Refrain 移除“字符数 × 7、最多 300 DIP”和“右栏固定 82 DIP”两项估算，改用 DirectWrite 精确测量、固定两端留白、空间不足不画线，并把左附加字段改为次要文字色。
+- 2026-07-15：用户截图确认 Compact line 的横线会穿过长标题和右侧 Genre/Year。只读核对 Foobox `WSHplaylist.js` 后确认其核心是先测量左右字段再把横线填入中间剩余空间；FooCrate 移除“字符数 × 7、最多 300 DIP”和“右栏固定 82 DIP”两项估算，改用 DirectWrite 精确测量、固定两端留白、空间不足不画线，并把左附加字段改为次要文字色。
 - 2026-07-15：按用户首轮观感把 Compact line 横线改为严格 2 DIP 实心矩形；专辑名由 11 增至 13 DIP，专辑表演者由 11 增至 12 DIP，右侧辅助字段保持 11 DIP。若后续层级过强，用户预定回退方案为专辑名 12 DIP、表演者 11.5 DIP。
 - 2026-07-15：用户确认 DirectWrite 使用 DIP 字号后重新校准视觉层级：Compact line 专辑名增至 17 DIP、专辑表演者增至 13 DIP，横线减至严格 1 DIP，右侧辅助字段仍为 11 DIP，使专辑名而非横线成为视觉中心。
 - 2026-07-15：用户把 Playlist View Cover 明确为固定宽度的独立合并区域：右侧数据区的组头、曲目、焦点和拖放横线不得进入 Cover；两区使用贯穿表头与列表体的纵向分隔线。Playlist View Cover 同时成为全局裁切规则的明确例外，使用完整等比显示、居中和主题底色留白，不能裁切或拉伸。
@@ -116,22 +116,22 @@
 - 2026-07-15：用户第三轮截图要求正常窗口下尽可能完整显示 Playlist View 专辑标题。实现修正 DirectWrite 测量框缺少字形边缘余量导致的错误省略，并把组头空间优先级固定为“专辑标题最高、表演者最多约 22%、右侧字段最多约 18%、横线最低”；整体页面真正缩窄时才逐级裁切。
 - 2026-07-15：用户开始校准 Now Playing Panel Artwork View：右键可在 Front Cover / Back Cover / Disc / Artist 间手动切换，缺失项禁用；`Pin current artwork` 暂停轮播，取消后恢复设置中的开关、来源和默认 20 秒间隔。后台改为探测全部来源，自动轮播仍只使用设置勾选项。Track Title 行同时锁定为歌名/文件名回退，原 Advanced 两行摘要兼容迁移为只控制第二行 Artist/Album。
 - 2026-07-15：用户验收清单第 1、2 项仍不通过：Now Playing 的 Playback statistics 越界，Groups 单行过厚；Layout profiles 使用下拉框导致排序结果不可见，删除与页面下滚冲突。规格升级到 0.4：详情区段改为 3+2 两行；Groups 使用更紧凑的 34 DIP 行节距；Profile 改为最多显示 5 行、可独立滚轮滚动的真实列表，并增加独立名称编辑框；整个设置页在高度不足时仍可外层滚动。Group 系统行为问题另行复现，本轮不猜测修复。
-- 2026-07-15：完成上述界面收敛。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新 Release 包写入 `dist/Refrain-0.1.0.fb2k-component`，SHA-256 为 `F40B95F33E2AF19CC41037C284C9F1E7E25CF3EF04254180B819E8D67A46E727`。等待用户实机检查两层滚动、五行 Profile 列表和紧凑 Groups 页面；Group 系统行为仍按用户决定留待后续单独复现。
-- 2026-07-15：用户完成最终实机检查，确认越界、Profile 五行列表与双层滚动、Move/Delete、Groups 紧凑布局及本任务其余功能均无问题，并明确宣布任务 17 验收通过。任务状态划为已验收，等待用户以 `重构 Refrain 设置菜单与配置界面` 提交 Fork。
-- 2026-07-15：用户提交 `e529b8d 重构 Refrain 设置菜单与配置界面` 后发现验收遗漏：Auto Playlist 切换 Group 会弹出“不允许重排”并拒绝应用。任务 17 暂时重新打开。根因是设置页 Apply 与 Playlist View 表头菜单都把 Group 切换错误地绑定为必须物理排序；修正规则为普通列表继续物理排序，只读/自动列表保留来源顺序并直接视觉分组。
-- 2026-07-15：上述两条入口均已修复，并新增模型回归检查，保证锁定 Auto Playlist 跳过物理排序但不阻止视觉 Group。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包为 `dist/Refrain-0.1.0.fb2k-component`，SHA-256 `A731521AD5D991209F00B78B4B873AFFB685094EF0B1C65FE9040F68718595CD`。等待用户复验 Auto Playlist 表头 Group、Preferences Apply、自动更新保持以及普通列表排序回归。
+- 2026-07-15：完成上述界面收敛。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新 Release 包写入 `dist/FooCrate-0.1.0.fb2k-component`，SHA-256 为 `F40B95F33E2AF19CC41037C284C9F1E7E25CF3EF04254180B819E8D67A46E727`。等待用户实机检查两层滚动、五行 Profile 列表和紧凑 Groups 页面；Group 系统行为仍按用户决定留待后续单独复现。
+- 2026-07-15：用户完成最终实机检查，确认越界、Profile 五行列表与双层滚动、Move/Delete、Groups 紧凑布局及本任务其余功能均无问题，并明确宣布任务 17 验收通过。任务状态划为已验收，等待用户以 `重构 FooCrate 设置菜单与配置界面` 提交 Fork。
+- 2026-07-15：用户提交 `e529b8d 重构 FooCrate 设置菜单与配置界面` 后发现验收遗漏：Auto Playlist 切换 Group 会弹出“不允许重排”并拒绝应用。任务 17 暂时重新打开。根因是设置页 Apply 与 Playlist View 表头菜单都把 Group 切换错误地绑定为必须物理排序；修正规则为普通列表继续物理排序，只读/自动列表保留来源顺序并直接视觉分组。
+- 2026-07-15：上述两条入口均已修复，并新增模型回归检查，保证锁定 Auto Playlist 跳过物理排序但不阻止视觉 Group。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包为 `dist/FooCrate-0.1.0.fb2k-component`，SHA-256 `A731521AD5D991209F00B78B4B873AFFB685094EF0B1C65FE9040F68718595CD`。等待用户复验 Auto Playlist 表头 Group、Preferences Apply、自动更新保持以及普通列表排序回归。
 - 2026-07-15：用户确认 Auto Playlist 分组修复通过，随后发现同一锁判断会在指针仍位于 Playlist View 内时取消整次拖拽。批准边界为 Auto Playlist 可作为只复制的拖拽来源，可拖到 Queue、其他普通列表或外部目标；只禁止同一 Auto Playlist 内部重排以及向 Auto Playlist 写入。
 - 2026-07-15：拖拽启动逻辑已拆分：可重排来源保持内部拖动，Auto Playlist 达到拖拽阈值后直接启动 OLE Copy；同源 Auto Playlist 目标被拒绝，外部 Move 也不再暴露。新增交互模型回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `4A1EC9304093711889EE4CBA4A12CA7711E4B9021B524B3EA75FC9F1589572B2`，等待用户复验 Queue、其他普通列表、同源禁止与普通列表内部重排。
-- 2026-07-15：用户进一步核对 Group 与排序语义。确认内置 `Album Artist / Album / Disc` 已按 Album Artist → Date/Year → Album → Disc → Track 排序，但 Refrain 新建 Auto Playlist 仍使用 Album → Disc → Track。两处现统一复用同一默认排序常量；已有 Auto Playlist 保持来源配置，由用户在 Properties 中按需修改，禁止静默迁移。
+- 2026-07-15：用户进一步核对 Group 与排序语义。确认内置 `Album Artist / Album / Disc` 已按 Album Artist → Date/Year → Album → Disc → Track 排序，但 FooCrate 新建 Auto Playlist 仍使用 Album → Disc → Track。两处现统一复用同一默认排序常量；已有 Auto Playlist 保持来源配置，由用户在 Properties 中按需修改，禁止静默迁移。
 - 2026-07-15：默认排序统一完成并加入回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `CF479C7B92ACCAE10E8E7EB4F8542EEC9B1987CB26D022188F43610800058082`。等待用户验证新建 Auto Playlist 的默认顺序，并在现有 Auto Playlist Properties 中按相同表达式调整一次。
 - 2026-07-15：用户截图发现 Playlist View 最后一行与底部播放控制栏重合。根因是可见容量额外计入一行部分行，且 Playlist Body 与播放栏分隔线共用同一底边。修正规则为只计算完整行，并在 1 DIP 播放栏分隔线上方结束 Playlist View、Playlist Browser 与其滚动轨道。
 - 2026-07-15：底边与完整行容量修复完成，并为 1 DIP 内容底边和整行容量增加回归检查。Debug/Release 完整构建成功，两种配置各 11/11 自动测试通过；最新包 SHA-256 为 `EE7E1456A0626E0BCB9C2B067BAB1F58653EA2706AAF71CAA46DB5635B16BE9A`，等待用户在 Two-line、Standard/Compact 和窗口缩放下复验最底行。
-- 2026-07-15：用户确认任务 17 及随后发现的 Auto Playlist 分组、拖拽、默认排序和 Playlist View 底边回归均已提交。Git 核对为 `e529b8d 重构 Refrain 设置菜单与配置界面`、`db55518 修正一些不在任务17里的界面错误`、`52a96ca 任务17完成`，工作树干净。任务 17 正式恢复为已验收，路线推进到任务 18 待讨论。
+- 2026-07-15：用户确认任务 17 及随后发现的 Auto Playlist 分组、拖拽、默认排序和 Playlist View 底边回归均已提交。Git 核对为 `e529b8d 重构 FooCrate 设置菜单与配置界面`、`db55518 修正一些不在任务17里的界面错误`、`52a96ca 任务17完成`，工作树干净。任务 17 正式恢复为已验收，路线推进到任务 18 待讨论。
 
 ## 改动文件
 
-- `tasks/017-重构Refrain设置菜单与配置界面/README.md`：新增任务范围、问题证据和未来核对步骤。
-- `specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md`：Foobox/Refrain 设置矩阵、推荐范围和页面信息架构草案。
+- `tasks/017-重构FooCrate设置菜单与配置界面/README.md`：新增任务范围、问题证据和未来核对步骤。
+- `specs/modules/SETTINGS_INFORMATION_ARCHITECTURE.md`：Foobox/FooCrate 设置矩阵、推荐范围和页面信息架构草案。
 - `tasks/README.md`：加入任务 17 入口。
 - `tasks/TODO.md`：插入任务 17 并顺延系统级质量与发布路线。
 - `src/now_playing_preferences.cpp`、`src/dependencies_preferences.cpp`：新增独立设置子页。

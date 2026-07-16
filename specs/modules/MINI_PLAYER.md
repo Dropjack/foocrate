@@ -8,14 +8,14 @@
 
 ## 1. 已批准概念
 
-Refrain 提供一个原生 C++ 独立 Mini Player 窗口，从主界面正式按钮进入。它复用 foobar2000 的真实播放状态、Refrain 主题、封面与播放命令，不创建第二套播放器。
+FooCrate 提供一个原生 C++ 独立 Mini Player 窗口，从主界面正式按钮进入。它复用 foobar2000 的真实播放状态、FooCrate 主题、封面与播放命令，不创建第二套播放器。
 
 支持两个可切换形态：
 
 - `Artwork`：播放条与封面同时显示；
 - `Compact`：隐藏封面，只保留紧凑播放条。
 
-Apple Music 可以作为尺寸、信息层级和动效参考，但最终图标与布局使用 Refrain 原创资产。
+Apple Music 可以作为尺寸、信息层级和动效参考，但最终图标与布局使用 FooCrate 原创资产。
 
 ## 2. 必须联动
 

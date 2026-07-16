@@ -20,7 +20,7 @@ GUID guid(unsigned value) {
 } // namespace
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
     const std::vector<PlaylistBrowserRow> rows{
         {guid(1), L"Manual", 4, PlaylistBrowserKind::manual},
         {guid(2), L"Automatic", 8, PlaylistBrowserKind::automatic},

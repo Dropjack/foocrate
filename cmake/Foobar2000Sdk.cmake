@@ -1,24 +1,24 @@
-set(REFRAIN_THIRD_PARTY_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party")
-cmake_path(NORMAL_PATH REFRAIN_THIRD_PARTY_DIR)
+set(FOOCRATE_THIRD_PARTY_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party")
+cmake_path(NORMAL_PATH FOOCRATE_THIRD_PARTY_DIR)
 
-set(REFRAIN_PFC_DIR "${REFRAIN_THIRD_PARTY_DIR}/pfc")
-set(REFRAIN_FOOBAR2000_DIR "${REFRAIN_THIRD_PARTY_DIR}/foobar2000")
-set(REFRAIN_COLUMNS_UI_SDK_DIR "${REFRAIN_THIRD_PARTY_DIR}/columns_ui-sdk-8.1.0")
-set(REFRAIN_LIBPPUI_DIR "${REFRAIN_THIRD_PARTY_DIR}/libPPUI")
+set(FOOCRATE_PFC_DIR "${FOOCRATE_THIRD_PARTY_DIR}/pfc")
+set(FOOCRATE_FOOBAR2000_DIR "${FOOCRATE_THIRD_PARTY_DIR}/foobar2000")
+set(FOOCRATE_COLUMNS_UI_SDK_DIR "${FOOCRATE_THIRD_PARTY_DIR}/columns_ui-sdk-8.1.0")
+set(FOOCRATE_LIBPPUI_DIR "${FOOCRATE_THIRD_PARTY_DIR}/libPPUI")
 
 foreach(required_path IN ITEMS
-  "${REFRAIN_PFC_DIR}/pfc.h"
-  "${REFRAIN_FOOBAR2000_DIR}/SDK/foobar2000.h"
-  "${REFRAIN_FOOBAR2000_DIR}/foobar2000_component_client/component_client.cpp"
-  "${REFRAIN_COLUMNS_UI_SDK_DIR}/ui_extension.h"
-  "${REFRAIN_LIBPPUI_DIR}/CListControl.h"
+  "${FOOCRATE_PFC_DIR}/pfc.h"
+  "${FOOCRATE_FOOBAR2000_DIR}/SDK/foobar2000.h"
+  "${FOOCRATE_FOOBAR2000_DIR}/foobar2000_component_client/component_client.cpp"
+  "${FOOCRATE_COLUMNS_UI_SDK_DIR}/ui_extension.h"
+  "${FOOCRATE_LIBPPUI_DIR}/CListControl.h"
 )
   if(NOT EXISTS "${required_path}")
     message(FATAL_ERROR "Required SDK file is missing: ${required_path}")
   endif()
 endforeach()
 
-set(REFRAIN_PFC_SOURCES
+set(FOOCRATE_PFC_SOURCES
   audio_math.cpp
   audio_sample.cpp
   base64.cpp
@@ -53,14 +53,14 @@ set(REFRAIN_PFC_SOURCES
   wildcard.cpp
   win-objects.cpp
 )
-list(TRANSFORM REFRAIN_PFC_SOURCES PREPEND "${REFRAIN_PFC_DIR}/")
+list(TRANSFORM FOOCRATE_PFC_SOURCES PREPEND "${FOOCRATE_PFC_DIR}/")
 
-add_library(refrain_pfc STATIC ${REFRAIN_PFC_SOURCES})
-target_include_directories(refrain_pfc SYSTEM PUBLIC "${REFRAIN_THIRD_PARTY_DIR}")
-target_compile_definitions(refrain_pfc PUBLIC _UNICODE UNICODE NOMINMAX)
-target_compile_options(refrain_pfc PRIVATE /W3 /permissive- /Zc:__cplusplus)
+add_library(foocrate_pfc STATIC ${FOOCRATE_PFC_SOURCES})
+target_include_directories(foocrate_pfc SYSTEM PUBLIC "${FOOCRATE_THIRD_PARTY_DIR}")
+target_compile_definitions(foocrate_pfc PUBLIC _UNICODE UNICODE NOMINMAX)
+target_compile_options(foocrate_pfc PRIVATE /W3 /permissive- /Zc:__cplusplus)
 
-set(REFRAIN_FOOBAR2000_SDK_SOURCES
+set(FOOCRATE_FOOBAR2000_SDK_SOURCES
   abort_callback.cpp
   advconfig.cpp
   album_art.cpp
@@ -126,29 +126,29 @@ set(REFRAIN_FOOBAR2000_SDK_SOURCES
   ui_element.cpp
   utility.cpp
 )
-list(TRANSFORM REFRAIN_FOOBAR2000_SDK_SOURCES PREPEND "${REFRAIN_FOOBAR2000_DIR}/SDK/")
+list(TRANSFORM FOOCRATE_FOOBAR2000_SDK_SOURCES PREPEND "${FOOCRATE_FOOBAR2000_DIR}/SDK/")
 
-add_library(refrain_foobar2000_sdk STATIC ${REFRAIN_FOOBAR2000_SDK_SOURCES})
-target_include_directories(refrain_foobar2000_sdk SYSTEM PUBLIC
-  "${REFRAIN_THIRD_PARTY_DIR}"
-  "${REFRAIN_FOOBAR2000_DIR}"
+add_library(foocrate_foobar2000_sdk STATIC ${FOOCRATE_FOOBAR2000_SDK_SOURCES})
+target_include_directories(foocrate_foobar2000_sdk SYSTEM PUBLIC
+  "${FOOCRATE_THIRD_PARTY_DIR}"
+  "${FOOCRATE_FOOBAR2000_DIR}"
 )
-target_compile_definitions(refrain_foobar2000_sdk PUBLIC _UNICODE UNICODE NOMINMAX)
-target_compile_options(refrain_foobar2000_sdk PRIVATE /W3 /permissive- /Zc:__cplusplus)
-target_link_libraries(refrain_foobar2000_sdk PUBLIC refrain_pfc)
+target_compile_definitions(foocrate_foobar2000_sdk PUBLIC _UNICODE UNICODE NOMINMAX)
+target_compile_options(foocrate_foobar2000_sdk PRIVATE /W3 /permissive- /Zc:__cplusplus)
+target_link_libraries(foocrate_foobar2000_sdk PUBLIC foocrate_pfc)
 
-add_library(refrain_component_client STATIC
-  "${REFRAIN_FOOBAR2000_DIR}/foobar2000_component_client/component_client.cpp"
+add_library(foocrate_component_client STATIC
+  "${FOOCRATE_FOOBAR2000_DIR}/foobar2000_component_client/component_client.cpp"
 )
-target_include_directories(refrain_component_client SYSTEM PUBLIC
-  "${REFRAIN_THIRD_PARTY_DIR}"
-  "${REFRAIN_FOOBAR2000_DIR}"
+target_include_directories(foocrate_component_client SYSTEM PUBLIC
+  "${FOOCRATE_THIRD_PARTY_DIR}"
+  "${FOOCRATE_FOOBAR2000_DIR}"
 )
-target_compile_definitions(refrain_component_client PUBLIC _UNICODE UNICODE NOMINMAX)
-target_compile_options(refrain_component_client PRIVATE /W3 /permissive- /Zc:__cplusplus)
-target_link_libraries(refrain_component_client PUBLIC refrain_foobar2000_sdk refrain_pfc)
+target_compile_definitions(foocrate_component_client PUBLIC _UNICODE UNICODE NOMINMAX)
+target_compile_options(foocrate_component_client PRIVATE /W3 /permissive- /Zc:__cplusplus)
+target_link_libraries(foocrate_component_client PUBLIC foocrate_foobar2000_sdk foocrate_pfc)
 
-set(REFRAIN_SHARED_SOURCES
+set(FOOCRATE_SHARED_SOURCES
   audio_math.cpp
   crash_info.cpp
   filedialogs.cpp
@@ -163,15 +163,15 @@ set(REFRAIN_SHARED_SOURCES
   utf8api.cpp
   Utility.cpp
 )
-list(TRANSFORM REFRAIN_SHARED_SOURCES PREPEND "${REFRAIN_FOOBAR2000_DIR}/shared/")
+list(TRANSFORM FOOCRATE_SHARED_SOURCES PREPEND "${FOOCRATE_FOOBAR2000_DIR}/shared/")
 
-add_library(refrain_shared SHARED ${REFRAIN_SHARED_SOURCES})
-set_target_properties(refrain_shared PROPERTIES OUTPUT_NAME "shared")
-target_include_directories(refrain_shared SYSTEM PUBLIC
-  "${REFRAIN_THIRD_PARTY_DIR}"
-  "${REFRAIN_FOOBAR2000_DIR}"
+add_library(foocrate_shared SHARED ${FOOCRATE_SHARED_SOURCES})
+set_target_properties(foocrate_shared PROPERTIES OUTPUT_NAME "shared")
+target_include_directories(foocrate_shared SYSTEM PUBLIC
+  "${FOOCRATE_THIRD_PARTY_DIR}"
+  "${FOOCRATE_FOOBAR2000_DIR}"
 )
-target_compile_definitions(refrain_shared PRIVATE
+target_compile_definitions(foocrate_shared PRIVATE
   _CRT_SECURE_NO_WARNINGS
   SHARED_EXPORTS
   _WINDLL
@@ -179,33 +179,33 @@ target_compile_definitions(refrain_shared PRIVATE
   UNICODE
   NOMINMAX
 )
-target_compile_options(refrain_shared PRIVATE /W3 /permissive- /Zc:__cplusplus)
-target_link_libraries(refrain_shared PRIVATE
-  refrain_pfc
+target_compile_options(foocrate_shared PRIVATE /W3 /permissive- /Zc:__cplusplus)
+target_link_libraries(foocrate_shared PRIVATE
+  foocrate_pfc
   comctl32
   imagehlp
   uxtheme
   dbghelp
 )
 
-add_library(refrain_columns_ui_sdk STATIC
-  "${REFRAIN_COLUMNS_UI_SDK_DIR}/container_window_v3.cpp"
-  "${REFRAIN_COLUMNS_UI_SDK_DIR}/ui_extension.cpp"
-  "${REFRAIN_COLUMNS_UI_SDK_DIR}/win32_helpers.cpp"
+add_library(foocrate_columns_ui_sdk STATIC
+  "${FOOCRATE_COLUMNS_UI_SDK_DIR}/container_window_v3.cpp"
+  "${FOOCRATE_COLUMNS_UI_SDK_DIR}/ui_extension.cpp"
+  "${FOOCRATE_COLUMNS_UI_SDK_DIR}/win32_helpers.cpp"
 )
-target_include_directories(refrain_columns_ui_sdk SYSTEM PUBLIC
-  "${REFRAIN_THIRD_PARTY_DIR}"
-  "${REFRAIN_COLUMNS_UI_SDK_DIR}"
+target_include_directories(foocrate_columns_ui_sdk SYSTEM PUBLIC
+  "${FOOCRATE_THIRD_PARTY_DIR}"
+  "${FOOCRATE_COLUMNS_UI_SDK_DIR}"
 )
-target_compile_definitions(refrain_columns_ui_sdk PUBLIC _UNICODE UNICODE NOMINMAX)
-target_compile_options(refrain_columns_ui_sdk PRIVATE /W3 /permissive- /Zc:__cplusplus)
-target_link_libraries(refrain_columns_ui_sdk PUBLIC refrain_foobar2000_sdk refrain_pfc refrain_shared shlwapi)
+target_compile_definitions(foocrate_columns_ui_sdk PUBLIC _UNICODE UNICODE NOMINMAX)
+target_compile_options(foocrate_columns_ui_sdk PRIVATE /W3 /permissive- /Zc:__cplusplus)
+target_link_libraries(foocrate_columns_ui_sdk PUBLIC foocrate_foobar2000_sdk foocrate_pfc foocrate_shared shlwapi)
 
 # libPPUI requires WTL only when its concrete controls are built. Step 03 establishes
 # the stable include target; later UI code can opt into concrete sources as needed.
-add_library(refrain_libppui_sdk INTERFACE)
-target_include_directories(refrain_libppui_sdk SYSTEM INTERFACE
-  "${REFRAIN_THIRD_PARTY_DIR}"
-  "${REFRAIN_LIBPPUI_DIR}"
+add_library(foocrate_libppui_sdk INTERFACE)
+target_include_directories(foocrate_libppui_sdk SYSTEM INTERFACE
+  "${FOOCRATE_THIRD_PARTY_DIR}"
+  "${FOOCRATE_LIBPPUI_DIR}"
 )
-target_link_libraries(refrain_libppui_sdk INTERFACE refrain_pfc)
+target_link_libraries(foocrate_libppui_sdk INTERFACE foocrate_pfc)

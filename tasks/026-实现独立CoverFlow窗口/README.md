@@ -8,7 +8,7 @@
 
 ## 任务目标
 
-提供一个上部 CoverFlow、下部 Playlist View 的原生独立窗口，两部分围绕专辑双向联动，同时与主 Refrain 窗口共享真实播放列表和播放状态。
+提供一个上部 CoverFlow、下部 Playlist View 的原生独立窗口，两部分围绕专辑双向联动，同时与主 FooCrate 窗口共享真实播放列表和播放状态。
 
 ## 明确不做
 

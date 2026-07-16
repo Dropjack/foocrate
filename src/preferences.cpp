@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 enum ControlId : int {
@@ -200,7 +200,7 @@ private:
         m_colourModeLabel = addControl(L"STATIC", L"Colour mode:", SS_LEFT, 0);
         m_colourMode = addControl(L"COMBOBOX", nullptr,
             CBS_DROPDOWNLIST | WS_TABSTOP, ControlId::colourMode);
-        for (const auto* value : {L"Follow Windows", L"Refrain preset", L"Follow album artwork"}) {
+        for (const auto* value : {L"Follow Windows", L"FooCrate preset", L"Follow album artwork"}) {
             SendMessageW(m_colourMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
         }
         m_themeLabel = addControl(L"STATIC", L"Preset:", SS_LEFT, 0);
@@ -229,7 +229,7 @@ private:
                 BS_PUSHBUTTON | WS_TABSTOP, ControlId::dependencyButtonBase + static_cast<int>(index)));
         }
         m_dependencyNote = addControl(L"STATIC",
-            L"Refrain does not download or update these components. Newer detected versions are not treated as errors.",
+            L"FooCrate does not download or update these components. Newer detected versions are not treated as errors.",
             SS_LEFT, 0);
     }
 
@@ -330,7 +330,7 @@ private:
         values.rightColumnPermille = m_draft.rightColumnPermille;
         const auto colourMode = SendMessageW(m_colourMode, CB_GETCURSEL, 0, 0);
         values.colourMode = colourMode >= 0 && colourMode <= 2
-            ? static_cast<ColourMode>(colourMode) : ColourMode::refrainPreset;
+            ? static_cast<ColourMode>(colourMode) : ColourMode::foocratePreset;
         const auto preset = SendMessageW(m_themePreset, CB_GETCURSEL, 0, 0);
         values.themePreset = preset >= 0 && preset <= 3
             ? static_cast<ThemePreset>(preset) : ThemePreset::mist;
@@ -361,8 +361,8 @@ private:
     }
 
     void updateAppearanceControls() const {
-        EnableWindow(m_themePreset, m_draft.colourMode == ColourMode::refrainPreset);
-        EnableWindow(m_themeLabel, m_draft.colourMode == ColourMode::refrainPreset);
+        EnableWindow(m_themePreset, m_draft.colourMode == ColourMode::foocratePreset);
+        EnableWindow(m_themeLabel, m_draft.colourMode == ColourMode::foocratePreset);
     }
 
     void previewDraft() {
@@ -413,7 +413,7 @@ private:
 
 class SettingsPage : public preferences_page_v3 {
 public:
-    const char* get_name() override { return "Refrain"; }
+    const char* get_name() override { return "FooCrate"; }
     GUID get_guid() override { return kPreferencesPageGuid; }
     GUID get_parent_guid() override { return preferences_page::guid_display; }
     preferences_page_instance::ptr instantiate(HWND parent, preferences_page_callback::ptr callback) override {
@@ -425,18 +425,18 @@ class SettingsCommand : public mainmenu_commands {
 public:
     t_uint32 get_command_count() override { return 1; }
     GUID get_command(t_uint32) override { return kSettingsCommandGuid; }
-    void get_name(t_uint32, pfc::string_base& out) override { out = "Refrain Settings..."; }
+    void get_name(t_uint32, pfc::string_base& out) override { out = "FooCrate Settings..."; }
     bool get_description(t_uint32, pfc::string_base& out) override {
-        out = "Open Refrain settings in foobar2000 Preferences";
+        out = "Open FooCrate settings in foobar2000 Preferences";
         return true;
     }
     GUID get_parent() override { return mainmenu_groups::view; }
     t_uint32 get_sort_priority() override { return sort_priority_base; }
-    void execute(t_uint32, ctx_t) override { showRefrainPreferences(); }
+    void execute(t_uint32, ctx_t) override { showFooCratePreferences(); }
 };
 
 preferences_page_factory_t<SettingsPage> g_settingsPageFactory;
 mainmenu_commands_factory_t<SettingsCommand> g_settingsCommandFactory;
 
 } // namespace
-} // namespace refrain
+} // namespace foocrate

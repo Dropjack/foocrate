@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <utility>
 
-namespace refrain {
+namespace foocrate {
 
 struct VisibleRows {
     std::size_t first{};
@@ -68,4 +68,4 @@ struct VisibleRows {
     return static_cast<std::size_t>(fraction * static_cast<float>(maximumTop) + 0.5F);
 }
 
-} // namespace refrain
+} // namespace foocrate

@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 class Instance : public preferences_page_instance {
 public:
@@ -19,7 +19,7 @@ public:
         SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this)); m_original = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(m_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Instance::proc)));
         m_dpi = GetDpiForWindow(m_window); createFont();
         for (std::size_t i = 0; i < m_dependencies.size(); ++i) { const auto& d = m_dependencies[i]; auto text = d.displayName + L": " + (d.detected ? L"Detected" : L"Not detected"); if (!d.version.empty()) text += L" " + d.version; m_labels.push_back(add(L"STATIC", text.c_str(), SS_LEFT, 0)); m_buttons.push_back(add(L"BUTTON", L"Open official page", BS_PUSHBUTTON | WS_TABSTOP, 6000 + static_cast<int>(i))); }
-        m_note = add(L"STATIC", L"Read-only detection. Refrain never downloads or updates these components.", SS_LEFT, 0); layout();
+        m_note = add(L"STATIC", L"Read-only detection. FooCrate never downloads or updates these components.", SS_LEFT, 0); layout();
     }
     ~Instance() { if (m_ownedFont) DeleteObject(m_ownedFont); }
     t_uint32 get_state() override { return preferences_state::dark_mode_supported; } HWND get_wnd() override { return m_window; } void apply() override {} void reset() override {}

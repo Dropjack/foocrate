@@ -8,7 +8,7 @@
 
 ## 1. 用户目标
 
-用户平时可以播放任意普通或自动播放列表，同时把包含完整曲库的 `all` 等列表设为 Default Playlist。Refrain 必须既能找到“当前到底从哪里播放”，也能把同一首歌带到 Default Playlist 中，从而自然浏览它所在的完整专辑。
+用户平时可以播放任意普通或自动播放列表，同时把包含完整曲库的 `all` 等列表设为 Default Playlist。FooCrate 必须既能找到“当前到底从哪里播放”，也能把同一首歌带到 Default Playlist 中，从而自然浏览它所在的完整专辑。
 
 这是一套通用的“播放来源定位”和“资料库目的地定位”，不是复制曲目、创建临时列表或重建媒体库。
 
@@ -20,12 +20,12 @@
 2. 切换 Playlist Workspace 到该播放列表。
 3. 展开曲目所属分组，设置焦点与单项选择，并滚动到可见位置。
 4. 不重新开始播放、不 Seek、不改变播放顺序和列表内容。
-5. 如果播放来自隐藏的 `Refrain Album View` 桥接列表，不把该内部列表暴露给用户；优先在原 Album Source 播放列表查找，找不到再在 Default Playlist 查找，仍找不到时给出明确提示。
+5. 如果播放来自隐藏的 `FooCrate Album View` 桥接列表，不把该内部列表暴露给用户；优先在原 Album Source 播放列表查找，找不到再在 Default Playlist 查找，仍找不到时给出明确提示。
 
 入口包括：
 
 - 双击 Now Playing Header 中的 `Track Title`；
-- 稳定的 Refrain 主命令，供 foobar2000 快捷键系统绑定。
+- 稳定的 FooCrate 主命令，供 foobar2000 快捷键系统绑定。
 
 双击 `Artwork View` 不执行本命令。
 
@@ -38,15 +38,15 @@
 5. 不向 Default Playlist 插入曲目，不改变自动列表规则，不触发播放。
 6. 目标列表消失时先服从现有 Default Playlist 修复规则；曲目不在目标列表时显示 `Track is not in the Default Playlist`。
 
-入口为 foobar2000 原生 Track Actions 上下文命令。该命令以独立分组显示在 `Add to playback queue` 上方；Refrain 的 Now Playing Header、Playlist View 和 Album Track List 均打开完整的原生 Track Actions 菜单，不以自定义菜单隐藏原有命令。
+入口为 foobar2000 原生 Track Actions 上下文命令。该命令以独立分组显示在 `Add to playback queue` 上方；FooCrate 的 Now Playing Header、Playlist View 和 Album Track List 均打开完整的原生 Track Actions 菜单，不以自定义菜单隐藏原有命令。
 
 ## 3. Playlist View 恢复
 
-Refrain Preferences 新增默认开启的：
+FooCrate Preferences 新增默认开启的：
 
 `Restore Playlist View to last played track`
 
-Refrain 保存：
+FooCrate 保存：
 
 - 播放列表稳定 GUID；
 - 文件路径与子曲目身份；
@@ -58,7 +58,7 @@ Refrain 保存：
 
 1. 如果 foobar2000 已恢复真实播放，优先显示当前真实播放项。
 2. 如果没有播放，只恢复 Playlist View 到上次曲目附近，不擅自开始播放。
-3. 实际播放时间点由 foobar2000 自己的恢复能力负责；Refrain 不自动 Seek，也不维护第二套播放恢复开关。
+3. 实际播放时间点由 foobar2000 自己的恢复能力负责；FooCrate 不自动 Seek，也不维护第二套播放恢复开关。
 4. 此设置不改变 Album Cover Browser 的来源、专辑选择或滚动位置。
 5. 列表、曲目或分组已不存在时安全放弃对应层级，保留当前有效视图，不创建替代数据。
 

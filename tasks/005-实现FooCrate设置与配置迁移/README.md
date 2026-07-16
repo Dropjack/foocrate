@@ -1,15 +1,15 @@
-# 005 实现 Refrain 设置与配置迁移
+# 005 实现 FooCrate 设置与配置迁移
 
 - 状态：已验收
-- TODO 步骤：`05 实现 Refrain 设置与配置迁移`
-- Fork 提交标题：`实现 Refrain 设置与配置迁移`
+- TODO 步骤：`05 实现 FooCrate 设置与配置迁移`
+- Fork 提交标题：`实现 FooCrate 设置与配置迁移`
 - 前置提交：`abcb67b 已实现原生主界面外壳与播放控制`
 - 对应规格：[`../../specs/modules/SETTINGS_AND_MIGRATION.md`](../../specs/modules/SETTINGS_AND_MIGRATION.md)
 - 最后更新：2026-07-13
 
 ## 任务目标
 
-建立唯一、正式、可升级的 Refrain 设置入口。用户可以在 foobar2000 Preferences 中编辑设置，也可通过真实齿轮或稳定菜单命令进入；配置升级时保留已知设置，异常值安全回退。
+建立唯一、正式、可升级的 FooCrate 设置入口。用户可以在 foobar2000 Preferences 中编辑设置，也可通过真实齿轮或稳定菜单命令进入；配置升级时保留已知设置，异常值安全回退。
 
 ## 明确不做
 
@@ -20,7 +20,7 @@
 
 ## 中文程序逻辑
 
-1. 组件用稳定 GUID 注册 `Display > Refrain` Preferences 页面和 `View > Refrain Settings...` 命令；底部齿轮调用同一页面 GUID。
+1. 组件用稳定 GUID 注册 `Display > FooCrate` Preferences 页面和 `View > FooCrate Settings...` 命令；底部齿轮调用同一页面 GUID。
 2. 页面创建时读取并校验当前持久值，形成独立草稿。控件变化只通知 foobar2000 页面已改变，不立即写配置。
 3. `Apply` 写入三个稳定字段并通知所有存活面板；`Cancel` 由 foobar2000 直接销毁未应用草稿；`Reset` 只恢复草稿默认值。
 4. 配置读取先检查架构版本：旧版本按已知规则升级，非法枚举回退；未来版本不被旧代码降级或删除未知值。
@@ -41,13 +41,13 @@
 
 - 输入：配置模型和 foobar2000 Preferences/主菜单接口。
 - 动作：实现页面、Apply/Cancel/Reset、稳定命令和官方依赖入口。
-- 产物：`Display > Refrain` 页面与 `View > Refrain Settings...`。
+- 产物：`Display > FooCrate` 页面与 `View > FooCrate Settings...`。
 - 通过标准：取消不保存，应用立即生效，命令可由 foobar2000 绑定快捷键。
 - 状态：已完成
 
 ### 步骤 3：已实现控制栏接入
 
-- 输入：三项设置和存活 Refrain 面板。
+- 输入：三项设置和存活 FooCrate 面板。
 - 动作：接入剩余时间、工具提示与齿轮显隐，并处理运行时通知。
 - 产物：可见且可恢复的设置行为。
 - 通过标准：隐藏齿轮后仍能从 Preferences/菜单恢复；播放控制无回归。
@@ -73,10 +73,10 @@
 - 2026-07-13：前置步骤已提交为 `abcb67b`，开始 05 时工作树干净。
 - 2026-07-13：x64 Debug 与 Release 全量构建成功；自有代码继续使用 `/W4 /WX`，没有新增编译警告。
 - 2026-07-13：Debug/Release 均通过 `component_identity`、`playback_state`、`settings_model` 三项测试；新增覆盖默认值、版本 0 到 1、非法枚举修复、未来版本保护和剩余时间格式。
-- 2026-07-13：Release 安装包审计和模拟安装通过，包中只有根目录 `foo_refrain.dll`。最终 DLL SHA-256 为 `4D8C0556779C38E8A6FDB1A4B1B641A2D31070E560FEA2193E6EC1A9E8799D33`；安装包 SHA-256 为 `8B1CEA9AEC98D3A4B7F61650296BAD5FAA7D7682998D6AA26336082A5807C33A`。
+- 2026-07-13：Release 安装包审计和模拟安装通过，包中只有根目录 `foo_crate.dll`。最终 DLL SHA-256 为 `4D8C0556779C38E8A6FDB1A4B1B641A2D31070E560FEA2193E6EC1A9E8799D33`；安装包 SHA-256 为 `8B1CEA9AEC98D3A4B7F61650296BAD5FAA7D7682998D6AA26336082A5807C33A`。
 - 2026-07-13：所有本轮维护文本严格通过 UTF-8 无 BOM、LF 检查，`git diff --check` 无格式错误。
-- 2026-07-13：只部署到 `.local/foobar-dev/profile/user-components-x64/foo_refrain/`；最终开发进程 PID `31760` 实际加载该路径下唯一的最新 DLL，安装文件哈希与构建产物一致，进程保持运行且未产生新崩溃文件。检测到的 C 盘日常实例未被关闭或修改。
-- 2026-07-13：用户完成 Preferences、设置入口、持久化、依赖状态和控制栏回归检查，明确回复“检查没问题”；步骤 05 正式通过验收。后续设置随已实现模块增加，必要时在稳定 `Display > Refrain` 入口下按功能增加非空子页面。
+- 2026-07-13：只部署到 `.local/foobar-dev/profile/user-components-x64/foo_crate/`；最终开发进程 PID `31760` 实际加载该路径下唯一的最新 DLL，安装文件哈希与构建产物一致，进程保持运行且未产生新崩溃文件。检测到的 C 盘日常实例未被关闭或修改。
+- 2026-07-13：用户完成 Preferences、设置入口、持久化、依赖状态和控制栏回归检查，明确回复“检查没问题”；步骤 05 正式通过验收。后续设置随已实现模块增加，必要时在稳定 `Display > FooCrate` 入口下按功能增加非空子页面。
 
 ## 改动文件
 
@@ -90,11 +90,11 @@
 
 ## 人工验收
 
-1. 使用当前已经启动的 `.local/foobar-dev`，点击 Refrain 底部左侧齿轮；应直接打开 `File > Preferences > Display > Refrain`。
-2. 关闭 Preferences，再从 `File > Preferences > Display > Refrain` 手动进入；还应在 `View > Refrain Settings...` 找到同一稳定命令。
+1. 使用当前已经启动的 `.local/foobar-dev`，点击 FooCrate 底部左侧齿轮；应直接打开 `File > Preferences > Display > FooCrate`。
+2. 关闭 Preferences，再从 `File > Preferences > Display > FooCrate` 手动进入；还应在 `View > FooCrate Settings...` 找到同一稳定命令。
 3. 把 `Right-side time` 改为 `Remaining`，点击 `Apply`；播放有明确长度的歌曲，右侧时间应立即显示负号剩余时间。改回 `Total` 并应用，应恢复总时长。
 4. 取消 `Show control tooltips` 并应用；悬停控制按钮不再弹提示。重新勾选并应用，提示恢复。
-5. 取消 `Show settings button` 并应用；齿轮立即消失。不要关闭 Preferences，先确认其他播放按钮仍正常；随后仍可从当前页面重新勾选并应用。再测试隐藏后关闭页面，从 `File > Preferences > Display > Refrain` 或 `View > Refrain Settings...` 重新进入并恢复。
+5. 取消 `Show settings button` 并应用；齿轮立即消失。不要关闭 Preferences，先确认其他播放按钮仍正常；随后仍可从当前页面重新勾选并应用。再测试隐藏后关闭页面，从 `File > Preferences > Display > FooCrate` 或 `View > FooCrate Settings...` 重新进入并恢复。
 6. 修改任意选项但点击 `Cancel`；重新打开页面，确认未应用修改没有保存。点击 Preferences 的 `Reset page`，确认三个草稿值变为默认，但取消后旧设置仍保留；再次 Reset 并 Apply 才真正保存默认值。
 7. 在 Dependencies 中确认三项显示：Columns UI `3.5.0`、ESLyric `1.0.6.7`、Playback Statistics `3.1.10`（组件公开版本文案可能带附加文字）；本轮不要求点击官方链接，如点击应只打开浏览器，不触发下载或安装。
 8. 正常关闭并重启 `.local/foobar-dev`，确认已应用的时间、提示和齿轮设置保留；播放、暂停、切歌、停止、进度、静音和音量没有回归。

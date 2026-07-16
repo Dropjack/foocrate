@@ -17,7 +17,7 @@ void expect(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     const auto mist = presetPalette(ThemePreset::mist);
     const auto paper = presetPalette(ThemePreset::paper);

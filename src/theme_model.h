@@ -5,7 +5,7 @@
 #include <span>
 #include <optional>
 
-namespace refrain {
+namespace foocrate {
 
 enum class ThemePreset : std::int64_t {
     mist = 0,
@@ -16,7 +16,7 @@ enum class ThemePreset : std::int64_t {
 
 enum class ColourMode : std::int64_t {
     windows = 0,
-    refrainPreset = 1,
+    foocratePreset = 1,
     albumArtwork = 2,
 };
 
@@ -90,4 +90,4 @@ struct ThemePalette {
     std::uint32_t width, std::uint32_t height) noexcept;
 [[nodiscard]] double contrastRatio(RgbColor first, RgbColor second) noexcept;
 
-} // namespace refrain
+} // namespace foocrate

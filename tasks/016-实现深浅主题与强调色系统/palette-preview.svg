@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
   <rect width="1280" height="760" fill="#F7F7F5"/>
-  <text x="48" y="54" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="28" font-weight="600" fill="#202426">Refrain 主题方案 0.1</text>
+  <text x="48" y="54" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="28" font-weight="600" fill="#202426">FooCrate 主题方案 0.1</text>
   <text x="48" y="84" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="15" fill="#62696C">两套浅色 + 两套深色；每张卡依次展示背景、面板、表面、正文、次要文字、强调、默认列表与错误色。</text>
 
   <g transform="translate(48 116)">

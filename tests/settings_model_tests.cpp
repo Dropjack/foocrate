@@ -16,7 +16,7 @@ void expect(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     const auto defaults = defaultSettings();
     expect(defaults.timeDisplay == TimeDisplayMode::total, "default time mode must be total");
@@ -30,7 +30,7 @@ int main() {
     expect(defaults.rightHeaderPermille == 500, "right header must default to half height");
     expect(defaults.rightColumnPermille == 230, "right column must default to 23 percent");
     expect(defaults.themePreset == ThemePreset::mist, "theme must default to mist");
-    expect(defaults.colourMode == ColourMode::refrainPreset, "colour mode must default to Refrain preset");
+    expect(defaults.colourMode == ColourMode::foocratePreset, "colour mode must default to FooCrate preset");
 
     const auto firstRun = migrateSettings({0, 0, true, true, true, 0, false, 500, 230});
     expect(firstRun.versionToKeep == 8, "version zero must migrate to eight");
@@ -47,7 +47,7 @@ int main() {
     expect(invalid.values.rightHeaderPermille == 500, "invalid divider must fall back");
     expect(invalid.values.rightColumnPermille == 230, "invalid right column must fall back");
     expect(invalid.values.themePreset == ThemePreset::mist, "invalid theme must fall back to mist");
-    expect(invalid.values.colourMode == ColourMode::refrainPreset, "invalid colour mode must fall back");
+    expect(invalid.values.colourMode == ColourMode::foocratePreset, "invalid colour mode must fall back");
 
     const auto remaining = migrateSettings({kCurrentSettingsVersion, 1, true, false, false, 1, true, 640, 360, 3, 2});
     expect(remaining.values.timeDisplay == TimeDisplayMode::remaining, "remaining mode must survive");
@@ -87,15 +87,15 @@ int main() {
     expect(preservedResume.values.startupBehavior == StartupBehavior::resumePlayback,
         "resume playback must survive current settings");
 
-    const auto oldRefrain = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 0});
+    const auto oldFooCrate = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 0});
     const auto oldWindows = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 1});
     const auto oldColumns = migrateSettings({4, 0, true, true, true, 0, false, 500, 230, 0, 2});
-    expect(oldRefrain.values.colourMode == ColourMode::refrainPreset,
-        "version-four Refrain source must map to Refrain preset");
+    expect(oldFooCrate.values.colourMode == ColourMode::foocratePreset,
+        "version-four FooCrate source must map to FooCrate preset");
     expect(oldWindows.values.colourMode == ColourMode::windows,
         "version-four Windows source must map to Windows");
-    expect(oldColumns.values.colourMode == ColourMode::refrainPreset,
-        "removed Columns UI source must safely map to Refrain preset");
+    expect(oldColumns.values.colourMode == ColourMode::foocratePreset,
+        "removed Columns UI source must safely map to FooCrate preset");
 
     const auto future = migrateSettings({9, 77, false, true, true, 77, false, 999, 999});
     expect(future.versionToKeep == 9, "future version must not be downgraded");

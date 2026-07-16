@@ -17,7 +17,7 @@ void expect(bool value, const char* message) {
 } // namespace
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     expect(playlistDragStartMode(true) == PlaylistDragStartMode::internalReorder,
         "a reorderable playlist must begin with internal drag handling");

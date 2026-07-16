@@ -11,7 +11,7 @@ void expect(bool condition, const char* message) {
 }
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
     const std::vector<PlaylistGroupInput> input{
         {"A", "Album A", "2020", "Artist", "Rock"},
         {"A", "Album A", "2020", "Artist", "Rock"},

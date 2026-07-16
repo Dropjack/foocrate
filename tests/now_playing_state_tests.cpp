@@ -4,7 +4,7 @@
 #include <limits>
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     assert(normalizeRating(1.0) == 1);
     assert(normalizeRating(4.6) == 5);

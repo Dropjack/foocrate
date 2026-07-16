@@ -82,7 +82,7 @@
 
 ### 6.2 专辑身份与排序（已核准）
 
-- 专辑身份只使用歌曲自身的 foobar2000 元数据语义：规范化后的 `%album% + %album artist%`。不读取、不要求也不优先使用 MusicBrainz、在线数据库或 Refrain 私有 ID。
+- 专辑身份只使用歌曲自身的 foobar2000 元数据语义：规范化后的 `%album% + %album artist%`。不读取、不要求也不优先使用 MusicBrainz、在线数据库或 FooCrate 私有 ID。
 - `%album artist%` 采用 foobar2000 标准字段/回退语义；同一来源中 Album 与 Album Artist 相同的曲目就是同一专辑。Date/Year 不进入身份，因此不同年份或版本若这两个字段相同会按用户指定规则合并。
 - Disc Number 不进入专辑身份，因此多碟专辑合并为一张专辑；右侧按 Disc Number、Track Number、Title 排序。
 - 缺少 Album 的曲目不全部合并为一个未知专辑，而是各自形成 `Single` 项，身份附加真实 metadb 位置以避免碰撞。
@@ -131,15 +131,15 @@
 用户已经核准两个独立 Workspace 按钮、metadata-only 专辑身份、右侧只读智能结果视图，以及单一真实播放桥接列表。foobar2000 核心播放必须属于一个真实播放列表；SDK 不提供完全隐藏、仅由组件持有的播放列表上下文，因此实现分离“用户看到的只读 Album Track List”和“核心播放桥接列表”。
 
 - 浏览和单击专辑只更新 UI 中的只读 `Album Track List`，不改任何真实播放列表。
-- 用户双击封面/曲目或按 Enter 真正开始播放时，才创建或复用唯一真实播放列表 `Refrain Album View`，填入右侧当前可见曲目并锁定添加、删除和重排，然后从点击曲目开始播放。
-- 这个桥接列表会出现在 foobar2000/Columns UI 的原生播放列表 UI 中，但任务 12 的 Refrain `Playlist Browser` 将它隐藏，不占主视觉空间；它仍由 Refrain 通过稳定 GUID 识别、锁定并维护，不会按专辑创建多个列表。
+- 用户双击封面/曲目或按 Enter 真正开始播放时，才创建或复用唯一真实播放列表 `FooCrate Album View`，填入右侧当前可见曲目并锁定添加、删除和重排，然后从点击曲目开始播放。
+- 这个桥接列表会出现在 foobar2000/Columns UI 的原生播放列表 UI 中，但任务 12 的 FooCrate `Playlist Browser` 将它隐藏，不占主视觉空间；它仍由 FooCrate 通过稳定 GUID 识别、锁定并维护，不会按专辑创建多个列表。
 - 用户只浏览新专辑时，当前播放和桥接列表不变；真正播放新专辑时才停止/切换到新的有序内容。
-- 启动桥接播放后立即把 foobar2000 的活动播放列表恢复为进入 Album Workspace 前的来源 playlist GUID；播放列表与正在播放列表可以不同，因此返回 Playlist Workspace 时仍显示原来源，不显示 `Refrain Album View`。
+- 启动桥接播放后立即把 foobar2000 的活动播放列表恢复为进入 Album Workspace 前的来源 playlist GUID；播放列表与正在播放列表可以不同，因此返回 Playlist Workspace 时仍显示原来源，不显示 `FooCrate Album View`。
 - 来源为某播放列表时，桥接内容只包含该来源中匹配 Album + Album Artist 的曲目；来源为 Media Library 时才包含媒体库中的完整匹配专辑。
 - Album Workspace 只允许专辑内部顺序或随机播放，不允许随机专辑，也不允许从当前专辑自动跨到整个来源的其他歌曲。
 - 顺序模式保持 Disc Number、Track Number、Title 顺序；从第六首开始时前五首仍保留在桥接列表中，上一首可以回到第五首。
 - 随机模式只对当前右侧曲目生成一次不重复的会话顺序，点击曲目作为会话起点，其余曲目在本次会话内各播放一次；不写入或污染正式 Playback Queue。
-- 模式读取 foobar2000 当前 Playback Order：Random/Shuffle 类入口映射为专辑内随机一次，其他入口在本工作区映射为专辑内顺序。Refrain 不在步骤 11 增加第二套全局 Playback Order 控件；步骤 14 再决定主界面的正式入口。
+- 模式读取 foobar2000 当前 Playback Order：Random/Shuffle 类入口映射为专辑内随机一次，其他入口在本工作区映射为专辑内顺序。FooCrate 不在步骤 11 增加第二套全局 Playback Order 控件；步骤 14 再决定主界面的正式入口。
 - 专辑会话最后一首自然结束后直接停止。不会自动跳回来源播放列表继续播放，因为那会产生不明确的续播索引、重复和跨专辑行为。
 - 用户播放期间切回 Playlist Workspace 不终止 Album Playback Session；底部上一首/下一首仍只在桥接专辑范围内工作，直到播放结束或用户从其他真实播放列表启动新播放。
 
@@ -150,17 +150,17 @@
 - 2026-07-13：用户允许未来修改愿景；修改必须通过版本化规格完成，不静默扩大范围。
 - 2026-07-14：步骤 10 已提交为 `daaed39`，工作树干净，步骤 11 启动。
 - 2026-07-14：用户指定 Album Workspace 入口位于左下，临时图标可先由实现决定，选中状态必须显示灰底；规格升至 0.2。
-- 2026-07-14：只读复核 Foobox `jssb.js`，确认 Album-only 模式按 Album 排序，多碟按 Disc/Track 排列；Foobox 为媒体库播放创建/复用 `Library View` 工作列表。Refrain 是否采用同类保留列表仍待用户明确核准。
+- 2026-07-14：只读复核 Foobox `jssb.js`，确认 Album-only 模式按 Album 排序，多碟按 Disc/Track 排列；Foobox 为媒体库播放创建/复用 `Library View` 工作列表。FooCrate 是否采用同类保留列表仍待用户明确核准。
 - 2026-07-14：用户否决单按钮切换，决定左下同时提供 Playlist/Album 两个互斥按钮，未来 Workspace 入口也统一放在这里。
 - 2026-07-14：用户否决 MusicBrainz 优先身份，决定纯用歌曲 metadata 的 Album + Album Artist；右侧结果严格限制为当前来源中的该专辑曲目，固定排序且不可编辑。
-- 2026-07-14：用户接受单一 `Refrain Album View` 核心桥接，但强调 UI 右侧始终是来源交集产生的只读智能视图，返回 Playlist Workspace 不能改成展示桥接列表。
-- 2026-07-14：Album Playback Session 范围冻结为当前专辑；顺序模式保留完整有序列表并可从任意曲目开始，随机模式只在专辑内不重复随机。用户把专辑结束行为交由实现决定，Refrain 选择结束后停止，不自动跨回来源续播。规格升至 0.3 并进入实现。
+- 2026-07-14：用户接受单一 `FooCrate Album View` 核心桥接，但强调 UI 右侧始终是来源交集产生的只读智能视图，返回 Playlist Workspace 不能改成展示桥接列表。
+- 2026-07-14：Album Playback Session 范围冻结为当前专辑；顺序模式保留完整有序列表并可从任意曲目开始，随机模式只在专辑内不重复随机。用户把专辑结束行为交由实现决定，FooCrate 选择结束后停止，不自动跨回来源续播。规格升至 0.3 并进入实现。
 - 2026-07-14：0.3 已完整实现并进入人工验收：两个左下 Workspace 入口、metadata-only 归组、来源选择/回调、独立虚拟封面缓存、只读多选曲目表、稳定 GUID 的锁定桥接列表、专辑内顺序/随机一次、来源恢复及版本化状态均已落地。
 - 2026-07-14：首轮人工验收确认检查点 1–5、8、9 通过；检查点 6 改为步骤 12 的 `Default Playlist` 启动规则，不再要求恢复上次 Album 来源。检查点 7 发现曲目双击不播放但右键 Play 正常；另发现部分封面反复闪烁，规格升至 0.4 并进入验收修正。
-- 2026-07-14：双击播放修正为先执行 foobar2000 默认播放动作，成功后立即安装 `Refrain Album View` 编辑锁，避免锁接管默认动作。封面网格改用 320 px 独立缩略图并按最近使用顺序淘汰，避免 1024 px 封面快速耗尽 64 MiB 缓存后反复请求。实现完成，等待用户复验。
+- 2026-07-14：双击播放修正为先执行 foobar2000 默认播放动作，成功后立即安装 `FooCrate Album View` 编辑锁，避免锁接管默认动作。封面网格改用 320 px 独立缩略图并按最近使用顺序淘汰，避免 1024 px 封面快速耗尽 64 MiB 缓存后反复请求。实现完成，等待用户复验。
 - 2026-07-14：第二轮验收确认封面不再闪烁；双击仍错误播放 Playlist Workspace 的同索引曲目，而右键 Play、上一首和下一首均正确。原因是默认播放动作延迟取活动列表，但代码已提前恢复来源列表；实现改为收到桥接列表的新曲确认后，再通过 UI 消息恢复来源活动列表。
-- 2026-07-14：第二轮修正版已实现：默认动作执行期间保持 `Refrain Album View` 为活动列表；核心报告新曲后只投递窗口消息，离开播放回调后再恢复来源列表。实现完成并重新部署，等待用户复验双击曲目身份。
+- 2026-07-14：第二轮修正版已实现：默认动作执行期间保持 `FooCrate Album View` 为活动列表；核心报告新曲后只投递窗口消息，离开播放回调后再恢复来源列表。实现完成并重新部署，等待用户复验双击曲目身份。
 - 2026-07-14：用户最终复验确认双击播放正确曲目，上一首/下一首维持专辑范围，Playlist Workspace 来源恢复正确；结合已确认的封面不闪烁，模块 0.4 正式验收通过。
-- 2026-07-14：任务 12 规格核对时，用户要求 `Refrain Album View` 不出现在 Refrain 自己的 Playlist Browser；Album Workspace 继续用来源下拉选择用户列表。底层桥接和原生 foobar2000 UI 可见性不变，规格升至 0.5。
+- 2026-07-14：任务 12 规格核对时，用户要求 `FooCrate Album View` 不出现在 FooCrate 自己的 Playlist Browser；Album Workspace 继续用来源下拉选择用户列表。底层桥接和原生 foobar2000 UI 可见性不变，规格升至 0.5。
 - 2026-07-14：任务 15 视觉核对时，用户以 `封面浏览器最终参考.jpg` 明确将网格改为唯一的无间距封面墙；常驻 Album/Artist 两行被移除，Album 标题只在 Hover 或 Selected 时覆盖于封面底部，Selected 使用撞色描边且不会因点击其他区域取消。规格升至 0.6。
 - 2026-07-14：首次封面墙人工检查发现旧 Album Grid tooltip 仍会显示白色多行信息框；用户明确不要该信息框。0.6 最终规则改为只保留封面内部单行 Hover 标题，Album Grid tooltip 永久为空。

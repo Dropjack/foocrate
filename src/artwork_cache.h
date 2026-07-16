@@ -9,7 +9,7 @@
 #include <optional>
 #include <string>
 
-namespace refrain {
+namespace foocrate {
 
 class ArtworkDiskCache {
 public:
@@ -38,4 +38,4 @@ private:
 
 [[nodiscard]] ArtworkDiskCache& profileArtworkCache() noexcept;
 
-} // namespace refrain
+} // namespace foocrate

@@ -46,18 +46,18 @@ This rule applies to every operation, including network access, permission-depen
 
 # Component build output and manual installation handoff
 
-Whenever a Refrain component build is prepared for user inspection or manual testing:
+Whenever a FooCrate component build is prepared for user inspection or manual testing:
 
 1. Codex must build the appropriate Release component and generate the installable `.fb2k-component` file. This is a component build output for manual import, not the formal release-packaging work tracked by the release task.
 2. Codex must place the finished component file in the repository `dist` directory and report its exact path to the user.
-3. Codex must verify that the component file exists and contains the expected Refrain component DLL before handing it off. Do not create unrelated release bundles, installers, or deployment artifacts.
+3. Codex must verify that the component file exists and contains the expected FooCrate component DLL before handing it off. Do not create unrelated release bundles, installers, or deployment artifacts.
 4. The user will import or install the component file manually. Do not install, load, copy, or deploy it into any foobar2000 instance unless the user explicitly requests that separate action.
 
 # Screenshot checkpoint protocol
 
 At any visual or UX checkpoint, make at most one screenshot attempt and inspect that result before doing more work.
 
-If the requested Refrain or foobar2000 target is obscured, absent, incomplete, or replaced by unrelated foreground content:
+If the requested FooCrate or foobar2000 target is obscured, absent, incomplete, or replaced by unrelated foreground content:
 
 1. Discard that screenshot as invalid evidence.
 2. Stop the current work immediately. Do not retry with another capture method and do not continue reasoning about the hidden UI.

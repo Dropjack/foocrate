@@ -11,7 +11,7 @@
 
 #include <foobar2000/SDK/foobar2000.h>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 constexpr std::uint32_t kPixelMagic = 0x31585052U; // RPX1
@@ -253,7 +253,7 @@ ArtworkDiskCache& profileArtworkCache() noexcept {
         try {
             if (core_api::is_quiet_mode_enabled()) return std::filesystem::path{};
             const auto native = filesystem::g_get_native_path(core_api::get_profile_path());
-            return pathFromUtf8(native.c_str()) / "refrain" / "cache";
+            return pathFromUtf8(native.c_str()) / "foocrate" / "cache";
         } catch (...) {
             return std::filesystem::path{};
         }
@@ -261,4 +261,4 @@ ArtworkDiskCache& profileArtworkCache() noexcept {
     return cache;
 }
 
-} // namespace refrain
+} // namespace foocrate

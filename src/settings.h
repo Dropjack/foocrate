@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 inline constexpr GUID kPreferencesPageGuid{
     0x0b88eb5f, 0x579d, 0x477c, {0x8b, 0x16, 0x22, 0x41, 0x34, 0x00, 0x25, 0xb8}};
@@ -71,7 +71,7 @@ void writePlaylistViewRestoreState(const PlaylistViewRestoreState& value);
 void notifySettingsChanged();
 void registerSettingsWindow(HWND window);
 void unregisterSettingsWindow(HWND window) noexcept;
-void showRefrainPreferences() noexcept;
+void showFooCratePreferences() noexcept;
 [[nodiscard]] std::vector<DependencyStatus> detectDependencies();
 
-} // namespace refrain
+} // namespace foocrate

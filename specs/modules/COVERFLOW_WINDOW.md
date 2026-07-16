@@ -8,7 +8,7 @@
 
 ## 1. 已批准结构
 
-CoverFlow 是由 Refrain 打开的原生独立窗口，不替换主窗口的 Playlist Workspace，也不依赖 JSplitter、Spider Monkey Panel 或 Columns UI 自由布局。
+CoverFlow 是由 FooCrate 打开的原生独立窗口，不替换主窗口的 Playlist Workspace，也不依赖 JSplitter、Spider Monkey Panel 或 Columns UI 自由布局。
 
 ```text
 ┌──────────────────────────────┐
@@ -19,7 +19,7 @@ CoverFlow 是由 Refrain 打开的原生独立窗口，不替换主窗口的 Pla
 └──────────────────────────────┘
 ```
 
-上部显示可横向浏览的 CoverFlow，下部复用 Refrain Playlist View；上下分隔比例可拖动并保存。
+上部显示可横向浏览的 CoverFlow，下部复用 FooCrate Playlist View；上下分隔比例可拖动并保存。
 
 ## 2. 已批准联动
 

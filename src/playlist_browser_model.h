@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 enum class PlaylistBrowserKind {
     manual,
@@ -89,4 +89,4 @@ struct PlaylistBrowserRow {
     return std::clamp(value, 100, 350);
 }
 
-} // namespace refrain
+} // namespace foocrate

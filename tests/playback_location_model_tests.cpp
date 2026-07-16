@@ -15,7 +15,7 @@ void expect(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using refrain::restoredPlaylistTopRow;
+    using foocrate::restoredPlaylistTopRow;
     expect(restoredPlaylistTopRow(0, 4, 100, 10) == 0, "anchor before first row must clamp to zero");
     expect(restoredPlaylistTopRow(20, 4, 100, 10) == 16, "saved viewport anchor must be restored");
     expect(restoredPlaylistTopRow(99, 4, 100, 10) == 90, "last row must clamp to maximum top row");

@@ -1,17 +1,17 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Refrain VERSION 0.1.0 LANGUAGES CXX RC)
+project(FooCrate VERSION 0.1.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
-  message(FATAL_ERROR "Refrain currently supports Windows only.")
+  message(FATAL_ERROR "FooCrate currently supports Windows only.")
 endif()
 
 if(NOT MSVC)
-  message(FATAL_ERROR "Refrain requires the Microsoft Visual C++ toolchain.")
+  message(FATAL_ERROR "FooCrate requires the Microsoft Visual C++ toolchain.")
 endif()
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-  message(FATAL_ERROR "Refrain must be configured for x64.")
+  message(FATAL_ERROR "FooCrate must be configured for x64.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -22,7 +22,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 include(CTest)
 include(cmake/Foobar2000Sdk.cmake)
 
-add_library(foo_refrain MODULE
+add_library(foo_crate MODULE
   src/artwork_cache.cpp
   src/artwork_cache.h
   src/artwork_loader.cpp
@@ -31,7 +31,7 @@ add_library(foo_refrain MODULE
   src/component.cpp
   src/component_identity.h
   src/compact_track_list_model.h
-  src/foo_refrain.rc
+  src/foo_crate.rc
   src/lyrics_host.cpp
   src/lyrics_host.h
   src/playback_panel.cpp
@@ -58,28 +58,28 @@ add_library(foo_refrain MODULE
   src/theme_model.h
 )
 
-set_target_properties(foo_refrain PROPERTIES
+set_target_properties(foo_crate PROPERTIES
   PREFIX ""
-  OUTPUT_NAME "foo_refrain"
+  OUTPUT_NAME "foo_crate"
 )
 
-target_include_directories(foo_refrain PRIVATE src)
-target_compile_definitions(foo_refrain PRIVATE
+target_include_directories(foo_crate PRIVATE src)
+target_compile_definitions(foo_crate PRIVATE
   _UNICODE
   UNICODE
   _WINDLL
   WIN32_LEAN_AND_MEAN
   NOMINMAX
 )
-target_compile_options(foo_refrain PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8 /external:W0)
-target_link_options(foo_refrain PRIVATE /INCREMENTAL:NO)
-target_link_libraries(foo_refrain PRIVATE
-  refrain_foobar2000_sdk
-  refrain_component_client
-  refrain_pfc
-  refrain_shared
-  refrain_columns_ui_sdk
-  refrain_libppui_sdk
+target_compile_options(foo_crate PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8 /external:W0)
+target_link_options(foo_crate PRIVATE /INCREMENTAL:NO)
+target_link_libraries(foo_crate PRIVATE
+  foocrate_foobar2000_sdk
+  foocrate_component_client
+  foocrate_pfc
+  foocrate_shared
+  foocrate_columns_ui_sdk
+  foocrate_libppui_sdk
   comctl32
   d2d1
   dwrite
@@ -90,119 +90,119 @@ target_link_libraries(foo_refrain PRIVATE
 )
 
 if(BUILD_TESTING)
-  add_executable(refrain_identity_tests tests/component_identity_tests.cpp)
-  target_include_directories(refrain_identity_tests PRIVATE src)
-  target_compile_definitions(refrain_identity_tests PRIVATE
+  add_executable(foocrate_identity_tests tests/component_identity_tests.cpp)
+  target_include_directories(foocrate_identity_tests PRIVATE src)
+  target_compile_definitions(foocrate_identity_tests PRIVATE
     _UNICODE
     UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
-  target_compile_options(refrain_identity_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME component_identity COMMAND refrain_identity_tests)
+  target_compile_options(foocrate_identity_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME component_identity COMMAND foocrate_identity_tests)
 
-  add_executable(refrain_playback_state_tests tests/playback_state_tests.cpp)
-  target_include_directories(refrain_playback_state_tests PRIVATE src)
-  target_compile_definitions(refrain_playback_state_tests PRIVATE
+  add_executable(foocrate_playback_state_tests tests/playback_state_tests.cpp)
+  target_include_directories(foocrate_playback_state_tests PRIVATE src)
+  target_compile_definitions(foocrate_playback_state_tests PRIVATE
     _UNICODE
     UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
-  target_compile_options(refrain_playback_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playback_state COMMAND refrain_playback_state_tests)
+  target_compile_options(foocrate_playback_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_state COMMAND foocrate_playback_state_tests)
 
-  add_executable(refrain_playback_layout_tests tests/playback_layout_tests.cpp)
-  target_include_directories(refrain_playback_layout_tests PRIVATE src)
-  target_compile_options(refrain_playback_layout_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playback_layout COMMAND refrain_playback_layout_tests)
+  add_executable(foocrate_playback_layout_tests tests/playback_layout_tests.cpp)
+  target_include_directories(foocrate_playback_layout_tests PRIVATE src)
+  target_compile_options(foocrate_playback_layout_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_layout COMMAND foocrate_playback_layout_tests)
 
-  add_executable(refrain_playback_location_model_tests tests/playback_location_model_tests.cpp)
-  target_include_directories(refrain_playback_location_model_tests PRIVATE src)
-  target_compile_options(refrain_playback_location_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playback_location_model COMMAND refrain_playback_location_model_tests)
+  add_executable(foocrate_playback_location_model_tests tests/playback_location_model_tests.cpp)
+  target_include_directories(foocrate_playback_location_model_tests PRIVATE src)
+  target_compile_options(foocrate_playback_location_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_location_model COMMAND foocrate_playback_location_model_tests)
 
-  add_executable(refrain_playback_order_icon_tests tests/playback_order_icon_tests.cpp)
-  target_include_directories(refrain_playback_order_icon_tests PRIVATE src)
-  target_compile_options(refrain_playback_order_icon_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playback_order_icon COMMAND refrain_playback_order_icon_tests)
+  add_executable(foocrate_playback_order_icon_tests tests/playback_order_icon_tests.cpp)
+  target_include_directories(foocrate_playback_order_icon_tests PRIVATE src)
+  target_compile_options(foocrate_playback_order_icon_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playback_order_icon COMMAND foocrate_playback_order_icon_tests)
 
-  add_executable(refrain_settings_model_tests tests/settings_model_tests.cpp)
-  target_include_directories(refrain_settings_model_tests PRIVATE src)
-  target_compile_options(refrain_settings_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME settings_model COMMAND refrain_settings_model_tests)
+  add_executable(foocrate_settings_model_tests tests/settings_model_tests.cpp)
+  target_include_directories(foocrate_settings_model_tests PRIVATE src)
+  target_compile_options(foocrate_settings_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME settings_model COMMAND foocrate_settings_model_tests)
 
-  add_executable(refrain_theme_model_tests tests/theme_model_tests.cpp src/theme_model.cpp)
-  target_include_directories(refrain_theme_model_tests PRIVATE src)
-  target_compile_options(refrain_theme_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME theme_model COMMAND refrain_theme_model_tests)
+  add_executable(foocrate_theme_model_tests tests/theme_model_tests.cpp src/theme_model.cpp)
+  target_include_directories(foocrate_theme_model_tests PRIVATE src)
+  target_compile_options(foocrate_theme_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME theme_model COMMAND foocrate_theme_model_tests)
 
-  add_executable(refrain_artwork_cache_tests
+  add_executable(foocrate_artwork_cache_tests
     tests/artwork_cache_tests.cpp
     src/artwork_cache.cpp
     src/theme_model.cpp
   )
-  target_include_directories(refrain_artwork_cache_tests PRIVATE src)
-  target_compile_definitions(refrain_artwork_cache_tests PRIVATE
+  target_include_directories(foocrate_artwork_cache_tests PRIVATE src)
+  target_compile_definitions(foocrate_artwork_cache_tests PRIVATE
     _UNICODE
     UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
-  target_compile_options(refrain_artwork_cache_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  target_link_libraries(refrain_artwork_cache_tests PRIVATE
-    refrain_foobar2000_sdk
-    refrain_component_client
-    refrain_pfc
-    refrain_shared
+  target_compile_options(foocrate_artwork_cache_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  target_link_libraries(foocrate_artwork_cache_tests PRIVATE
+    foocrate_foobar2000_sdk
+    foocrate_component_client
+    foocrate_pfc
+    foocrate_shared
   )
-  add_test(NAME artwork_cache COMMAND refrain_artwork_cache_tests)
+  add_test(NAME artwork_cache COMMAND foocrate_artwork_cache_tests)
 
-  add_executable(refrain_now_playing_state_tests tests/now_playing_state_tests.cpp)
-  target_include_directories(refrain_now_playing_state_tests PRIVATE src)
-  target_compile_options(refrain_now_playing_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME now_playing_state COMMAND refrain_now_playing_state_tests)
+  add_executable(foocrate_now_playing_state_tests tests/now_playing_state_tests.cpp)
+  target_include_directories(foocrate_now_playing_state_tests PRIVATE src)
+  target_compile_options(foocrate_now_playing_state_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME now_playing_state COMMAND foocrate_now_playing_state_tests)
 
-  add_executable(refrain_playlist_view_model_tests tests/playlist_view_model_tests.cpp)
-  target_include_directories(refrain_playlist_view_model_tests PRIVATE src)
-  target_compile_options(refrain_playlist_view_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playlist_view_model COMMAND refrain_playlist_view_model_tests)
+  add_executable(foocrate_playlist_view_model_tests tests/playlist_view_model_tests.cpp)
+  target_include_directories(foocrate_playlist_view_model_tests PRIVATE src)
+  target_compile_options(foocrate_playlist_view_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playlist_view_model COMMAND foocrate_playlist_view_model_tests)
 
-  add_executable(refrain_playlist_grouping_model_tests tests/playlist_grouping_model_tests.cpp)
-  target_include_directories(refrain_playlist_grouping_model_tests PRIVATE src)
-  target_compile_options(refrain_playlist_grouping_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playlist_grouping_model COMMAND refrain_playlist_grouping_model_tests)
+  add_executable(foocrate_playlist_grouping_model_tests tests/playlist_grouping_model_tests.cpp)
+  target_include_directories(foocrate_playlist_grouping_model_tests PRIVATE src)
+  target_compile_options(foocrate_playlist_grouping_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playlist_grouping_model COMMAND foocrate_playlist_grouping_model_tests)
 
-  add_executable(refrain_playlist_interaction_model_tests tests/playlist_interaction_model_tests.cpp)
-  target_include_directories(refrain_playlist_interaction_model_tests PRIVATE src)
-  target_compile_options(refrain_playlist_interaction_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playlist_interaction_model COMMAND refrain_playlist_interaction_model_tests)
+  add_executable(foocrate_playlist_interaction_model_tests tests/playlist_interaction_model_tests.cpp)
+  target_include_directories(foocrate_playlist_interaction_model_tests PRIVATE src)
+  target_compile_options(foocrate_playlist_interaction_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playlist_interaction_model COMMAND foocrate_playlist_interaction_model_tests)
 
-  add_executable(refrain_album_browser_model_tests tests/album_browser_model_tests.cpp)
-  target_include_directories(refrain_album_browser_model_tests PRIVATE src)
-  target_compile_options(refrain_album_browser_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME album_browser_model COMMAND refrain_album_browser_model_tests)
+  add_executable(foocrate_album_browser_model_tests tests/album_browser_model_tests.cpp)
+  target_include_directories(foocrate_album_browser_model_tests PRIVATE src)
+  target_compile_options(foocrate_album_browser_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME album_browser_model COMMAND foocrate_album_browser_model_tests)
 
-  add_executable(refrain_playlist_browser_model_tests tests/playlist_browser_model_tests.cpp)
-  target_include_directories(refrain_playlist_browser_model_tests PRIVATE src)
-  target_compile_definitions(refrain_playlist_browser_model_tests PRIVATE
+  add_executable(foocrate_playlist_browser_model_tests tests/playlist_browser_model_tests.cpp)
+  target_include_directories(foocrate_playlist_browser_model_tests PRIVATE src)
+  target_compile_definitions(foocrate_playlist_browser_model_tests PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
-  target_compile_options(refrain_playlist_browser_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
-  add_test(NAME playlist_browser_model COMMAND refrain_playlist_browser_model_tests)
+  target_compile_options(foocrate_playlist_browser_model_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8)
+  add_test(NAME playlist_browser_model COMMAND foocrate_playlist_browser_model_tests)
 endif()
 
-find_program(REFRAIN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
+find_program(FOOCRATE_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
 
 add_custom_target(package_component
-  COMMAND "${REFRAIN_POWERSHELL_EXECUTABLE}"
+  COMMAND "${FOOCRATE_POWERSHELL_EXECUTABLE}"
     -NoProfile
     -ExecutionPolicy Bypass
     -File "${CMAKE_SOURCE_DIR}/scripts/package-component.ps1"
     -RepositoryRoot "${CMAKE_SOURCE_DIR}"
-    -ComponentDll "$<TARGET_FILE:foo_refrain>"
+    -ComponentDll "$<TARGET_FILE:foo_crate>"
     -OutputDirectory "${CMAKE_SOURCE_DIR}/dist"
-  DEPENDS foo_refrain
+  DEPENDS foo_crate
   VERBATIM
 )

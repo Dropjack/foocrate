@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace refrain {
+namespace foocrate {
 
 struct PlaybackState {
     bool playing{};
@@ -104,4 +104,4 @@ struct PlaybackState {
     return L"-" + formatPlaybackTime(std::max(0.0, length - position));
 }
 
-} // namespace refrain
+} // namespace foocrate

@@ -1,7 +1,7 @@
 #pragma once
 
-namespace refrain {
+namespace foocrate {
 
 void ensurePlaybackPanelLinked() noexcept;
 
-} // namespace refrain
+} // namespace foocrate

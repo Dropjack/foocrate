@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 enum Id : int { follow = 5001, rotate, front, back, disc, artist, interval, autoLyrics,

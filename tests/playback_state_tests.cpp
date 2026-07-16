@@ -5,7 +5,7 @@
 #include <limits>
 
 int main() {
-    using namespace refrain;
+    using namespace foocrate;
 
     assert(seekFraction(30.0, 120.0) == 0.25);
     assert(seekFraction(-5.0, 120.0) == 0.0);

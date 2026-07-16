@@ -35,7 +35,7 @@ if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
   throw "Component DLL does not exist: $dll"
 }
 
-if ([IO.Path]::GetFileName($dll) -cne 'foo_refrain.dll') {
+if ([IO.Path]::GetFileName($dll) -cne 'foo_crate.dll') {
   throw "Unexpected component filename: $dll"
 }
 
@@ -47,11 +47,11 @@ if (-not (Test-Path -LiteralPath $foobarExe -PathType Leaf)) {
 $running = Get-CimInstance Win32_Process -Filter "Name = 'foobar2000.exe'" |
   Where-Object { $_.ExecutablePath -and ([IO.Path]::GetFullPath($_.ExecutablePath) -ieq $foobarExe) }
 if ($running) {
-  throw "Close $instanceName before deploying Refrain."
+  throw "Close $instanceName before deploying FooCrate."
 }
 
-$destination = Join-Path $instanceRoot 'profile/user-components-x64/foo_refrain'
+$destination = Join-Path $instanceRoot 'profile/user-components-x64/foo_crate'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
-Copy-Item -LiteralPath $dll -Destination (Join-Path $destination 'foo_refrain.dll') -Force
+Copy-Item -LiteralPath $dll -Destination (Join-Path $destination 'foo_crate.dll') -Force
 
 Write-Output "DEPLOYED_TO=$destination"

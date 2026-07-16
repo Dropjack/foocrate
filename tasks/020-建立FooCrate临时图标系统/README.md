@@ -1,14 +1,14 @@
-# 020-建立 Refrain 临时图标系统
+# 020-建立 FooCrate 临时图标系统
 
 - 状态：已验收（待提交）
 - 对应规格：[`../../specs/modules/FOOBOX_BASIC_DEFAULT_VISUAL.md`](../../specs/modules/FOOBOX_BASIC_DEFAULT_VISUAL.md)
 - 前置任务：[`../019-完成稳定性性能与生命周期验证/README.md`](../019-完成稳定性性能与生命周期验证/README.md)（已提交为 `76b8c47`）
-- Fork 提交标题：`建立 Refrain 临时图标系统`
+- Fork 提交标题：`建立 FooCrate 临时图标系统`
 - 最后更新：2026-07-16
 
 ## 任务目标
 
-保留当前可用的代码绘制临时图标，冻结稳定语义映射，并让七种标准 Playback Order 各有独立图形。后续若功能开发需要新的临时图标，统一以 Remix Icon 的现有语义库为来源参考；正式图标由用户在项目完成、生成组件版本后自行替换，不再作为 Refrain 1.0 路线任务。
+保留当前可用的代码绘制临时图标，冻结稳定语义映射，并让七种标准 Playback Order 各有独立图形。后续若功能开发需要新的临时图标，统一以 Remix Icon 的现有语义库为来源参考；正式图标由用户在项目完成、生成组件版本后自行替换，不再作为 FooCrate 1.0 路线任务。
 
 ## 明确不做
 
@@ -30,7 +30,7 @@
 
 ### 步骤 1：现有语义与来源核对
 
-- 输入：当前 Refrain 绘制代码、Foobox 只读参考和本机 Remix Icon 字体证据。
+- 输入：当前 FooCrate 绘制代码、Foobox 只读参考和本机 Remix Icon 字体证据。
 - 动作：盘点现有图标位置，确认 Playback Order 七种语义和临时图标来源策略。
 - 产物：稳定语义清单、参考位置和许可记录。
 - 用户检查方法：确认正式图标退出当前路线，临时缺图统一参考 Remix Icon。
@@ -55,9 +55,9 @@
 ## 验证记录
 
 - 2026-07-15：用户当时确认可以提供散装图标，并接受单独 SVG/透明 PNG 或带编号说明的图标表方案；此正式资产交付计划已由 2026-07-16 的新决定取消，不再阻挡 1.0 路线。
-- 2026-07-16：只读检查 Foobox 参考确认，底栏图标字体为 `remixicon`，本机文件位于 `C:\Windows\Fonts\remixicon.ttf`；Foobox 在 `profile/foobox/script/js_panels/base.js` 第 12–13 行为七种标准 Playback Order 建立了字符映射。Refrain 不复制参考字体或字符轮廓，只据此确认七种语义，并使用可替换的原生矢量绘制。
-- 2026-07-16：Remix Icon 官方仓库当前使用 Remix Icon License v1.0，允许作为应用功能图标使用且无需购买；本项目把它作为未来临时缺图的统一来源参考，不把整套字体作为 Refrain 运行时依赖。
-- 2026-07-16：用户批准把七种 Playback Order 独立图标写入代码，并决定正式图标在项目完成、生成组件版本后由用户自行替换。Refrain 已为七种标准顺序建立稳定映射和不同原生图形；同时把此前与 Playlist Workspace 相同的 Playback Queue 图形改为独立的“列表＋播放标记”。Debug/Release 串行构建成功，两种配置各 12 项自动测试全部通过；用户明确要求任务 20 划勾并推进任务 21。
+- 2026-07-16：只读检查 Foobox 参考确认，底栏图标字体为 `remixicon`，本机文件位于 `C:\Windows\Fonts\remixicon.ttf`；Foobox 在 `profile/foobox/script/js_panels/base.js` 第 12–13 行为七种标准 Playback Order 建立了字符映射。FooCrate 不复制参考字体或字符轮廓，只据此确认七种语义，并使用可替换的原生矢量绘制。
+- 2026-07-16：Remix Icon 官方仓库当前使用 Remix Icon License v1.0，允许作为应用功能图标使用且无需购买；本项目把它作为未来临时缺图的统一来源参考，不把整套字体作为 FooCrate 运行时依赖。
+- 2026-07-16：用户批准把七种 Playback Order 独立图标写入代码，并决定正式图标在项目完成、生成组件版本后由用户自行替换。FooCrate 已为七种标准顺序建立稳定映射和不同原生图形；同时把此前与 Playlist Workspace 相同的 Playback Queue 图形改为独立的“列表＋播放标记”。Debug/Release 串行构建成功，两种配置各 12 项自动测试全部通过；用户明确要求任务 20 划勾并推进任务 21。
 
 ## 改动文件
 
@@ -71,4 +71,4 @@
 
 - Playback Order 固定语义清单为：Default、Repeat Playlist、Repeat Track、Random、Shuffle Tracks、Shuffle Albums、Shuffle Folders。
 - 后续功能若缺临时图标，统一从 Remix Icon 选择语义参考并转换为项目可控的单个图形；不接入整套字体运行时依赖。
-- 正式图标不再是 Refrain 1.0 路线任务，由用户在项目完成、生成组件版本后自行替换。
+- 正式图标不再是 FooCrate 1.0 路线任务，由用户在项目完成、生成组件版本后自行替换。

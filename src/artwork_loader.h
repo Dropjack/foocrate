@@ -13,7 +13,7 @@
 
 #include <foobar2000/SDK/foobar2000.h>
 
-namespace refrain {
+namespace foocrate {
 
 enum class ArtworkStatus {
     ready,
@@ -38,4 +38,4 @@ struct ArtworkPixels {
 [[nodiscard]] std::optional<ThemePalette> loadArtworkTheme(
     const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept;
 
-} // namespace refrain
+} // namespace foocrate

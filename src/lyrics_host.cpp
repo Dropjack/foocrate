@@ -8,7 +8,7 @@
 #include <utility>
 #include <wrl/client.h>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -89,7 +89,7 @@ using DllGetClassObjectProc = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*
         pfc::string8 name;
         candidate->get_name(name);
         if (lower(utf8ToWide(name.c_str())) == L"eslyric") {
-            FB2K_console_formatter() << "Refrain: detected ESLyric Columns UI panel GUID "
+            FB2K_console_formatter() << "FooCrate: detected ESLyric Columns UI panel GUID "
                                      << pfc::print_guid(candidate->get_extension_guid());
             output = candidate;
             return true;
@@ -200,7 +200,7 @@ bool LyricsHost::create(HWND parent, const uie::window_host_ptr& upstream, const
         resize(bounds);
         setVisible(m_visible);
         if (!applyThemeColors()) {
-            FB2K_console_formatter() << "Refrain: ESLyric background synchronization is unavailable; "
+            FB2K_console_formatter() << "FooCrate: ESLyric background synchronization is unavailable; "
                                         "enable pref.script.expose or check ESLyric compatibility.";
         }
         return true;
@@ -324,4 +324,4 @@ bool LyricsHost::childIsVisible(HWND child) const noexcept {
     return child == m_child && m_visible && IsWindow(child) && IsWindowVisible(child);
 }
 
-} // namespace refrain
+} // namespace foocrate

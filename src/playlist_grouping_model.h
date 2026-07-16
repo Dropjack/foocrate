@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 struct PlaylistGroupInput {
     std::string key;
@@ -92,4 +92,4 @@ struct PlaylistDisplayRow {
                               : static_cast<std::size_t>(found - rows.begin());
 }
 
-} // namespace refrain
+} // namespace foocrate

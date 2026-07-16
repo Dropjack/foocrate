@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 enum class GroupArtworkSource : std::int32_t { front = 0, artist = 1, placeholder = 2 };
 enum class ColumnAlignment : std::int32_t { leading = 0, center = 1, trailing = 2 };
@@ -496,4 +496,4 @@ template<typename T> [[nodiscard]] inline bool number(std::string_view text, T& 
     return normalizePlaylistViewSettings(std::move(value));
 }
 
-} // namespace refrain
+} // namespace foocrate

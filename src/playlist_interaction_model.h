@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace refrain {
+namespace foocrate {
 
 enum class PlaylistDragStartMode { internalReorder, outgoingCopy };
 
@@ -160,4 +160,4 @@ struct PlaylistRatingStrip {
     return std::clamp(static_cast<int>((x - strip.left) / strip.starSize) + 1, 1, 5);
 }
 
-} // namespace refrain
+} // namespace foocrate

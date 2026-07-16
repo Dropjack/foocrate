@@ -18,11 +18,11 @@ void expect(bool condition, const char* message) {
 
 int main() {
     const auto root = std::filesystem::temp_directory_path()
-        / ("refrain-artwork-cache-" + std::to_string(
+        / ("foocrate-artwork-cache-" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()));
-    refrain::ArtworkDiskCache cache(root, 1024U * 1024U);
+    foocrate::ArtworkDiskCache cache(root, 1024U * 1024U);
 
-    refrain::ArtworkPixels pixels{refrain::ArtworkStatus::ready, 2, 2,
+    foocrate::ArtworkPixels pixels{foocrate::ArtworkStatus::ready, 2, 2,
         {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
     cache.storePixels("pixel-key", 320, pixels);
     const auto loadedPixels = cache.loadPixels("pixel-key", 320);
@@ -32,7 +32,7 @@ int main() {
     expect(!cache.loadPixels("pixel-key", 160).has_value(),
         "persistent artwork cache must separate requested dimensions");
 
-    auto palette = refrain::presetPalette(refrain::ThemePreset::ink);
+    auto palette = foocrate::presetPalette(foocrate::ThemePreset::ink);
     cache.storeTheme("theme-key", palette);
     const auto loadedTheme = cache.loadTheme("theme-key");
     expect(loadedTheme.has_value() && loadedTheme->dark == palette.dark
@@ -52,7 +52,7 @@ int main() {
         "corrupt persistent cache entries must be discarded safely");
 
     const auto trimRoot = root / "trim";
-    refrain::ArtworkDiskCache smallCache(trimRoot, 70U);
+    foocrate::ArtworkDiskCache smallCache(trimRoot, 70U);
     smallCache.storePixels("first", 320, pixels);
     smallCache.storePixels("second", 320, pixels);
     std::size_t cachedFiles{};

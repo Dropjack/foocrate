@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <string>
 
-namespace refrain {
+namespace foocrate {
 
 class LyricsHost {
 public:
@@ -63,4 +63,4 @@ private:
     bool m_instanceConfigPortable{};
 };
 
-} // namespace refrain
+} // namespace foocrate

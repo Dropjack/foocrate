@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace refrain {
+namespace foocrate {
 
 enum class TimeDisplayMode : std::int64_t {
     total = 0,
@@ -44,7 +44,7 @@ struct SettingsValues {
     std::int64_t rightHeaderPermille{500};
     std::int64_t rightColumnPermille{230};
     ThemePreset themePreset{ThemePreset::mist};
-    ColourMode colourMode{ColourMode::refrainPreset};
+    ColourMode colourMode{ColourMode::foocratePreset};
     TrackActivationAction trackActivation{TrackActivationAction::play};
     StartupBehavior startupBehavior{StartupBehavior::startAtHome};
     RightPanelFollow rightPanelFollow{RightPanelFollow::playingTrack};
@@ -163,13 +163,13 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 8;
     result.values.themePreset = isValidThemePreset(stored.themePreset)
         ? static_cast<ThemePreset>(stored.themePreset) : ThemePreset::mist;
     if (stored.version <= 4) {
-        // Version 4 used Refrain=0, Windows=1 and Columns UI=2. Columns UI is removed;
-        // its old value safely returns to the Refrain preset instead of changing meaning.
+        // Version 4 used FooCrate=0, Windows=1 and Columns UI=2. Columns UI is removed;
+        // its old value safely returns to the FooCrate preset instead of changing meaning.
         result.values.colourMode = stored.colourMode == 1
-            ? ColourMode::windows : ColourMode::refrainPreset;
+            ? ColourMode::windows : ColourMode::foocratePreset;
     } else {
         result.values.colourMode = isValidColourMode(stored.colourMode)
-            ? static_cast<ColourMode>(stored.colourMode) : ColourMode::refrainPreset;
+            ? static_cast<ColourMode>(stored.colourMode) : ColourMode::foocratePreset;
     }
     result.values.trackActivation = isValidTrackActivation(stored.trackActivation)
         ? static_cast<TrackActivationAction>(stored.trackActivation) : TrackActivationAction::play;
@@ -226,4 +226,4 @@ inline constexpr std::int64_t kCurrentSettingsVersion = 8;
     return result;
 }
 
-} // namespace refrain
+} // namespace foocrate

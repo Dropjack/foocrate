@@ -2,13 +2,13 @@
 
 - 状态：已验收并提交
 - 对应规格：[`../../specs/modules/DPI_ACCESSIBILITY_AND_KEYBOARD.md`](../../specs/modules/DPI_ACCESSIBILITY_AND_KEYBOARD.md) 0.1（已验收）
-- 前置任务：[`../017-重构Refrain设置菜单与配置界面/README.md`](../017-重构Refrain设置菜单与配置界面/README.md)（已提交为 `52a96ca 任务17完成`）
+- 前置任务：[`../017-重构FooCrate设置菜单与配置界面/README.md`](../017-重构FooCrate设置菜单与配置界面/README.md)（已提交为 `52a96ca 任务17完成`）
 - Fork 提交标题：`完善 DPI 无障碍与键盘操作`
 - 最后更新：2026-07-15
 
 ## 任务目标
 
-让 Refrain 在 Windows 10/11 的不同 DPI、字体与高对比度环境中保持完整可读，并让不使用鼠标的用户可以通过键盘到达和操作主要功能。任务开始时先盘点现状和实际缺口，再与用户冻结验收范围，不把系统级质量工作混入新的产品功能。
+让 FooCrate 在 Windows 10/11 的不同 DPI、字体与高对比度环境中保持完整可读，并让不使用鼠标的用户可以通过键盘到达和操作主要功能。任务开始时先盘点现状和实际缺口，再与用户冻结验收范围，不把系统级质量工作混入新的产品功能。
 
 ## 明确不做
 
@@ -30,7 +30,7 @@
 
 ### 步骤 1：盘点 DPI、键盘与无障碍现状
 
-- 输入：当前 Refrain 实现、任务 17 设置页、Windows DPI/高对比度环境及现有自动测试。
+- 输入：当前 FooCrate 实现、任务 17 设置页、Windows DPI/高对比度环境及现有自动测试。
 - 动作：列出已支持行为、缺口、风险和可重复的人工检查路径。
 - 产物：任务 18 规格与用户可逐项核对的验收矩阵。
 - 用户检查方法：确认哪些行为必须本任务完成，以及哪些属于任务 19 性能稳定性。
@@ -67,10 +67,10 @@
 - 2026-07-15：确认任务 17 已提交，当前 HEAD 为 `52a96ca 任务17完成`，工作树干净；任务 18 仅建立入口，尚未开始代码盘点或实现。
 - 2026-07-15：完成代码盘点。确认主面板已有 DIP 绘制/命中、运行时 `WM_DPICHANGED`、局部列表键盘操作、底栏焦点环、全局快捷键传递和高对比度系统色；确认 Preferences 子页跨屏 DPI 更新、自绘区域完整键盘路径、Windows 可访问对象以及系统文本放大仍有缺口。建立模块规格 0.1，未修改产品代码。
 - 2026-07-15：用户确认 1080p 屏幕存在跨屏后字体发虚，并批准由 Codex 按经验修复。主面板补充 `WM_DPICHANGED_AFTERPARENT`，同步 Direct2D DPI/像素尺寸、系统字体、滚动范围与 ESLyric 子窗口；全部 Preferences 子页和顶部摘要改为按目标屏幕 DPI 重建系统字体。代码绘制图标只修复跨屏清晰度，不改变造型。
-- 2026-07-15：只读核对 Foobox `jsplaylist.js`，确认 Tab 在关闭 Auto-collapse 时切换“全部组折叠/全部组展开”；Refrain 按该行为实现并增加混合状态、全折叠和空列表模型测试。
+- 2026-07-15：只读核对 Foobox `jsplaylist.js`，确认 Tab 在关闭 Auto-collapse 时切换“全部组折叠/全部组展开”；FooCrate 按该行为实现并增加混合状态、全折叠和空列表模型测试。
 - 2026-07-15：最终源码 x64 Debug/Release 构建成功；两套配置各 11 项测试全部通过。Release 包生成成功，SHA-256 为 `31499842033671356B66423886208A7607078A7830BCC649A5CB07EEEB05F385`。部署因 `foobar-dev` 正在运行被安全脚本拒绝，等待用户关闭后继续，不主动结束进程。
-- 2026-07-15：用户关闭开发实例后，Release DLL 已部署到 `.local/foobar-dev/profile/user-components-x64/foo_refrain/foo_refrain.dll`。构建源与部署目标 SHA-256 均为 `92C832B4C52F3C19F60D837A2216699C8F396E026A3AF46C5631B1394AFD7164`，等待用户跨屏和 Tab 行为验收。
-- 2026-07-15：用户确认跨屏效果与 Foobox 对比无明显问题，全部设置页正常；Tab 无反应。代码复查确认 Columns UI 在 `WM_KEYDOWN` 前将 Tab 当作焦点导航，因为 Refrain 的 `WM_GETDLGCODE` 未声明接收 Tab。补充 `DLGC_WANTTAB`，普通 Tab 由 Playlist View 处理，Shift+Tab 仍交回 Columns UI 焦点链。
+- 2026-07-15：用户关闭开发实例后，Release DLL 已部署到 `.local/foobar-dev/profile/user-components-x64/foo_crate/foo_crate.dll`。构建源与部署目标 SHA-256 均为 `92C832B4C52F3C19F60D837A2216699C8F396E026A3AF46C5631B1394AFD7164`，等待用户跨屏和 Tab 行为验收。
+- 2026-07-15：用户确认跨屏效果与 Foobox 对比无明显问题，全部设置页正常；Tab 无反应。代码复查确认 Columns UI 在 `WM_KEYDOWN` 前将 Tab 当作焦点导航，因为 FooCrate 的 `WM_GETDLGCODE` 未声明接收 Tab。补充 `DLGC_WANTTAB`，普通 Tab 由 Playlist View 处理，Shift+Tab 仍交回 Columns UI 焦点链。
 - 2026-07-15：Tab 消息入口修复后重新完成 x64 Debug/Release 构建与两套各 11 项测试，并部署到 `foobar-dev`。源/目标 DLL SHA-256 均为 `3AED9CE6D00CAA38705CF3E9EC883463DBD79BB09CE552C206B8593957ECEA55`；最新安装包 SHA-256 为 `B523073F01697ED8A0C4B5A0BE4F6054B5C17BAACC32B6B30F214AC3C829671D`。
 - 2026-07-15：用户确认设置页无问题，跨屏效果与 Foobox 对比无明显异常；Tab 全部折叠/展开修复复验通过，并明确批准任务 18 结束。
 - 2026-07-15：用户已提交为 `d7a1dfe 完善 DPI 无障碍与键盘操作`，工作树核对干净后进入任务 19。

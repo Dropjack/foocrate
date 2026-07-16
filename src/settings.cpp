@@ -13,7 +13,7 @@
 #include <limits>
 #include <optional>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 constexpr GUID kConfigVersionGuid{
@@ -97,8 +97,8 @@ cfg_bool g_showReplayGain(kShowReplayGainGuid, false);
 cfg_int g_rightHeaderPermille(kRightHeaderPermilleGuid, 500);
 cfg_int g_rightColumnPermille(kRightColumnPermilleGuid, 230);
 cfg_int g_themePreset(kThemePresetGuid, static_cast<std::int64_t>(ThemePreset::mist));
-// Zero is the version-4 Refrain value. First-run version-0 migration rewrites it to
-// the version-5 Refrain preset value without ever selecting Windows accidentally.
+// Zero is the version-4 FooCrate value. First-run version-0 migration rewrites it to
+// the version-5 FooCrate preset value without ever selecting Windows accidentally.
 cfg_int g_colourMode(kColourModeGuid, 0);
 cfg_int g_trackActivation(kTrackActivationGuid, 0);
 cfg_int g_rightPanelFollow(kRightPanelFollowGuid, 0);
@@ -412,7 +412,7 @@ void unregisterSettingsWindow(HWND window) noexcept {
     std::erase(g_settingsWindows, window);
 }
 
-void showRefrainPreferences() noexcept {
+void showFooCratePreferences() noexcept {
     try {
         ui_control::get()->show_preferences(kPreferencesPageGuid);
     } catch (...) {
@@ -453,4 +453,4 @@ std::vector<DependencyStatus> detectDependencies() {
     return result;
 }
 
-} // namespace refrain
+} // namespace foocrate

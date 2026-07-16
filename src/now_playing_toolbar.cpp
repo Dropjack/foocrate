@@ -10,7 +10,7 @@
 #include <columns_ui-sdk-8.1.0/ui_extension.h>
 #include <foobar2000/SDK/foobar2000.h>
 
-namespace refrain {
+namespace foocrate {
 namespace {
 
 constexpr GUID kNowPlayingToolbarGuid{0x61c1cd76, 0x9944, 0x4b63,
@@ -31,14 +31,14 @@ public:
     ~NowPlayingToolbar() { releaseFont(); }
 
     const GUID& get_extension_guid() const override { return kNowPlayingToolbarGuid; }
-    void get_name(pfc::string_base& out) const override { out = "Refrain Now Playing Summary"; }
+    void get_name(pfc::string_base& out) const override { out = "FooCrate Now Playing Summary"; }
     void get_category(pfc::string_base& out) const override { out = "Toolbars"; }
     bool get_short_name(pfc::string_base& out) const override {
-        out = "Refrain Summary";
+        out = "FooCrate Summary";
         return true;
     }
     bool get_description(pfc::string_base& out) const override {
-        out = "Single-line Refrain now-playing summary for the Columns UI toolbar area";
+        out = "Single-line FooCrate now-playing summary for the Columns UI toolbar area";
         return true;
     }
     unsigned get_type() const override { return uie::type_toolbar; }
@@ -50,7 +50,7 @@ public:
     }
 
     uie::container_window_v3_config get_window_config() override {
-        auto config = uie::container_window_v3_config{L"Refrain.NowPlayingSummary", false, 0};
+        auto config = uie::container_window_v3_config{L"FooCrate.NowPlayingSummary", false, 0};
         config.class_cursor = IDC_ARROW;
         return config;
     }
@@ -212,4 +212,4 @@ private:
 uie::window_factory<NowPlayingToolbar> g_nowPlayingToolbarFactory;
 
 } // namespace
-} // namespace refrain
+} // namespace foocrate
