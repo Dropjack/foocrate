@@ -166,24 +166,24 @@ void hashString(hasher_md5& hasher, hasher_md5_state& state, const char* value) 
     return result;
 }
 
-} // namespace
-
-ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept {
-    return loadArtwork(target, album_art_ids::cover_front, aborter);
-}
-
-ArtworkPixels loadArtwork(const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept {
+[[nodiscard]] ArtworkPixels loadSingleArtworkBounded(const metadb_handle_ptr& target,
+    const GUID& artworkId, abort_callback& aborter, std::uint32_t maxDimension,
+    bool usePersistentCache) noexcept {
     try {
-        if (target.is_empty()) {
-            return {ArtworkStatus::missing};
-        }
+        if (target.is_empty()) return {ArtworkStatus::missing};
         metadb_handle_list items;
         items.add_item(target);
         pfc::list_t<GUID> ids;
         ids.add_item(artworkId);
         const auto extractor = album_art_manager_v2::get()->open(items, ids, aborter);
-        const auto data = extractor->query(artworkId, aborter);
-        return decodeArtwork(data, aborter, 1024U);
+        const auto identity = usePersistentCache
+            ? artworkIdentity(artworkId, extractor, aborter) : std::nullopt;
+        if (identity) {
+            if (const auto cached = profileArtworkCache().loadPixels(*identity, maxDimension)) return *cached;
+        }
+        auto pixels = decodeArtwork(extractor->query(artworkId, aborter), aborter, maxDimension);
+        if (identity) profileArtworkCache().storePixels(*identity, maxDimension, pixels);
+        return pixels;
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};
     } catch (const exception_album_art_not_found&) {
@@ -191,6 +191,16 @@ ArtworkPixels loadArtwork(const metadb_handle_ptr& target, const GUID& artworkId
     } catch (...) {
         return {ArtworkStatus::unavailable};
     }
+}
+
+} // namespace
+
+ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept {
+    return loadArtwork(target, album_art_ids::cover_front, aborter);
+}
+
+ArtworkPixels loadArtwork(const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept {
+    return loadSingleArtworkBounded(target, artworkId, aborter, 1024U, false);
 }
 
 ArtworkPixels loadGroupArtwork(
@@ -207,15 +217,21 @@ ArtworkPixels loadGroupArtwork(
             if (const auto cached = profileArtworkCache().loadPixels(*identity, maxDimension)) return *cached;
         }
         auto pixels = decodeArtwork(extractor->query(artworkId, aborter), aborter, maxDimension);
-        if (identity) profileArtworkCache().storePixels(*identity, maxDimension, pixels);
-        return pixels;
+        if (pixels.status == ArtworkStatus::ready) {
+            if (identity) profileArtworkCache().storePixels(*identity, maxDimension, pixels);
+            return pixels;
+        }
+        if (pixels.status == ArtworkStatus::aborted) return pixels;
     } catch (const exception_aborted&) {
         return {ArtworkStatus::aborted};
-    } catch (const exception_album_art_not_found&) {
-        return {ArtworkStatus::missing};
     } catch (...) {
-        return {ArtworkStatus::unavailable};
+        // A group may legitimately contain different embedded covers. If the core cannot
+        // produce one group result, keep the group order and select the first decodable item.
     }
+    return selectFirstReadyArtwork(targets.get_count(), [&](std::size_t index) {
+        return loadSingleArtworkBounded(targets.get_item(index), artworkId, aborter,
+            maxDimension, maxDimension <= 320U);
+    });
 }
 
 std::optional<ThemePalette> loadArtworkTheme(
