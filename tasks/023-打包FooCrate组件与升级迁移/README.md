@@ -15,7 +15,7 @@
 - 不把 ESLyric、Playback Statistics、Columns UI 或 Beefweb 二进制塞进 FooCrate 组件包。
 - 不把用户放在 `third_party` 的本地组件提交到 Git。
 - 不覆盖已有 Columns UI 布局、快捷键或 ESLyric 私有配置。
-- 本步骤生成版本号为 1.0.1 的正式候选组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
+- 本步骤当前生成版本号为 1.0.3 的正式组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
 
 ## 中文程序逻辑
 
@@ -143,6 +143,7 @@
 - 2026-07-16：在全新 `build/release-1.0.2` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 403685 字节，SHA-256 `E84C6C4A8357013ACF9F104A91FD33851D9866EFE8EEA4A760A9E0D9BB640242`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `4F2960D0610AB6F15F06F5F4058EC4F37C801ED9916B362298DC3D61164A7D8D`。Windows FileVersion/ProductVersion 均为 1.0.2；`dist/FooCrate-1.0.2-SHA256SUMS.txt` 已生成。
 - 2026-07-17：三个失败专辑的全部 M4A 均含合法 JPEG `covr`；FFmpeg 与 FooCrate 等价的 WIC 缩放/PBGRA 转换全部成功。共同边界是每个专辑内部各有两套不同哈希与尺寸的封面。用户确认逐曲封面不同属于合法语义，批准组查询失败后按稳定曲目顺序选择第一张可解码封面的回退规则。
 - 2026-07-17：混合封面回退完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过；新增测试覆盖“缺图、坏图后选择第一张可解码图片”、取消立即停止和全组失败状态。手动测试组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 404506 字节，SHA-256 `AC0B070FAE73EE8FCE1EDF38C1AED6538DC5942399C202A3E4472E48523E236B`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `7BA37DECE63E718792ED5E0A96E8FF8DC6FAB61C46BD494B7E50A0DDA29B2020`。本轮保持 1.0.2 供人工复验，用户确认后再决定正式补丁版本。
+- 2026-07-17：用户确认混合封面修复通过人工测试并批准正式输出 1.0.3。按 `AGENTS.md` 快速正式化规则，仅更新版本与直接相关发布元数据，在新 `build/release-1.0.3` 构建树生成 Release 组件，不重复 Debug 和自动测试。正式组件为 `dist/FooCrate-1.0.3.fb2k-component`，大小 404506 字节，SHA-256 `473266257ADB4597892570AB7E5963DC64A5DC40CAB5AF194569D51F5237D4B2`；包内仅根目录 `foo_crate.dll`，Windows FileVersion/ProductVersion 均为 1.0.3。
 
 ## 改动文件
 
@@ -154,7 +155,7 @@
 - `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃、容量上限，以及混合组封面选择/取消/失败状态测试。
 - `src/playlist_interaction_model.h`：共享的五星排列与命中模型。
 - `tests/playlist_interaction_model_tests.cpp`：五星边缘、连续格和窄列缩放测试。
-- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.1 版本元数据与自动检查。
+- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.3 版本元数据与自动检查。
 - `scripts/package-component.ps1`、`scripts/prepare-release.ps1`：按版本生成正式组件、整理 `dist` 文档并生成 SHA-256 清单。
 - `README.md`、`docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.0.md`、`docs/RELEASE_NOTES_1.0.1.md`：当前发布入口、依赖、安装、升级、卸载、回退、首版历史与 1.0.1 修复说明。
 - `.gitignore`：忽略用户本地保存的第三方 `.fb2k-component`。
