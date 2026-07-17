@@ -29,6 +29,7 @@
 8. Release 打包只收录 FooCrate DLL；构建后审计包内容并生成校验和。FCL 作为可选布局文件单独提供，不与组件二进制混装。
 9. 用户手动安装、升级、卸载或回退；Codex 不自动写入日常 foobar2000。
 10. FooCrate 提供三档启动行为：继续播放上次曲目并恢复绝对时间、只恢复上次曲目及 Playlist View 相对位置、停止播放并回到 Default Playlist 首页。首次安装和全局重置使用第三档；旧版已开启 Playlist View 恢复的配置迁移到第二档。
+11. Playlist View 组封面和 Album Cover Grid 允许组内曲目使用不同图片。正式组查询未返回可解码图片时，按稳定曲目顺序逐项读取，第一张可成功解码的目标类型封面用于该组；单项缺图或损坏不会阻止后续曲目的封面显示。
 
 ## 可检查步骤
 
@@ -86,6 +87,15 @@
 - 通过标准：首次安装/Reset 不自动播放；旧版 `Restore Playlist View` 开启值升级为第二档；无效或已删除的曲目安全回到首页，不播放替代内容。
 - 状态：实现完成待验收
 
+### 步骤 7：混合内嵌封面回退
+
+- 输入：同一 Album 或 Playlist 分组内含不同哈希、尺寸、JPEG 采样或完全不同画面的逐曲封面。
+- 动作：进入 Album Workspace，并在 Playlist View 显示对应组封面。
+- 产物：正式组查询失败时，按稳定曲目顺序显示第一张可解码封面。
+- 用户检查方法：使用 `Imploding the Mirage`、`The Lumineers III`、`isaac gracie` 及每曲单曲封面的专辑，确认 Album Grid 和 Playlist View 都显示 Cover。
+- 通过标准：组内图片不一致不会显示 No cover；首项缺图或损坏时会继续寻找后续曲目；Now Playing 仍显示当前曲目自己的封面。
+- 状态：实现完成待验收
+
 ## 用户检查点
 
 - [x] 用户已要求 ESLyric 缺失时自动回退 Metadata。
@@ -131,6 +141,8 @@
 - 2026-07-16：用户截图发现 Now Playing 的 `Artist | Album` 行显示为 `TitleArtist | Album`。根因是任务 17 的旧两行格式先整体交给 foobar2000 标题格式执行，执行结果不保留换行，之后才尝试提取第二行，导致两行被拼接。修正为编译前先从设置文本提取第二行；新单行 Artist/Album 格式保持原样。新增 LF、CRLF 和单行格式回归测试，保证 Track Title 只出现在独立标题行。
 - 2026-07-16：用户确认 Now Playing 第二行只显示 `Artist | Album`，歌名不再混入；批准将该修复正式发布为 1.0.2。本轮只更新必要版本元数据、安装入口、组件与哈希清单，不新增仓库 Release Notes 文件。
 - 2026-07-16：在全新 `build/release-1.0.2` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 403685 字节，SHA-256 `E84C6C4A8357013ACF9F104A91FD33851D9866EFE8EEA4A760A9E0D9BB640242`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `4F2960D0610AB6F15F06F5F4058EC4F37C801ED9916B362298DC3D61164A7D8D`。Windows FileVersion/ProductVersion 均为 1.0.2；`dist/FooCrate-1.0.2-SHA256SUMS.txt` 已生成。
+- 2026-07-17：三个失败专辑的全部 M4A 均含合法 JPEG `covr`；FFmpeg 与 FooCrate 等价的 WIC 缩放/PBGRA 转换全部成功。共同边界是每个专辑内部各有两套不同哈希与尺寸的封面。用户确认逐曲封面不同属于合法语义，批准组查询失败后按稳定曲目顺序选择第一张可解码封面的回退规则。
+- 2026-07-17：混合封面回退完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过；新增测试覆盖“缺图、坏图后选择第一张可解码图片”、取消立即停止和全组失败状态。手动测试组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 404506 字节，SHA-256 `AC0B070FAE73EE8FCE1EDF38C1AED6538DC5942399C202A3E4472E48523E236B`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `7BA37DECE63E718792ED5E0A96E8FF8DC6FAB61C46BD494B7E50A0DDA29B2020`。本轮保持 1.0.2 供人工复验，用户确认后再决定正式补丁版本。
 
 ## 改动文件
 
@@ -138,8 +150,8 @@
 - `src/settings_model.h`、`src/settings.h`、`src/settings.cpp`、`src/preferences.cpp`：启动行为枚举、版本 8 迁移、绝对时间保存与设置界面。
 - `tests/settings_model_tests.cpp`：首次安装、旧版恢复开关和新三档值的迁移测试。
 - `src/artwork_cache.h`、`src/artwork_cache.cpp`：用户 Profile 缓存目录、版本化文件、校验、原子写入和 256 MB 清理。
-- `src/artwork_loader.h`、`src/artwork_loader.cpp`：以媒体/外部封面文件状态生成缓存身份，并复用缩略图和主题色结果。
-- `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃和容量上限测试。
+- `src/artwork_loader.h`、`src/artwork_loader.cpp`：以媒体/外部封面文件状态生成缓存身份，复用缩略图和主题色结果；正式组查询失败时按稳定曲目顺序选择第一张可解码封面。
+- `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃、容量上限，以及混合组封面选择/取消/失败状态测试。
 - `src/playlist_interaction_model.h`：共享的五星排列与命中模型。
 - `tests/playlist_interaction_model_tests.cpp`：五星边缘、连续格和窄列缩放测试。
 - `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.1 版本元数据与自动检查。

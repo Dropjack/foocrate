@@ -29,6 +29,19 @@ struct ArtworkPixels {
     std::vector<std::uint8_t> bgra;
 };
 
+template<typename Loader>
+[[nodiscard]] ArtworkPixels selectFirstReadyArtwork(std::size_t count, Loader&& loader) {
+    bool sawUnavailable{};
+    for (std::size_t index = 0; index < count; ++index) {
+        auto pixels = loader(index);
+        if (pixels.status == ArtworkStatus::ready || pixels.status == ArtworkStatus::aborted) {
+            return pixels;
+        }
+        sawUnavailable = sawUnavailable || pixels.status == ArtworkStatus::unavailable;
+    }
+    return {sawUnavailable ? ArtworkStatus::unavailable : ArtworkStatus::missing};
+}
+
 [[nodiscard]] ArtworkPixels loadFrontArtwork(const metadb_handle_ptr& target, abort_callback& aborter) noexcept;
 [[nodiscard]] ArtworkPixels loadArtwork(
     const metadb_handle_ptr& target, const GUID& artworkId, abort_callback& aborter) noexcept;

@@ -1,8 +1,8 @@
 # Album Cover Browser 模块规格
 
-- 状态：实现完成待验收（0.6 封面墙视觉修订）
-- 版本：0.6
-- 最后更新：2026-07-14
+- 状态：实现完成待验收（0.7 混合封面兼容修订）
+- 版本：0.7
+- 最后更新：2026-07-17
 - 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
 - 对应路线：`11 实现专辑封面浏览器与专辑曲目列表`
 - 参考证据：[`../../tasks/001-Foobox-Basic交互取证/screenshots/封面浏览器最终参考.jpg`](../../tasks/001-Foobox-Basic交互取证/screenshots/封面浏览器最终参考.jpg)
@@ -99,6 +99,7 @@
 - Hover 到非选中项时，选中项的描边和标题继续保留，同时 Hover 项临时显示自己的标题；Hover 本身不显示第二种边框，避免和 Selected 混淆。
 - Album Grid 不显示系统白色 tooltip；Hover 信息只使用封面内部标题条。完整 Album Artist、Year 和曲目数仍可从右侧 `Album Track Header` 与曲目上下文读取，不建立第二层悬浮信息框。
 - 使用行列虚拟化，只为可见区和小范围预取请求封面；缓存有数量和字节上限，来源代次变化后旧结果不得落入新项目。
+- 同一 Album + Album Artist 组允许每首曲目使用不同的内嵌单曲封面。FooCrate 先使用 foobar2000 正式组封面结果；组结果缺失或不可解码时，按右侧专辑曲目的稳定排序逐项请求 Front Cover，显示第一张成功解码的图片。缺图或坏图只跳过对应曲目，不要求组内图片哈希、尺寸、压缩或色度采样一致。
 
 ### 6.4 Album Track Header/List
 
@@ -164,3 +165,4 @@
 - 2026-07-14：任务 12 规格核对时，用户要求 `FooCrate Album View` 不出现在 FooCrate 自己的 Playlist Browser；Album Workspace 继续用来源下拉选择用户列表。底层桥接和原生 foobar2000 UI 可见性不变，规格升至 0.5。
 - 2026-07-14：任务 15 视觉核对时，用户以 `封面浏览器最终参考.jpg` 明确将网格改为唯一的无间距封面墙；常驻 Album/Artist 两行被移除，Album 标题只在 Hover 或 Selected 时覆盖于封面底部，Selected 使用撞色描边且不会因点击其他区域取消。规格升至 0.6。
 - 2026-07-14：首次封面墙人工检查发现旧 Album Grid tooltip 仍会显示白色多行信息框；用户明确不要该信息框。0.6 最终规则改为只保留封面内部单行 Hover 标题，Album Grid tooltip 永久为空。
+- 2026-07-17：用户明确同一专辑可以包含完全不同的逐曲单曲封面，Album Cover Grid 的职责仍是展示一张可用图片。规格升至 0.7：组查询失败时按稳定专辑曲目顺序选择第一张可解码 Front Cover，图片不一致不再导致整张专辑显示 No cover。

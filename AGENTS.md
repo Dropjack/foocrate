@@ -53,6 +53,17 @@ Whenever a FooCrate component build is prepared for user inspection or manual te
 3. Codex must verify that the component file exists and contains the expected FooCrate component DLL before handing it off. Do not create unrelated release bundles, installers, or deployment artifacts.
 4. The user will import or install the component file manually. Do not install, load, copy, or deploy it into any foobar2000 instance unless the user explicitly requests that separate action.
 
+# Prerelease and final component versioning
+
+Use a new prerelease version for every component handed to the user for testing. Never use the previous stable version number for a new test binary, and never overwrite an existing stable component package with test content.
+
+1. Reserve the next intended release version before building the first candidate. Name candidates with SemVer prerelease identifiers such as `1.0.3-beta.1`, then `1.0.3-beta.2`. The package filename and the FooCrate product/component version shown to the user must carry the same prerelease identifier. A numeric Windows `FileVersion` may map `1.0.3-beta.1` to `1.0.3.0`, but the visible `ProductVersion` must retain the full prerelease string.
+2. Every changed or rebuilt candidate receives the next prerelease number. Do not replace or silently reuse an earlier `beta.N` package, even when the intended fix is small. Existing stable and prerelease packages are immutable evidence of the exact binary that was tested.
+3. A prerelease candidate requires the normal applicable Debug and Release builds, automated tests, and the minimum package-structure verification required by the component handoff rules. A prerelease checksum file and user-facing SHA-256 are not required unless the user explicitly asks for them.
+4. After the user explicitly accepts a specific prerelease candidate, the final build may use the fast finalization path only when the source is unchanged except for removing the prerelease version label and updating directly related release metadata. In that path, build the Release component, verify that the package exists and contains only the expected FooCrate DLL, then compute and report the final package SHA-256. Do not repeat Debug builds, the full automated test suite, or unrelated release audits.
+5. If any functional source, dependency, build option, resource, or non-version behavior changes after prerelease acceptance, the fast finalization path is invalid. Produce the next `beta.N` candidate and obtain user acceptance again.
+6. Once a final version has been produced or published, never replace it with different bits. Any later correction starts the next patch version and its own prerelease sequence.
+
 # Screenshot checkpoint protocol
 
 At any visual or UX checkpoint, make at most one screenshot attempt and inspect that result before doing more work.

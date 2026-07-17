@@ -1,5 +1,6 @@
 #include "artwork_cache.h"
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,37 @@ void expect(bool condition, const char* message) {
 } // namespace
 
 int main() {
+    {
+        const std::array statuses{foocrate::ArtworkStatus::missing,
+            foocrate::ArtworkStatus::unavailable, foocrate::ArtworkStatus::ready,
+            foocrate::ArtworkStatus::ready};
+        std::size_t calls{};
+        const auto selected = foocrate::selectFirstReadyArtwork(statuses.size(), [&](std::size_t index) {
+            ++calls;
+            return foocrate::ArtworkPixels{statuses[index], 1, 1,
+                statuses[index] == foocrate::ArtworkStatus::ready
+                    ? std::vector<std::uint8_t>{static_cast<std::uint8_t>(index)}
+                    : std::vector<std::uint8_t>{}};
+        });
+        expect(selected.status == foocrate::ArtworkStatus::ready
+                && selected.bgra == std::vector<std::uint8_t>{2} && calls == 3,
+            "mixed group artwork must select the first decodable item in stable order");
+
+        const auto aborted = foocrate::selectFirstReadyArtwork(3, [](std::size_t index) {
+            return foocrate::ArtworkPixels{index == 1
+                ? foocrate::ArtworkStatus::aborted : foocrate::ArtworkStatus::missing};
+        });
+        expect(aborted.status == foocrate::ArtworkStatus::aborted,
+            "group artwork fallback must stop immediately when cancelled");
+
+        const auto unavailable = foocrate::selectFirstReadyArtwork(2, [](std::size_t index) {
+            return foocrate::ArtworkPixels{index == 0
+                ? foocrate::ArtworkStatus::unavailable : foocrate::ArtworkStatus::missing};
+        });
+        expect(unavailable.status == foocrate::ArtworkStatus::unavailable,
+            "a group with only damaged and missing artwork must report unavailable");
+    }
+
     const auto root = std::filesystem::temp_directory_path()
         / ("foocrate-artwork-cache-" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()));
