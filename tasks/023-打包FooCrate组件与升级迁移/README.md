@@ -4,7 +4,7 @@
 - 对应规格：[`../TODO.md`](../TODO.md) 步骤 23
 - 前置任务：[`../022-建立ESLyric推荐默认设置/README.md`](../022-建立ESLyric推荐默认设置/README.md)
 - Fork 提交标题：`打包 FooCrate 组件与升级迁移`
-- 最后更新：2026-07-16
+- 最后更新：2026-07-22
 
 ## 任务目标
 
@@ -15,7 +15,7 @@
 - 不把 ESLyric、Playback Statistics、Columns UI 或 Beefweb 二进制塞进 FooCrate 组件包。
 - 不把用户放在 `third_party` 的本地组件提交到 Git。
 - 不覆盖已有 Columns UI 布局、快捷键或 ESLyric 私有配置。
-- 本步骤当前生成版本号为 1.0.3 的正式组件与安装资料；公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
+- 本步骤已将用户验收的 `1.0.4-beta.1` 快速正式化为 `1.0.4`。公开发布确认、全量人工回归和 Git tag 仍属于步骤 24。
 
 ## 中文程序逻辑
 
@@ -30,6 +30,7 @@
 9. 用户手动安装、升级、卸载或回退；Codex 不自动写入日常 foobar2000。
 10. FooCrate 提供三档启动行为：继续播放上次曲目并恢复绝对时间、只恢复上次曲目及 Playlist View 相对位置、停止播放并回到 Default Playlist 首页。首次安装和全局重置使用第三档；旧版已开启 Playlist View 恢复的配置迁移到第二档。
 11. Playlist View 组封面和 Album Cover Grid 允许组内曲目使用不同图片。正式组查询未返回可解码图片时，按稳定曲目顺序逐项读取，第一张可成功解码的目标类型封面用于该组；单项缺图或损坏不会阻止后续曲目的封面显示。
+12. 预设自动列表不使用通用搜索上下文预编译，而是交给 foobar2000 正式 autoplaylist API 统一解析。Playback Statistics 动态预设缺少依赖时明确提示；规则失败时删除刚创建的空容器，并返回预设名称、回滚结果与技术原因。
 
 ## 可检查步骤
 
@@ -96,6 +97,15 @@
 - 通过标准：组内图片不一致不会显示 No cover；首项缺图或损坏时会继续寻找后续曲目；Now Playing 仍显示当前曲目自己的封面。
 - 状态：实现完成待验收
 
+### 步骤 8：预设自动列表创建修复
+
+- 输入：已安装 Playback Statistics 的媒体库，以及 11 个 FooCrate 预设自动列表。
+- 动作：分别创建 Library (full)、Never played、History - last week、Played often、Recently added - 12 weeks、Unrated 和 Rated 1–5。
+- 产物：所有规则由 foobar2000 正式 autoplaylist API 持有；历史类预设保留倒序，其余预设保持专辑顺序。
+- 用户检查方法：确认四个原失败预设不再提示“无法在这里建立”，新列表显示 `A` 且内容会随播放历史动态变化。
+- 通过标准：四个动态统计预设均创建成功；其他七个预设不回归；任何失败不留下空列表，并显示预设名称、依赖和技术原因。
+- 状态：实现完成待验收
+
 ## 用户检查点
 
 - [x] 用户已要求 ESLyric 缺失时自动回退 Metadata。
@@ -144,10 +154,15 @@
 - 2026-07-17：三个失败专辑的全部 M4A 均含合法 JPEG `covr`；FFmpeg 与 FooCrate 等价的 WIC 缩放/PBGRA 转换全部成功。共同边界是每个专辑内部各有两套不同哈希与尺寸的封面。用户确认逐曲封面不同属于合法语义，批准组查询失败后按稳定曲目顺序选择第一张可解码封面的回退规则。
 - 2026-07-17：混合封面回退完成 x64 Debug/Release 构建，两种配置各 14/14 自动测试通过；新增测试覆盖“缺图、坏图后选择第一张可解码图片”、取消立即停止和全组失败状态。手动测试组件为 `dist/FooCrate-1.0.2.fb2k-component`，大小 404506 字节，SHA-256 `AC0B070FAE73EE8FCE1EDF38C1AED6538DC5942399C202A3E4472E48523E236B`；包内仅根目录 `foo_crate.dll`，条目与 Release DLL 的 SHA-256 均为 `7BA37DECE63E718792ED5E0A96E8FF8DC6FAB61C46BD494B7E50A0DDA29B2020`。本轮保持 1.0.2 供人工复验，用户确认后再决定正式补丁版本。
 - 2026-07-17：用户确认混合封面修复通过人工测试并批准正式输出 1.0.3。按 `AGENTS.md` 快速正式化规则，仅更新版本与直接相关发布元数据，在新 `build/release-1.0.3` 构建树生成 Release 组件，不重复 Debug 和自动测试。正式组件为 `dist/FooCrate-1.0.3.fb2k-component`，大小 404506 字节，SHA-256 `473266257ADB4597892570AB7E5963DC64A5DC40CAB5AF194569D51F5237D4B2`；包内仅根目录 `foo_crate.dll`，Windows FileVersion/ProductVersion 均为 1.0.3。
+- 2026-07-22：移除预设自动列表的通用搜索预检查，将 11 个预设的名称、查询、排序和 Playback Statistics 依赖收敛为可测试模型。失败路径会报告预设名称、依赖、空容器回滚结果和底层技术原因。
+- 2026-07-22：在全新 `build/beta-1.0.4-beta.1` 构建树完成 x64 Debug/Release，两种配置各 14/14 自动测试通过。候选组件为 `dist/FooCrate-1.0.4-beta.1.fb2k-component`，大小 406025 字节，SHA-256 `8D796ACA7267059CA30C66684A33448D79B3F9677D721A7A1E20BFE2B9AEBCDB`；包内仅根目录 `foo_crate.dll`，包内 DLL 与 Release DLL 哈希均为 `DDF1CE775774DF27FE0992AA4B368C9D99A3240AC6F3281721EAB249B057DFBB`。可见 ProductVersion 为 `1.0.4-beta.1`，数字 FileVersion 为 `1.0.4.0`；当前等待用户手动安装并检查四个原失败预设。
+- 2026-07-22：用户确认 `1.0.4-beta.1` 人工验收通过，批准正式化为 1.0.4 并准备推送 GitHub。验收后功能源码未变，仅移除 prerelease 标签并同步直接发布元数据和文档。
+- 2026-07-22：按快速正式化规则，在全新 `build/release-1.0.4` 构建树仅构建 Release，不重复 Debug 和自动测试。首次命令在工具 124 秒时限处中止，但已产生完整 DLL；第二次增量确认成功，无编译错误。正式组件为 `dist/FooCrate-1.0.4.fb2k-component`，大小 406005 字节，SHA-256 `AEE5257C046F8BB36D433CA920A072BAE59FC1BC2FBC45579D7D5BB2B5BB4BA3`；包内仅根目录 `foo_crate.dll`，包内 DLL 与 Release DLL 哈希均为 `7B96E51DD5FF7EFAECB042E77BFC58E5F5658A29CBEA03F485457328E6FB11CD`。可见 ProductVersion 为 `1.0.4`，数字 FileVersion 为 `1.0.4.0`；正式安装说明、Release Notes 和 SHA-256 清单已生成。
 
 ## 改动文件
 
-- `src/playback_panel.cpp`：ESLyric 缺失回退、Rating 五星绘制和点击命中、M4A 内嵌 Rating 与 Playback Statistics 的读取隔离、封面主题异步切换期间的稳定配色，以及三档启动恢复。
+- `src/playback_panel.cpp`：ESLyric 缺失回退、Rating 五星绘制和点击命中、M4A 内嵌 Rating 与 Playback Statistics 的读取隔离、封面主题异步切换期间的稳定配色、三档启动恢复，以及预设自动列表的正式 API 创建和失败回滚。
+- `src/playlist_browser_model.h`、`tests/playlist_browser_model_tests.cpp`：11 个预设的查询/排序/依赖模型，以及失败反馈和回滚结果测试。
 - `src/settings_model.h`、`src/settings.h`、`src/settings.cpp`、`src/preferences.cpp`：启动行为枚举、版本 8 迁移、绝对时间保存与设置界面。
 - `tests/settings_model_tests.cpp`：首次安装、旧版恢复开关和新三档值的迁移测试。
 - `src/artwork_cache.h`、`src/artwork_cache.cpp`：用户 Profile 缓存目录、版本化文件、校验、原子写入和 256 MB 清理。
@@ -155,9 +170,9 @@
 - `tests/artwork_cache_tests.cpp`：像素/配色往返、损坏文件丢弃、容量上限，以及混合组封面选择/取消/失败状态测试。
 - `src/playlist_interaction_model.h`：共享的五星排列与命中模型。
 - `tests/playlist_interaction_model_tests.cpp`：五星边缘、连续格和窄列缩放测试。
-- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：1.0.3 版本元数据与自动检查。
-- `scripts/package-component.ps1`、`scripts/prepare-release.ps1`：按版本生成正式组件、整理 `dist` 文档并生成 SHA-256 清单。
-- `README.md`、`docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.0.md`、`docs/RELEASE_NOTES_1.0.1.md`：当前发布入口、依赖、安装、升级、卸载、回退、首版历史与 1.0.1 修复说明。
+- `CMakeLists.txt`、`src/component.cpp`、`src/component_identity.h`、`src/foo_crate.rc`、`tests/component_identity_tests.cpp`：`1.0.4` 可见版本、`1.0.4.0` 数字文件版本与自动检查。
+- `scripts/package-component.ps1`：支持 SemVer prerelease 包名并生成只含 Release DLL 的组件；`scripts/prepare-release.ps1` 继续只用于正式发布整理和 SHA-256 清单。
+- `README.md`、`docs/INSTALLATION_AND_UPGRADE.md`、`docs/RELEASE_NOTES_1.0.4.md`、`docs/DEVELOPMENT_SETUP.md`：当前 1.0.4 发布入口、依赖、安装、升级、卸载、回退和本版修复说明。
 - `.gitignore`：忽略用户本地保存的第三方 `.fb2k-component`。
 - 本任务、任务入口和 TODO：记录步骤 23 的范围、状态和人工验收。
 

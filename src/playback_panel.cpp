@@ -3257,26 +3257,53 @@ private:
         return true;
     }
 
-    bool createAutoplaylist(const std::wstring& requestedName, const char* query) {
-        constexpr const char* sort = kAlbumArtistYearAlbumSort;
+    [[nodiscard]] bool playbackStatisticsDetected() const {
+        const auto dependencies = detectDependencies();
+        const auto found = std::find_if(dependencies.begin(), dependencies.end(),
+            [](const DependencyStatus& dependency) {
+                return dependency.displayName == L"Playback Statistics";
+            });
+        return found != dependencies.end() && found->detected;
+    }
+
+    bool createAutoplaylist(const std::wstring& requestedName, const char* query,
+        const char* sort, bool requiresPlaybackStatistics = false) {
+        if (requiresPlaybackStatistics && !playbackStatisticsDetected()) {
+            const auto message = autoplaylistDependencyMessage(requestedName);
+            MessageBoxW(get_wnd(), message.c_str(), L"FooCrate - Autoplaylist",
+                MB_OK | MB_ICONINFORMATION);
+            return false;
+        }
+        auto rollback = AutoplaylistRollbackResult::noContainer;
         try {
-            (void)search_filter_manager::get()->create(query);
             const auto name = uniqueBrowserName(requestedName);
             const auto utf8 = wideToUtf8(name);
             auto api = playlist_manager::get();
             const auto created = api->create_playlist(utf8.c_str(), utf8.size(), SIZE_MAX);
-            if (created == SIZE_MAX) return false;
+            if (created == SIZE_MAX) {
+                throw std::runtime_error("foobar2000 did not create a playlist container");
+            }
             try {
                 autoplaylist_manager::get()->add_client_simple(query, sort, created, autoplaylist_flag_sort);
             } catch (...) {
-                api->remove_playlist(created);
+                rollback = api->remove_playlist(created)
+                    ? AutoplaylistRollbackResult::removed
+                    : AutoplaylistRollbackResult::failed;
                 throw;
             }
             api->set_active_playlist(created);
             refreshPlaylistBrowserSnapshot();
             return true;
         } catch (const std::exception& error) {
-            MessageBoxW(get_wnd(), utf8ToWide(error.what()).c_str(), L"FooCrate - Autoplaylist",
+            const auto message = autoplaylistFailureMessage(requestedName, utf8ToWide(error.what()),
+                requiresPlaybackStatistics, rollback);
+            MessageBoxW(get_wnd(), message.c_str(), L"FooCrate - Autoplaylist",
+                MB_OK | MB_ICONWARNING);
+            return false;
+        } catch (...) {
+            const auto message = autoplaylistFailureMessage(requestedName, L"Unknown foobar2000 error",
+                requiresPlaybackStatistics, rollback);
+            MessageBoxW(get_wnd(), message.c_str(), L"FooCrate - Autoplaylist",
                 MB_OK | MB_ICONWARNING);
             return false;
         }
@@ -3359,11 +3386,9 @@ private:
         }
         AppendMenuW(add, MF_STRING, 100, L"New Playlist");
         AppendMenuW(add, MF_STRING, 101, L"New Autoplaylist...");
-        constexpr std::array<const wchar_t*, 11> presetNames{
-            L"Library (full)", L"Never played", L"History - last week", L"Played often",
-            L"Recently added - 12 weeks", L"Unrated", L"Rated 1", L"Rated 2", L"Rated 3", L"Rated 4", L"Rated 5"};
-        for (std::size_t index = 0; index < presetNames.size(); ++index) {
-            AppendMenuW(presets, MF_STRING, 200 + static_cast<UINT>(index), presetNames[index]);
+        for (std::size_t index = 0; index < kAutoplaylistPresets.size(); ++index) {
+            AppendMenuW(presets, MF_STRING, 200 + static_cast<UINT>(index),
+                kAutoplaylistPresets[index].name.data());
         }
         AppendMenuW(add, MF_POPUP, reinterpret_cast<UINT_PTR>(presets), L"Preset Autoplaylists");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(add), L"Add Playlist...");
@@ -3382,7 +3407,7 @@ private:
                 beginPlaylistBrowserRename();
             }
         } else if (command == 101) {
-            if (createAutoplaylist(L"New Autoplaylist", "ALL")) {
+            if (createAutoplaylist(L"New Autoplaylist", "ALL", kAlbumArtistYearAlbumSort)) {
                 const auto created = playlist_manager::get()->get_active_playlist();
                 if (created != SIZE_MAX && autoplaylist_manager::get()->is_client_present(created)) {
                     const auto client = autoplaylist_manager::get()->query_client(created);
@@ -3394,15 +3419,13 @@ private:
             }
         } else if (command == 102) standard_commands::main_load_playlist();
         else if (command == 103) standard_commands::main_save_all_playlists();
-        else if (command >= 200 && command < 211) {
-            constexpr std::array<const char*, 11> queries{
-                "ALL", "%play_count% IS 0",
-                "%last_played% DURING LAST 1 WEEK SORT DESCENDING BY %last_played%",
-                "%play_count% GREATER 0 SORT DESCENDING BY %play_count%",
-                "%added% DURING LAST 12 WEEKS SORT DESCENDING BY %added%", "%rating% MISSING",
-                "%rating% IS 1", "%rating% IS 2", "%rating% IS 3", "%rating% IS 4", "%rating% IS 5"};
+        else if (command >= 200 && command < 200 + kAutoplaylistPresets.size()) {
             const auto index = static_cast<std::size_t>(command - 200);
-            (void)createAutoplaylist(presetNames[index], queries[index]);
+            const auto& preset = kAutoplaylistPresets[index];
+            const auto sort = preset.sort == AutoplaylistPresetSort::album
+                ? kAlbumArtistYearAlbumSort : "";
+            (void)createAutoplaylist(std::wstring{preset.name}, preset.query.data(), sort,
+                preset.requiresPlaybackStatistics);
         }
     }
 

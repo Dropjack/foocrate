@@ -6,7 +6,7 @@
 namespace foocrate {
 
 inline constexpr std::string_view kComponentName{"FooCrate"};
-inline constexpr std::string_view kComponentVersion{"1.0.3"};
+inline constexpr std::string_view kComponentVersion{"1.0.4"};
 inline constexpr std::string_view kComponentFileName{"foo_crate.dll"};
 inline constexpr GUID kComponentGuid{
     0x5aeac28d,

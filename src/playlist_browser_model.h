@@ -3,9 +3,11 @@
 #include <guiddef.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cwctype>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace foocrate {
@@ -15,6 +17,79 @@ enum class PlaylistBrowserKind {
     automatic,
     reserved,
 };
+
+enum class AutoplaylistPresetSort {
+    album,
+    query,
+};
+
+struct AutoplaylistPreset {
+    std::wstring_view name;
+    std::string_view query;
+    AutoplaylistPresetSort sort{AutoplaylistPresetSort::album};
+    bool requiresPlaybackStatistics{};
+};
+
+inline constexpr std::array<AutoplaylistPreset, 11> kAutoplaylistPresets{{
+    {L"Library (full)", "ALL"},
+    {L"Never played", "%play_count% IS 0", AutoplaylistPresetSort::album, true},
+    {L"History - last week",
+        "%last_played% DURING LAST 1 WEEK SORT DESCENDING BY %last_played%",
+        AutoplaylistPresetSort::query, true},
+    {L"Played often", "%play_count% GREATER 0 SORT DESCENDING BY %play_count%",
+        AutoplaylistPresetSort::query, true},
+    {L"Recently added - 12 weeks",
+        "%added% DURING LAST 12 WEEKS SORT DESCENDING BY %added%",
+        AutoplaylistPresetSort::query, true},
+    {L"Unrated", "%rating% MISSING"},
+    {L"Rated 1", "%rating% IS 1"},
+    {L"Rated 2", "%rating% IS 2"},
+    {L"Rated 3", "%rating% IS 3"},
+    {L"Rated 4", "%rating% IS 4"},
+    {L"Rated 5", "%rating% IS 5"},
+}};
+
+enum class AutoplaylistRollbackResult {
+    noContainer,
+    removed,
+    failed,
+};
+
+[[nodiscard]] inline std::wstring autoplaylistFailureMessage(
+    std::wstring_view name, std::wstring_view technicalDetail,
+    bool requiresPlaybackStatistics, AutoplaylistRollbackResult rollback) {
+    std::wstring message = L"FooCrate could not create the autoplaylist \"";
+    message.append(name);
+    message += L"\".\r\n\r\n";
+    if (requiresPlaybackStatistics) {
+        message += L"This preset uses Playback Statistics fields. Confirm that Playback Statistics "
+                   L"is installed and enabled.\r\n\r\n";
+    }
+    switch (rollback) {
+    case AutoplaylistRollbackResult::noContainer:
+        message += L"No playlist container was created.";
+        break;
+    case AutoplaylistRollbackResult::removed:
+        message += L"The empty playlist container was removed.";
+        break;
+    case AutoplaylistRollbackResult::failed:
+        message += L"The empty playlist container could not be removed; delete it manually.";
+        break;
+    }
+    if (!technicalDetail.empty()) {
+        message += L"\r\n\r\nTechnical detail: ";
+        message.append(technicalDetail);
+    }
+    return message;
+}
+
+[[nodiscard]] inline std::wstring autoplaylistDependencyMessage(std::wstring_view name) {
+    std::wstring message = L"The autoplaylist preset \"";
+    message.append(name);
+    message += L"\" requires Playback Statistics. Install or enable Playback Statistics, "
+               L"then try again.\r\n\r\nNo playlist container was created.";
+    return message;
+}
 
 struct PlaylistBrowserRow {
     GUID guid{};
