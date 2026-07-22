@@ -1,8 +1,8 @@
 # Playlist Browser 模块规格
 
 - 状态：已验收
-- 版本：0.2
-- 最后更新：2026-07-14
+- 版本：0.3
+- 最后更新：2026-07-22
 - 所属产品规格：[`../PRODUCT_SPEC.md`](../PRODUCT_SPEC.md)
 - 对应路线：`12 实现播放列表管理侧栏`
 - 参考证据：[`../../tasks/001-Foobox-Basic交互取证/screenshots/主界面.jpg`](../../tasks/001-Foobox-Basic交互取证/screenshots/主界面.jpg)
@@ -64,6 +64,8 @@ Default Playlist 还需要独立于上述状态的持久视觉标识。任务 12
 - Duplicate 必须复制查询/排序/flags；不能悄悄生成同名普通快照。provider 无法重建时禁用并说明。
 - Convert to Normal 明确生成当前内容快照；只有新普通列表创建成功后才移除原自动列表。
 - 自动或禁止添加的锁定列表永远拒绝曲目拖入。
+- FooCrate 内置预设只由 `autoplaylist_manager::add_client_simple()` 解析和创建。不得先用一次性的通用搜索上下文预编译，因为 `%play_count%`、`%last_played%` 和 `%added%` 等 Playback Statistics 动态字段只有在自动列表上下文中才具备完整的刷新语义。
+- 创建流程先建立唯一命名的空容器，再交给 autoplaylist API；API 拒绝规则时必须立即删除该空容器。反馈必须包含预设名称、是否需要 Playback Statistics、“未留下空列表”结果和底层技术原因，不能只原样转发“无法在这里建立”。
 
 ## 6. 拖放安全原则
 
@@ -146,7 +148,7 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 
 ### 8.12 预设自动列表模板（已核准）
 
-采用 Foobox 同义模板：Library (full)、Never played、History（最近一周）、Played often、Recently added（最近 12 周）、Unrated、Rated 1–5；排除 Favorites (mood) 和网络电台。查询完全使用 foobar2000 标准查询语法，默认排序使用 `%album% | %discnumber% | %tracknumber% | %title%`，再由 `autoplaylist_manager::add_client_simple()` 交给核心持续计算。FooCrate 不发明“通配符规则”或第二套查询引擎。
+采用 Foobox 同义模板：Library (full)、Never played、History（最近一周）、Played often、Recently added（最近 12 周）、Unrated、Rated 1–5；排除 Favorites (mood) 和网络电台。查询完全使用 foobar2000 标准查询语法。Library、Never played、Unrated 和 Rated 1–5 使用 `%album% | %discnumber% | %tracknumber% | %title%` 默认排序；History 按 `%last_played%` 倒序，Played often 按 `%play_count%` 倒序，Recently added 按 `%added%` 倒序。规则直接由 `autoplaylist_manager::add_client_simple()` 交给核心持续计算，FooCrate 不发明“通配符规则”或第二套查询引擎。
 
 ### 8.13 右键背景菜单与外部列表（已核准）
 
@@ -165,3 +167,4 @@ Default 被删除时回退到第一个非保留播放列表；若完全没有可
 - 2026-07-14：用户接受规则管理菜单；核准非 Mood 的 Foobox 同义预设、foobar2000 标准查询/标题格式语法、背景 Add/Load/Save、单行 Save This、全普通列表精确去重，以及唯一命名并立即激活的 `Dragged Items`。0.2 无未决产品问题，进入实现。
 - 2026-07-14：用户要求 Default Playlist 与其他列表颜色不同；任务 12 暂定灰蓝色 `#5F7495`，最终色值留到主题与多套配色阶段调整，但保留独立视觉语义。
 - 2026-07-14：用户完成任务 12 人工验收，确认未发现逻辑问题并接受当前 Default Playlist 颜色；模块规格 0.2 标记为已验收，后续只在主题阶段调整视觉参数。
+- 2026-07-22：用户发现 Never played、History、Played often 和 Recently added 均被通用搜索预检查以“无法在这里建立”拒绝。已核准修复为只由 autoplaylist API 解析内置规则，保留失败回滚，并增加面向用户的上下文反馈。

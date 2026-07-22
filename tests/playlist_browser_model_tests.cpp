@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -50,5 +51,32 @@ int main() {
     expect(normalizePlaylistBrowserSplitPermille(20) == 100, "split must have safe lower storage bound");
     expect(normalizePlaylistBrowserSplitPermille(500) == 350, "split must have 35 percent upper bound");
     expect(normalizePlaylistBrowserSplitPermille(150) == 150, "valid split must survive");
+
+    expect(kAutoplaylistPresets.size() == 11, "all approved autoplaylist presets must remain present");
+    expect(kAutoplaylistPresets[1].requiresPlaybackStatistics,
+        "Never played must declare its Playback Statistics dependency");
+    expect(kAutoplaylistPresets[2].sort == AutoplaylistPresetSort::query
+            && kAutoplaylistPresets[3].sort == AutoplaylistPresetSort::query
+            && kAutoplaylistPresets[4].sort == AutoplaylistPresetSort::query,
+        "history presets must retain their explicit descending query sort");
+    expect(kAutoplaylistPresets[0].sort == AutoplaylistPresetSort::album
+            && kAutoplaylistPresets[5].sort == AutoplaylistPresetSort::album,
+        "library and rating presets must retain album sorting");
+
+    const auto failure = autoplaylistFailureMessage(L"Never played", L"Cannot create here", true,
+        AutoplaylistRollbackResult::removed);
+    expect(failure.find(L"Never played") != std::wstring::npos,
+        "autoplaylist errors must identify the selected preset");
+    expect(failure.find(L"Playback Statistics") != std::wstring::npos,
+        "dynamic preset errors must explain their dependency");
+    expect(failure.find(L"empty playlist container was removed") != std::wstring::npos,
+        "autoplaylist errors must report successful rollback");
+    expect(failure.find(L"Cannot create here") != std::wstring::npos,
+        "autoplaylist errors must preserve the technical detail");
+
+    const auto dependency = autoplaylistDependencyMessage(L"History - last week");
+    expect(dependency.find(L"History - last week") != std::wstring::npos
+            && dependency.find(L"No playlist container was created") != std::wstring::npos,
+        "missing dependency feedback must identify the preset and confirm no side effect");
     return 0;
 }

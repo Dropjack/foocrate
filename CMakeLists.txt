@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(FooCrate VERSION 1.0.3 LANGUAGES CXX RC)
+project(FooCrate VERSION 1.0.4 LANGUAGES CXX RC)
+
+set(FOOCRATE_DISPLAY_VERSION "1.0.4")
 
 if(NOT WIN32)
   message(FATAL_ERROR "FooCrate currently supports Windows only.")
@@ -203,7 +205,7 @@ add_custom_target(package_component
     -RepositoryRoot "${CMAKE_SOURCE_DIR}"
     -ComponentDll "$<TARGET_FILE:foo_crate>"
     -OutputDirectory "${CMAKE_SOURCE_DIR}/dist"
-    -Version "${PROJECT_VERSION}"
+    -Version "${FOOCRATE_DISPLAY_VERSION}"
   DEPENDS foo_crate
   VERBATIM
 )

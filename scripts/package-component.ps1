@@ -20,8 +20,8 @@ $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repo 'build')).TrimEnd('\')
 $distRoot = [IO.Path]::GetFullPath((Join-Path $repo 'dist')).TrimEnd('\')
 
-if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
-  throw "Version must use major.minor.patch format: $Version"
+if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+  throw "Version must use SemVer release or prerelease format: $Version"
 }
 
 if (-not $dll.StartsWith($buildRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
@@ -56,7 +56,7 @@ New-Item -ItemType Directory -Path $output -Force | Out-Null
 Copy-Item -LiteralPath $dll -Destination (Join-Path $staging 'foo_crate.dll')
 
 if (Test-Path -LiteralPath $package) {
-  Remove-Item -LiteralPath $package -Force
+  throw "Package already exists and prerelease/release artifacts are immutable: $package"
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
