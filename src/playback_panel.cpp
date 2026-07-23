@@ -1499,6 +1499,44 @@ private:
         invalidate();
     }
 
+    void togglePlaylistGroupsAroundFocus(HWND wnd) {
+        if (!wnd || m_playlistGroups.empty()) return;
+        const auto layout = calculateLayout(wnd);
+        const auto capacity = visibleRowCapacity(
+            layout.playlistBody.bottom - layout.playlistBody.top, playlistRowHeight());
+
+        auto anchorTrack = m_playlistFocus < m_playlistItems.get_count()
+            ? static_cast<std::size_t>(m_playlistFocus) : SIZE_MAX;
+        if (anchorTrack == SIZE_MAX && !m_playlistDisplayRows.empty()) {
+            const auto centerOffset = capacity > 0 ? capacity / 2 : 0;
+            const auto centerRow = std::min(m_playlistDisplayRows.size() - 1,
+                m_playlistTopRow + centerOffset);
+            anchorTrack = m_playlistDisplayRows[centerRow].track;
+        }
+
+        if (!togglePlaylistGroupsCollapsed(m_playlistGroups)) return;
+        m_playlistDisplayRows = buildPlaylistDisplayRows(m_playlistGroups, 4);
+
+        const auto anchorGroup = groupForTrack(m_playlistGroups, anchorTrack);
+        auto anchorDisplayRow = SIZE_MAX;
+        if (anchorGroup != SIZE_MAX) {
+            anchorDisplayRow = m_playlistGroups[anchorGroup].collapsed
+                ? displayRowForGroupHeader(m_playlistDisplayRows, anchorGroup)
+                : displayRowForTrack(m_playlistDisplayRows, anchorTrack);
+        }
+        if (anchorDisplayRow != SIZE_MAX) {
+            constexpr std::size_t preferredViewportRow = 2;
+            m_playlistTopRow = topRowForViewportAnchor(anchorDisplayRow, preferredViewportRow,
+                m_playlistDisplayRows.size(), capacity);
+        } else {
+            clampPlaylistScroll();
+        }
+        if (maximumTopRow(m_playlistDisplayRows.size(), capacity) > 0) {
+            showScrollbar(wnd, ScrollbarKind::playlist);
+        }
+        invalidate();
+    }
+
     void refreshPlayingLocation() {
         m_playingPlaylist = SIZE_MAX;
         m_playingItem = SIZE_MAX;
@@ -7552,7 +7590,7 @@ private:
             const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             if (m_workspace == Workspace::playlist && !shift) {
                 if (!m_playlistSettings.autoCollapse && !m_playlistGroups.empty()) {
-                    if (togglePlaylistGroupsCollapsed(m_playlistGroups)) rebuildPlaylistDisplayRows();
+                    togglePlaylistGroupsAroundFocus(wnd);
                 }
                 return true;
             }

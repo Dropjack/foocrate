@@ -42,6 +42,15 @@ struct VisibleRows {
     return clampTopRow(topRow, itemCount, visibleCapacity);
 }
 
+[[nodiscard]] constexpr std::size_t topRowForViewportAnchor(std::size_t row,
+    std::size_t preferredViewportRow, std::size_t itemCount, std::size_t visibleCapacity) noexcept {
+    if (itemCount == 0 || visibleCapacity == 0) return 0;
+    row = std::min(row, itemCount - 1);
+    preferredViewportRow = std::min(preferredViewportRow, visibleCapacity - 1);
+    const auto desiredTopRow = row > preferredViewportRow ? row - preferredViewportRow : 0;
+    return clampTopRow(desiredTopRow, itemCount, visibleCapacity);
+}
+
 [[nodiscard]] constexpr std::pair<std::size_t, std::size_t> inclusiveRange(
     std::size_t anchor, std::size_t target) noexcept {
     return anchor <= target ? std::pair{anchor, target} : std::pair{target, anchor};
