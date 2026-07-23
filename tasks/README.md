@@ -13,9 +13,9 @@
 
 - 当前提交步骤：`23 打包 FooCrate 组件与升级迁移`
 - 当前任务：[`023-打包FooCrate组件与升级迁移`](023-打包FooCrate组件与升级迁移/README.md)
-- 状态：实现完成待验收
+- 状态：已验收
 - 前置提交：`8fd1f23 建立 ESLyric 推荐默认设置`
-- 当前下一步：用户核对 `1.0.4` 正式包、安装说明、Release Notes 和 SHA-256 清单后推送 GitHub；若公开发布，先明确仓库许可证或保留全部权利
+- 当前下一步：用户以 `打包 FooCrate 组件与升级迁移` 为标题提交并推送 GitHub；确认提交后再进入步骤 24
 
 ## 状态定义
 
@@ -56,7 +56,7 @@
 | 020 | [建立 FooCrate 临时图标系统](020-建立FooCrate临时图标系统/README.md) | 已验收（待提交） | 原生临时图标、Playback Order 七态、Remix Icon 临时来源策略 |
 | 021 | [实现播放定位与 Playlist View 恢复](021-实现播放定位与Playlist-View恢复/README.md) | 已验收并提交 | Show Now Playing、Show in Default Playlist、默认恢复列表位置 |
 | 022 | [建立 ESLyric 推荐默认设置](022-建立ESLyric推荐默认设置/README.md) | 已验收并提交 | 安全接口验证、动态歌词颜色、用户设置保留与 Playlist 默认 profile |
-| 023 | [打包 FooCrate 组件与升级迁移](023-打包FooCrate组件与升级迁移/README.md) | 实现中 | 正式安装包、迁移、依赖说明、卸载与回退 |
+| 023 | [打包 FooCrate 组件与升级迁移](023-打包FooCrate组件与升级迁移/README.md) | 已验收（待提交） | 正式安装包、迁移、依赖说明、卸载与回退 |
 | 024 | 发布 FooCrate 1.0.0 | 待讨论 | 全量回归、发布记录、最终产物与校验和 |
 | 025 | [实现原生 Mini Player](025-实现原生Mini-Player/README.md) | 待讨论 | Artwork/Compact 两形态独立播放窗口 |
 | 026 | [实现独立 CoverFlow 窗口](026-实现独立CoverFlow窗口/README.md) | 待讨论 | 上部 CoverFlow、下部 Playlist View 与双向联动 |

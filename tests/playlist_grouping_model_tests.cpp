@@ -23,6 +23,8 @@ int main() {
     expect(rows.size() == 8, "expanded groups must include stable cover spacer rows");
     expect(rows[0].kind == PlaylistDisplayRowKind::groupHeader && rows[1].track == 0 && rows[2].track == 1,
         "display rows must preserve real track indexes");
+    expect(displayRowForGroupHeader(rows, 1) == 4,
+        "group header lookup must preserve the requested group identity");
     expect(groupForTrack(groups, 2) == 1 && displayRowForTrack(rows, 2) == 5, "track lookup must cross groups");
     groups[0].collapsed = true;
     rows = buildPlaylistDisplayRows(groups, 3);
@@ -36,6 +38,8 @@ int main() {
         "Tab-style toggle must expand every group after all are collapsed");
     std::vector<PlaylistGroup> emptyGroups;
     expect(!togglePlaylistGroupsCollapsed(emptyGroups), "empty playlists must not report a group toggle");
+    expect(displayRowForGroupHeader(rows, 99) == static_cast<std::size_t>(-1),
+        "missing group headers must not resolve to another group");
 
     std::vector<PlaylistGroupInput> largeInput;
     largeInput.reserve(100000);

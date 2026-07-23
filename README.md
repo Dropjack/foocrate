@@ -20,7 +20,7 @@ It recreates the familiar structure and everyday workflow of the Foobox Basic la
 
 ## Requirements
 
-FooCrate 1.0.4 was validated with:
+FooCrate 1.0.5 was validated with:
 
 - Windows 10 or Windows 11 x64;
 - foobar2000 2.25.10 stable x64;
@@ -37,7 +37,7 @@ FooCrate does not bundle, download, replace, or automatically update these third
 1. Install Columns UI and restart foobar2000.
 2. Install any optional components you want to use, such as ESLyric and Playback Statistics.
 3. Open `File > Preferences > Components`.
-4. Select `Install...` and choose `FooCrate-1.0.4.fb2k-component`.
+4. Select `Install...` and choose `FooCrate-1.0.5.fb2k-component`.
 5. Restart foobar2000 and make sure the active user interface module is Columns UI.
 6. Import the compatible `FooCrate-1.0.0.fcl`, or add the `FooCrate` root panel manually in the Columns UI layout editor.
 
@@ -45,9 +45,9 @@ The optional FCL contains a neutral default layout. It does not overwrite ESLyri
 
 Release files are provided separately:
 
-- `FooCrate-1.0.4.fb2k-component` — installable component;
-- `FooCrate-1.0.4-SHA256SUMS.txt` — integrity checksum;
-- `FooCrate-1.0.4-RELEASE-NOTES.md` — release-specific changes;
+- `FooCrate-1.0.5.fb2k-component` — installable component;
+- `FooCrate-1.0.5-SHA256SUMS.txt` — integrity checksum;
+- `FooCrate-1.0.5-RELEASE-NOTES.md` — release-specific changes;
 - `FooCrate-1.0.0.fcl` — optional compatible Columns UI layout.
 
 ## Upgrading
@@ -92,6 +92,7 @@ The detailed product specification, implementation tasks, development boundaries
 - [`specs/PRODUCT_SPEC.md`](specs/PRODUCT_SPEC.md)
 - [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md)
 - [`docs/INSTALLATION_AND_UPGRADE.md`](docs/INSTALLATION_AND_UPGRADE.md)
+- [`docs/RELEASE_NOTES_1.0.5.md`](docs/RELEASE_NOTES_1.0.5.md)
 - [`docs/RELEASE_NOTES_1.0.4.md`](docs/RELEASE_NOTES_1.0.4.md)
 - [`docs/RELEASE_NOTES_1.0.0.md`](docs/RELEASE_NOTES_1.0.0.md)
 - [`tasks/README.md`](tasks/README.md)

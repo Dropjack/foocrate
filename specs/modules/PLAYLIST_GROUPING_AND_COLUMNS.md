@@ -42,7 +42,7 @@ FooCrate 提供以下六个与 Foobox 参考语义对应的内置预置，并允
 - 单击组标题推荐选择该组全部真实曲目并把第一项设为焦点；Ctrl 追加/切换整组，Shift 从锚点扩展到目标组末尾。
 - 双击组标题在展开/折叠之间切换，不开始播放。
 - 表头右键菜单提供 `Group by`、`Collapse all`、`Expand all`、`Auto-collapse` 和 `Collapse groups by default`。
-- Foobox 用 `Tab` 切换全部折叠，但这与 FooCrate 已有的 Columns UI 焦点导航冲突；推荐不复制该快捷键，`Tab` 继续交给 Columns UI/foobar2000，全局折叠只从表头右键菜单执行。
+- `Tab` 的最新规则由 `DPI_ACCESSIBILITY_AND_KEYBOARD.md` 0.2 定义：关闭自动折叠时切换全部折叠/展开，并以活动播放列表的准确焦点曲目为锚点，优先定位到第三个可见内容行；Shift+Tab 继续交给 Columns UI 焦点链。
 - 自动折叠开启时只展开焦点所在组；焦点移动到另一组后折叠旧组、展开新组。
 - 单个组的临时折叠状态只属于当前面板会话；保存的是默认折叠和自动折叠选项，避免升级后保存大量易失效的分组键。
 
@@ -116,7 +116,7 @@ FooCrate 提供以下六个与 Foobox 参考语义对应的内置预置，并允
 ## 12. 已核准决定
 
 1. 使用六个内置分组并默认 `Album (simple)`；切换分组先建立 Undo，再排序真实普通播放列表；自动/锁定列表无法排序时拒绝切换。
-2. 组标题单击选择整组、双击折叠/展开，默认全部展开且关闭自动折叠；Collapse all / Expand all 位于表头右键菜单，`Tab` 保留 Columns UI 焦点导航。Album 使用 Front Cover，Artist 使用 Artist artwork，Genre 使用稳定占位，Directory 使用第一首 Front Cover，不增加外部图片文件夹。
+2. 组标题单击选择整组、双击折叠/展开，默认全部展开且关闭自动折叠；Collapse all / Expand all 位于表头右键菜单，普通 `Tab` 按键盘规格切换全部折叠/展开并保持准确焦点曲目定位，Shift+Tab 保留 Columns UI 焦点导航。Album 使用 Front Cover，Artist 使用 Artist artwork，Genre 使用稳定占位，Directory 使用第一首 Front Cover，不增加外部图片文件夹。
 3. 所有播放列表共用一套跨升级保存的全局样式，不实现按播放列表命名布局；默认列按截图顺序，Length 始终显示总时长，并提供完整 Columns/Grouping 编辑与安全回退。
 4. 任务 17 的视觉校准把 Cover 冻结为最左独立合并区域：固定不可拖宽、内部无横线、右侧无可见边框；组头横跨全宽，封面从第一首曲目行贴顶开始并完整等比显示，留白透出列表背景，不采用其他封面区域的 Fill 裁切规则。
 

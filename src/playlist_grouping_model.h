@@ -92,4 +92,13 @@ struct PlaylistDisplayRow {
                               : static_cast<std::size_t>(found - rows.begin());
 }
 
+[[nodiscard]] inline std::size_t displayRowForGroupHeader(
+    const std::vector<PlaylistDisplayRow>& rows, std::size_t group) noexcept {
+    const auto found = std::find_if(rows.begin(), rows.end(), [&](const PlaylistDisplayRow& row) {
+        return row.kind == PlaylistDisplayRowKind::groupHeader && row.group == group;
+    });
+    return found == rows.end() ? static_cast<std::size_t>(-1)
+                              : static_cast<std::size_t>(found - rows.begin());
+}
+
 } // namespace foocrate
