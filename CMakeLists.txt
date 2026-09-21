@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(FooCrate VERSION 1.0.5 LANGUAGES CXX RC)
+project(FooCrate VERSION 1.1.0 LANGUAGES CXX RC)
 
-set(FOOCRATE_DISPLAY_VERSION "1.0.5")
+set(FOOCRATE_DISPLAY_VERSION "1.1.0-beta.2")
 
 if(NOT WIN32)
   message(FATAL_ERROR "FooCrate currently supports Windows only.")
@@ -25,6 +25,8 @@ include(CTest)
 include(cmake/Foobar2000Sdk.cmake)
 
 add_library(foo_crate MODULE
+  src/device_browser.cpp
+  src/foopodbridge_guids.cpp
   src/artwork_cache.cpp
   src/artwork_cache.h
   src/artwork_loader.cpp
@@ -65,7 +67,7 @@ set_target_properties(foo_crate PROPERTIES
   OUTPUT_NAME "foo_crate"
 )
 
-target_include_directories(foo_crate PRIVATE src)
+target_include_directories(foo_crate PRIVATE src third_party/foopodbridge-contract)
 target_compile_definitions(foo_crate PRIVATE
   _UNICODE
   UNICODE
@@ -92,6 +94,10 @@ target_link_libraries(foo_crate PRIVATE
 )
 
 if(BUILD_TESTING)
+  add_executable(foocrate_device_browser_tests tests/device_browser_model_tests.cpp)
+  target_include_directories(foocrate_device_browser_tests PRIVATE src)
+  target_compile_options(foocrate_device_browser_tests PRIVATE /W4 /WX /EHsc /utf-8)
+  add_test(NAME device_browser COMMAND foocrate_device_browser_tests)
   add_executable(foocrate_identity_tests tests/component_identity_tests.cpp)
   target_include_directories(foocrate_identity_tests PRIVATE src)
   target_compile_definitions(foocrate_identity_tests PRIVATE

@@ -11,11 +11,11 @@
 
 ## 当前进度
 
-- 当前提交步骤：`23 打包 FooCrate 组件与升级迁移`
-- 当前任务：[`023-打包FooCrate组件与升级迁移`](023-打包FooCrate组件与升级迁移/README.md)
+- 当前工作：`027 集成 FooPodBridge 只读设备浏览`（用户于 2026-09-21 批准的新集成任务）
+- 当前任务：[`027-集成FooPodBridge只读设备浏览`](027-集成FooPodBridge只读设备浏览/README.md)
 - 状态：已验收
 - 前置提交：`8fd1f23 建立 ESLyric 推荐默认设置`
-- 当前下一步：用户以 `打包 FooCrate 组件与升级迁移` 为标题提交并推送 GitHub；确认提交后再进入步骤 24
+- 当前下一步：任务 027 的 beta.2 只读设备浏览已逐项人工验收；按用户要求提交源码、自动测试代码与文档，不上传测试组件包或创建 Release。DUP-001 仍由 FooPodBridge 任务 005 跟踪，不代表设备写入获批。
 
 ## 状态定义
 
@@ -60,6 +60,8 @@
 | 024 | 发布 FooCrate 1.0.0 | 待讨论 | 全量回归、发布记录、最终产物与校验和 |
 | 025 | [实现原生 Mini Player](025-实现原生Mini-Player/README.md) | 待讨论 | Artwork/Compact 两形态独立播放窗口 |
 | 026 | [实现独立 CoverFlow 窗口](026-实现独立CoverFlow窗口/README.md) | 待讨论 | 上部 CoverFlow、下部 Playlist View 与双向联动 |
+
+| 027 | [集成 FooPodBridge 只读设备浏览](027-集成FooPodBridge只读设备浏览/README.md) | 已验收 | 只读设备浏览、右下中键切换、播放隔离与独立使用 |
 
 ## 推进规则
 

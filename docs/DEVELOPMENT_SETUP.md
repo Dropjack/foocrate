@@ -186,3 +186,9 @@ $ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - 版本检查必须读取实际二进制或头文件证据，不仅依赖聊天中的版本号。
 - 构建/部署命令必须先打印并校验解析后的绝对目标路径位于项目根目录或两个允许实例内。
 - 所有本机路径、组件安装状态和哈希都属于可变化事实；发现变化时先更新本文，再继续依赖它执行。
+
+## 2026-09-21 本机工具差异
+
+当前工作区位于 D:/dev/foo/FooCrate。旧 Community 路径不存在，本机可用工具为 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools，MSVC 14.44.35207、Windows SDK 10.0.26100。scripts/build-local.py 固定调用该安装内的 CMake/CTest，并只对子进程处理 Path 大小写冲突。
+
+任务 027 首次全构建发现 ATL 头文件缺失（atlbase.h）。用户关闭 Unity 后，自动安装尝试被已有安装器实例阻挡，未执行补装；随后用户手动安装 v143 ATL。2026-09-21 已确认 MSVC/14.44.35207/atlmfc/include/atlbase.h 存在，Debug/Release 全构建与各 15 项测试通过，候选包已审计。未强制关闭进程或自动重启。详细记录在任务 027。
