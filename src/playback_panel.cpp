@@ -1,4 +1,5 @@
 #include "playback_panel.h"
+#include "device_browser.h"
 #include "artwork_loader.h"
 #include "album_browser_model.h"
 #include "compact_track_list_model.h"
@@ -497,12 +498,14 @@ public:
 
     uie::container_window_v3_config get_window_config() override {
         auto config = uie::container_window_v3_config{L"FooCrate.PlaybackShell", false, CS_DBLCLKS};
-        config.window_styles |= WS_TABSTOP;
+        config.window_styles |= WS_TABSTOP | WS_CLIPCHILDREN;
         config.class_cursor = IDC_ARROW;
         return config;
     }
 
     LRESULT on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) override {
+        LRESULT deviceResult{};
+        if (m_deviceBrowser.message(msg, wp, lp, deviceResult)) return deviceResult;
         switch (msg) {
         case WM_CREATE:
             if (!m_artworkAsync->alive.load()) m_artworkAsync = std::make_shared<ArtworkAsyncState>();
@@ -531,6 +534,15 @@ public:
             registerSettingsWindow(wnd);
             initializeLowerRightView();
             createLyricsHost(wnd);
+            m_deviceBrowser.baseTab(m_lowerRightView == LowerRightView::lyrics ? 0 : 1);
+            m_deviceBrowser.create(wnd, [this, wnd](int tab) {
+                if (tab < 2) {
+                    m_lowerRightView = tab == 0 && m_lyricsHost.available()
+                        ? LowerRightView::lyrics : LowerRightView::trackDetails;
+                    m_deviceBrowser.baseTab(m_lowerRightView == LowerRightView::lyrics ? 0 : 1);
+                }
+                syncLyricsHost(wnd);
+            });
             m_dropAsync->alive.store(true);
             m_dropAsync->window = wnd;
             m_dropTarget = new DropTargetImpl(this);
@@ -543,6 +555,7 @@ public:
             }
             return 0;
         case WM_DESTROY: {
+            m_deviceBrowser.destroy();
             rememberPlaybackPositionForRestore(true);
             if (!m_startupRestorePending && playback_control::get()->is_playing()) {
                 rememberPlayingTrackForRestore();
@@ -1134,9 +1147,22 @@ private:
 
     void syncLyricsHost(HWND wnd) {
         if (!wnd || !IsWindow(wnd)) return;
+        m_deviceBrowser.baseTab(m_lowerRightView == LowerRightView::lyrics ? 0 : 1);
+        const auto deviceLayout = calculateLayout(wnd);
+        const auto pixels = [this](D2D1_RECT_F r) -> RECT {
+            const auto scale = dpiScale();
+            return {static_cast<LONG>(std::lround(r.left * scale)), static_cast<LONG>(std::lround(r.top * scale)),
+                static_cast<LONG>(std::lround(r.right * scale)), static_cast<LONG>(std::lround(r.bottom * scale))};
+        };
+        auto sidebar = deviceLayout.playlistBrowser;
+        sidebar.top = deviceLayout.playlistBrowserBody.bottom;
+        sidebar.right = std::max(sidebar.left, sidebar.right - 4.0F);
+        auto lower = deviceLayout.lowerRight;
+        m_deviceBrowser.layout(pixels(sidebar), pixels(deviceLayout.playlistArea), pixels(lower),
+            m_workspace == Workspace::playlist && !m_queueMode, static_cast<UINT>(m_dpi), m_themePalette);
         m_lyricsHost.resize(lowerRightPixels(wnd));
         m_lyricsHost.setVisible(m_workspace == Workspace::playlist && !m_queueMode
-            && m_lowerRightView == LowerRightView::lyrics);
+            && m_lowerRightView == LowerRightView::lyrics && !m_deviceBrowser.overview());
         InvalidateRect(wnd, nullptr, FALSE);
     }
 
@@ -1155,12 +1181,14 @@ private:
     }
 
     void toggleLowerRightView() {
+        if (m_deviceBrowser.active()) { m_deviceBrowser.cycle(m_lyricsHost.available()); return; }
         setLowerRightView(m_lowerRightView == LowerRightView::lyrics
                 ? LowerRightView::trackDetails : LowerRightView::lyrics,
             !readSettings().lyricsAutoSwitch);
     }
 
     void toggleQueueMode() {
+        m_deviceBrowser.leave();
         if (m_workspace == Workspace::album) {
             setWorkspace(Workspace::playlist);
             m_queueMode = true;
@@ -2146,6 +2174,7 @@ private:
     }
 
     void setWorkspace(Workspace workspace) {
+        m_deviceBrowser.leave();
         if (m_workspace == workspace) return;
         if (workspace == Workspace::album) {
             auto api = playlist_manager_v5::get();
@@ -2944,6 +2973,7 @@ private:
     }
 
     void selectPlaylistBrowserRow(std::size_t row, bool ctrl, bool shift, bool activate) {
+        m_deviceBrowser.leave();
         if (row >= m_playlistBrowserRows.size()) return;
         if (!ctrl && !shift) {
             m_playlistBrowserSelection.assign(1, m_playlistBrowserRows[row].guid);
@@ -3510,7 +3540,7 @@ private:
         const auto queueTarget = m_queueMode && contains(layout.queuePanel, client) && m_externalDropNative;
         const auto sameSourcePlaylist = m_oleDragFromThisPanel
             && InlineIsEqualGUID(activePlaylistGuid(), m_playlistDragGuid);
-        const auto playlistTarget = contains(layout.playlistArea, client) && playlistCanAdd(m_activePlaylist)
+        const auto playlistTarget = !m_deviceBrowser.active() && contains(layout.playlistArea, client) && playlistCanAdd(m_activePlaylist)
             && (!sameSourcePlaylist || playlistCanReorder());
         bool browserTarget{};
         m_externalDropBrowserBlank = false;
@@ -4711,8 +4741,10 @@ private:
             layout.playlistBrowser = D2D1::RectF(0.0F, 0.0F, browserWidth, contentBottom);
             layout.playlistBrowserHeader = D2D1::RectF(0.0F, 0.0F, browserWidth, headerHeight);
             layout.playlistBrowserBody = D2D1::RectF(0.0F, headerHeight, browserWidth, contentBottom);
+            if (m_deviceBrowser.available() && m_workspace == Workspace::playlist && !m_queueMode)
+                layout.playlistBrowserBody.bottom = m_deviceBrowser.sidebarBottom(contentBottom, headerHeight);
             layout.playlistBrowserScrollTrack = D2D1::RectF(browserWidth - scrollbarWidth,
-                headerHeight, browserWidth, contentBottom);
+                headerHeight, browserWidth, layout.playlistBrowserBody.bottom);
             const auto browserCapacity = visibleRowCapacity(layout.playlistBrowserBody.bottom
                 - layout.playlistBrowserBody.top, 30.0F);
             const auto browserMaximum = maximumTopRow(m_playlistBrowserRows.size(), browserCapacity);
@@ -4921,9 +4953,9 @@ private:
                     D2D1::Point2F(layout.rightDivider.right, (layout.rightDivider.top + layout.rightDivider.bottom) * 0.5F),
                     m_border.Get(), layout::InteriorChromeMetrics::dividerVisualWidth);
             }
-            if (m_lowerRightView == LowerRightView::trackDetails) {
+            if (!m_deviceBrowser.overview() && m_lowerRightView == LowerRightView::trackDetails) {
                 drawTrackDetails(layout);
-            } else if (!m_lyricsHost.available()) {
+            } else if (!m_deviceBrowser.overview() && !m_lyricsHost.available()) {
                 drawTextWith(m_lyricsHost.statusText(), layout.lowerRight, m_secondaryFormat.Get(),
                     DWRITE_TEXT_ALIGNMENT_CENTER, m_disabled.Get());
             }
@@ -7503,6 +7535,10 @@ private:
     }
 
     bool onKeyDown(HWND wnd, WPARAM key) {
+        if (m_deviceBrowser.active() && (m_focus == ControlId::playlistBody || m_focus == ControlId::playlistBrowser)) {
+            if (key == VK_DELETE || key == VK_F2 || key == VK_RETURN || key == VK_SPACE || key == VK_TAB
+                || ((GetKeyState(VK_CONTROL) & 0x8000) && (key == 'V' || key == 'X'))) return true;
+        }
         if (m_workspace == Workspace::album && (m_focus == ControlId::albumGrid
                 || m_focus == ControlId::albumTrackList)) {
             const auto ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -8051,6 +8087,7 @@ private:
     std::shared_ptr<abort_callback_impl> m_groupArtworkAborter;
     bool m_groupArtworkAborterAlbum{};
     std::jthread m_groupArtworkThread;
+    DeviceBrowser m_deviceBrowser;
     LyricsHost m_lyricsHost;
     double m_previewPosition{};
     float m_dpi{96.0F};

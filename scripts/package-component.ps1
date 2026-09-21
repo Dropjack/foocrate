@@ -73,6 +73,13 @@ if ($entries.Count -ne 1 -or $entries[0] -cne 'foo_crate.dll') {
   throw "Unexpected package contents: $($entries -join ', ')"
 }
 
-$hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
+$stream = [IO.File]::OpenRead($package)
+$sha256 = [Security.Cryptography.SHA256]::Create()
+try {
+  $hash = [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+} finally {
+  $sha256.Dispose()
+  $stream.Dispose()
+}
 Write-Output "PACKAGE=$package"
 Write-Output "SHA256=$hash"
