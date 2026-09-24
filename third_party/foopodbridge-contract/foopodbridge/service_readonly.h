@@ -4,7 +4,7 @@
 
 namespace foopodbridge::contract {
 // ABI 1.1 adds queryable extensions; ABI 1.0 vtables and GUIDs remain unchanged.
-inline constexpr std::uint32_t readonly_contract_minor = 1;
+inline constexpr std::uint32_t readonly_contract_minor = 2;
 enum class track_text : std::uint32_t { title, artist, album, relative_path };
 enum class read_media_kind : std::uint32_t { unknown, music, audiobook, other };
 enum class read_playlist_kind : std::uint32_t { master, ordinary, smart, opaque };
@@ -35,6 +35,8 @@ public:
     virtual void get_profile(pfc::string_base& out) = 0;
     virtual void get_status_description(pfc::string_base& out) = 0;
     virtual bool get_library(service_ptr_t<library_snapshot_v1>& out) noexcept = 0;
+    // Current mounted root for read-only playback consumers; never grants write access.
+    virtual void get_mount_root(pfc::string_base& out) = 0;
     FB2K_MAKE_SERVICE_INTERFACE(device_snapshot_readonly_v1, device_snapshot_v1);
 };
 class device_provider_readonly_v1 : public device_provider_v1 {

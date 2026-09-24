@@ -1,6 +1,6 @@
 # 027 集成 FooPodBridge 只读设备浏览
 
-- 状态：已验收（1.1.0-beta.2 的已批准只读设备浏览范围）。
+- 状态：实现完成待验收（1.1.0-beta.3 增加只读设备播放入口；原 beta.2 浏览范围仍已验收）。
 - 日期：2026-09-21。
 - 对应 FooPodBridge 任务 006：`D:/dev/foo/FooPodBridge/FooPodBridge/tasks/006-实现FooCrate只读Devices工作区/SPEC.md`。
 - 用户已批准顶部/左栏及右下第三页签布局，并明确“就这么做了”；不重复请求同一设计批准。
@@ -115,3 +115,14 @@ FooCrate x64 Debug/Release 全构建成功，各 15/15 测试通过，包括 dev
 已逐项获用户确认：外观、隐藏入口中键轮换、退出设备上下文恢复、播放隔离、纵向滚动条拖动、安全弹出与拔线响应、重新连接恢复、无 FooPodBridge 时 FooCrate 独立使用、深色主题、DPI。任务 006 的本轮已批准只读浏览范围据此标记已验收，候选为 FooCrate 1.1.0-beta.2 与 FooPodBridge 0.1.0-beta.4。不声称所有硬件、系统主题或任意故障场景均已覆盖。
 
 任务 005 的 DUP-001（一台设备重复显示）按用户决定继续暂缓；本结论不代表 005 全部验收、写入授权或任务 007 实施授权。未生成稳定版、未提交或推送。FooCrate 仓库当前不在可写范围，本轮后续人工记录保存在此处，其任务文档尚待同步。
+
+## beta.3：设备只读播放（实现完成待验收）
+
+用户要求在等待 iPod 拷贝期间先实现播放入口。本轮将设备 Library/playlist 的双击动作接到 foobar 播放：FooPodBridge 只读快照提供挂载根目录，FooCrate 将曲目相对路径解析为本地挂载文件，创建/复用专用 `FooPodBridge playback` 播放列表并执行默认播放动作。该流程只读设备文件，不执行 iPod 数据库写入、同步、删除或重命名。
+
+- 版本：FooCrate 1.1.0-beta.3；FooPodBridge 0.1.0-beta.10。
+- 自动检查：FooCrate Debug/Release 各 15/15；FooPodBridge Debug/Release 各 13/13。
+- 包路径：`D:/dev/foo/FooCrate/dist/FooCrate-1.1.0-beta.3.fb2k-component` 与 `D:/dev/foo/FooPodBridge/FooPodBridge/dist/FooPodBridge-0.1.0-beta.10.fb2k-component`。
+- 尚未进行用户操作验收；不得把自动测试当作实际播放成功证据。
+
+回家后在 `foobar-test` 手动安装这两个新包，打开设备 Library，双击一首已确认存在的歌曲。通过标准：foobar 开始播放该歌曲，设备仍保持只读，原有普通播放列表没有被删除或改写；若失败，请记录设备是否仍挂载、双击的曲目标题和 foobar 状态栏/控制台错误。

@@ -71,6 +71,7 @@ struct DeviceBrowser::Impl {
         std::string token;
         std::uint64_t generation{}, playlistId{};
         std::uint32_t playlistIndex{}, members{};
+        std::string mountRoot;
         bool playlist{};
     };
     std::vector<Node> nodes;
@@ -150,7 +151,7 @@ struct DeviceBrowser::Impl {
                 c::device_snapshot_v1::ptr base; Node node;
                 if (!list->get_item(i,base) || !base->service_query_t(node.device)) continue;
                 pfc::string8 name,token; node.device->get_display_name(name); node.device->get_stable_id(token);
-                node.token=token.c_str(); node.generation=node.device->get_generation(); node.device->get_library(node.library);
+                node.token=token.c_str(); node.generation=node.device->get_generation(); pfc::string8 mount; node.device->get_mount_root(mount); node.mountRoot=mount.c_str(); node.device->get_library(node.library);
                 const auto deviceIndex=nodes.size(); nodes.push_back(node);
                 const auto device=insert(root,wide(name.c_str()),static_cast<LPARAM>(deviceIndex));
                 if (node.library.is_valid()) {
@@ -202,12 +203,13 @@ struct DeviceBrowser::Impl {
         if (total>1000000) throw std::runtime_error("library limit");
         unsigned budget=128;
         while (trackCursor<total && budget--) {
-            devices::Track track; std::uint64_t pid{}; c::read_media_kind kind{}; pfc::string8 title,artist,album;
+            devices::Track track; std::uint64_t pid{}; c::read_media_kind kind{}; pfc::string8 title,artist,album,path;
             if (!source->get_track(trackCursor,track.id,pid,kind)
                 || !source->get_track_text(trackCursor,c::track_text::title,title)
                 || !source->get_track_text(trackCursor,c::track_text::artist,artist)
-                || !source->get_track_text(trackCursor,c::track_text::album,album)) throw std::runtime_error("invalid track");
-            track.title=wide(title.c_str()); track.artist=wide(artist.c_str()); track.album=wide(album.c_str());
+                || !source->get_track_text(trackCursor,c::track_text::album,album)
+                || !source->get_track_text(trackCursor,c::track_text::relative_path,path)) throw std::runtime_error("invalid track");
+            track.title=wide(title.c_str()); track.artist=wide(artist.c_str()); track.album=wide(album.c_str()); track.relativePath=path.c_str();
             if (!library.append(std::move(track))) throw std::runtime_error("duplicate track ID");
             if (!selected->playlist) rows.push_back(trackCursor);
             ++trackCursor;
@@ -225,6 +227,30 @@ struct DeviceBrowser::Impl {
         projecting=false; status=rows.empty()?L"0 tracks":L"Read-only";
         ListView_SetItemCountEx(table,static_cast<int>(rows.size()),LVSICF_NOINVALIDATEALL);
         InvalidateRect(table,nullptr,TRUE); overviewText();
+    }
+    void playRow(int row) {
+        if (row < 0 || static_cast<std::size_t>(row) >= rows.size() || !current()) return;
+        const auto& track = library.tracks[rows[static_cast<std::size_t>(row)]];
+        if (track.relativePath.empty() || selected->mountRoot.empty()) return;
+        std::string root = selected->mountRoot;
+        if (!root.empty() && root.back() != '\\' && root.back() != '/') root += '\\';
+        auto path = root + track.relativePath;
+        std::replace(path.begin(), path.end(), '/', '\\');
+        const auto handle = metadb::get()->handle_create(path.c_str(), 0);
+        if (!handle.is_valid()) return;
+
+        // Device rows are read-only virtual rows.  Use a dedicated foobar playlist
+        // as the playback bridge so the device itself is never mutated.
+        auto playlists = playlist_manager::get();
+        constexpr const char* bridgeName = "FooPodBridge playback";
+        const auto bridge = playlists->find_or_create_playlist(bridgeName);
+        if (bridge == SIZE_MAX || !playlists->playlist_remove_items(bridge, pfc::bit_array_true())) return;
+        metadb_handle_list handles;
+        handles.add_item(handle);
+        if (!playlists->playlist_add_items(bridge, handles, pfc::bit_array_false())) return;
+        playlists->set_active_playlist(bridge);
+        playlists->set_playing_playlist(bridge);
+        playlists->playlist_execute_default_action(bridge, 0);
     }
 };
 
@@ -333,6 +359,7 @@ bool DeviceBrowser::message(UINT msg,WPARAM wp,LPARAM lp,LRESULT& result) {
             auto item=reinterpret_cast<NMTREEVIEWW*>(lp);
             if (!p.rebuilding && item->itemNew.lParam>=0) p.choose(static_cast<std::size_t>(item->itemNew.lParam)); return true;
         }
+        if (header->hwndFrom==p.table && header->code==NM_DBLCLK) { auto activate=reinterpret_cast<NMITEMACTIVATE*>(lp); p.playRow(activate->iItem); return true; }
         if (header->hwndFrom==p.table && header->code==LVN_GETDISPINFOW) {
             auto info=reinterpret_cast<NMLVDISPINFOW*>(lp);
             if (!p.current()) {
