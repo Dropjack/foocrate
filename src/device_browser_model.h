@@ -27,7 +27,7 @@ struct Context {
     void leave() noexcept { active = false; if (tab == 2) tab = previousTab; }
     bool overview() const noexcept { return active && tab == 2; }
 };
-struct Track { std::uint32_t id{}; std::wstring title, artist, album; };
+struct Track { std::uint32_t id{}; std::wstring title, artist, album; std::string relativePath; };
 class LibraryIndex {
 public:
     bool append(Track track) {

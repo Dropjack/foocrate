@@ -23,7 +23,7 @@ BEGIN
             VALUE "InternalName", "foo_crate\0"
             VALUE "OriginalFilename", "foo_crate.dll\0"
             VALUE "ProductName", "FooCrate\0"
-            VALUE "ProductVersion", "1.1.0-beta.2\0"
+            VALUE "ProductVersion", "1.1.0-beta.3\0"
         END
     END
     BLOCK "VarFileInfo"

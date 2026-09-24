@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(FooCrate VERSION 1.1.0 LANGUAGES CXX RC)
 
-set(FOOCRATE_DISPLAY_VERSION "1.1.0-beta.2")
+set(FOOCRATE_DISPLAY_VERSION "1.1.0-beta.3")
 
 if(NOT WIN32)
   message(FATAL_ERROR "FooCrate currently supports Windows only.")
