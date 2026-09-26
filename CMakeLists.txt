@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(FooCrate VERSION 1.1.0 LANGUAGES CXX RC)
 
-set(FOOCRATE_DISPLAY_VERSION "1.1.0-beta.3")
+set(FOOCRATE_DISPLAY_VERSION "1.1.0-beta.16")
 
 if(NOT WIN32)
   message(FATAL_ERROR "FooCrate currently supports Windows only.")
@@ -19,6 +19,7 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+add_compile_options(/EHsc)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 include(CTest)
@@ -67,7 +68,7 @@ set_target_properties(foo_crate PROPERTIES
   OUTPUT_NAME "foo_crate"
 )
 
-target_include_directories(foo_crate PRIVATE src third_party/foopodbridge-contract)
+target_include_directories(foo_crate PRIVATE src third_party/foopodbridge-contract third_party/foobar2000/shared)
 target_compile_definitions(foo_crate PRIVATE
   _UNICODE
   UNICODE
@@ -75,7 +76,7 @@ target_compile_definitions(foo_crate PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
 )
-target_compile_options(foo_crate PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /utf-8 /external:W0)
+target_compile_options(foo_crate PRIVATE /W4 /WX /EHsc /permissive- /Zc:__cplusplus /utf-8 /external:W0)
 target_link_options(foo_crate PRIVATE /INCREMENTAL:NO)
 target_link_libraries(foo_crate PRIVATE
   foocrate_foobar2000_sdk

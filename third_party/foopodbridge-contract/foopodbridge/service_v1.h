@@ -118,6 +118,32 @@ public:
     FB2K_MAKE_SERVICE_INTERFACE(operation_request_v1, service_base);
 };
 
+// Optional music import payload.  It is a derived interface so existing
+// consumers compiled against ABI 1.0 keep their original vtables.
+enum class import_audio_format : std::uint32_t { unknown, mp3, aac_lc, m4a };
+class music_import_request_v1 : public operation_request_v1 {
+public:
+    virtual void get_source_path(pfc::string_base& out) = 0;
+    virtual void get_title(pfc::string_base& out) = 0;
+    virtual void get_artist(pfc::string_base& out) = 0;
+    virtual void get_album(pfc::string_base& out) = 0;
+    virtual import_audio_format get_audio_format() noexcept = 0;
+    virtual std::uint32_t get_duration_ms() noexcept = 0;
+    virtual std::uint64_t get_source_size() noexcept = 0;
+    virtual void get_source_digest(pfc::string_base& out) = 0;
+    virtual void get_target_path(pfc::string_base& out) = 0;
+    virtual std::uint32_t get_soundcheck() noexcept = 0;
+    virtual std::uint32_t get_pregap() noexcept = 0;
+    virtual std::uint32_t get_postgap() noexcept = 0;
+    virtual std::uint32_t get_encoding_delay() noexcept = 0;
+    virtual std::uint32_t get_encoding_drain() noexcept = 0;
+    virtual bool has_audio_analysis() noexcept = 0;
+    // Optional media compatibility hint. Zero means the consumer could not
+    // provide it; supported legacy iPod paths reject known non-16-bit audio.
+    virtual std::uint32_t get_bit_depth() noexcept { return 0; }
+    FB2K_MAKE_SERVICE_INTERFACE(music_import_request_v1, operation_request_v1);
+};
+
 class operation_plan_v1 : public service_base {
 public:
     virtual void get_plan_id(pfc::string_base& out) = 0;
@@ -128,6 +154,12 @@ public:
     virtual void get_summary(pfc::string_base& out) = 0;
 
     FB2K_MAKE_SERVICE_INTERFACE(operation_plan_v1, service_base);
+};
+
+class music_import_plan_v1 : public operation_plan_v1 {
+public:
+    virtual void get_operation_key(pfc::string_base& out) = 0;
+    FB2K_MAKE_SERVICE_INTERFACE(music_import_plan_v1, operation_plan_v1);
 };
 
 class operation_result_v1 : public service_base {

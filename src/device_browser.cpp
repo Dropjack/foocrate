@@ -1,4 +1,5 @@
 #include <foopodbridge/service_readonly.h>
+#include <foobar2000/SDK/foobar2000.h>
 #include "device_browser.h"
 #include "device_browser_model.h"
 #include "device_scrollbars.h"
@@ -6,10 +7,13 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <sstream>
+#include <cmath>
 
 namespace foocrate {
 namespace {
+DeviceBrowser* g_currentDeviceBrowser{};
 namespace c = foopodbridge::contract;
 constexpr UINT updateMessage = WM_APP + 0x450, projectMessage = WM_APP + 0x451;
 constexpr GUID splitGuid{0x4a5fc64a,0x1336,0x4a58,{0x89,0x52,0xaf,0x64,0x83,0xd9,0x1f,0x27}};
@@ -22,7 +26,34 @@ std::wstring wide(const char* value) {
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, result.data(), count);
     result.pop_back(); return result;
 }
-struct Lifetime { HWND window{}; std::atomic<bool> pending{}, unavailable{}; };
+class MusicImportRequest : public c::music_import_request_v1 {
+public:
+    std::string device, source, title, artist, album; std::uint64_t generation{}, sourceSize{}; std::uint32_t durationMs{}, soundcheck{}, pregap{}, postgap{}, encodingDelay{}, encodingDrain{}; bool analysis{}; std::uint32_t bitDepth{};
+    c::operation_kind get_kind() noexcept override { return c::operation_kind::import_music; }
+    void get_request_id(pfc::string_base& out) override { out="foocrate-import"; }
+    void get_device_id(pfc::string_base& out) override { out=device.c_str(); }
+    std::uint64_t get_snapshot_generation() noexcept override { return generation; }
+    void get_source_path(pfc::string_base& out) override { out=source.c_str(); }
+    void get_title(pfc::string_base& out) override { out=title.c_str(); }
+    void get_artist(pfc::string_base& out) override { out=artist.c_str(); }
+    void get_album(pfc::string_base& out) override { out=album.c_str(); }
+    c::import_audio_format get_audio_format() noexcept override {
+        const auto dot=source.find_last_of('.'); auto ext=dot==std::string::npos?std::string{}:source.substr(dot+1); std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+        return ext=="mp3"?c::import_audio_format::mp3:(ext=="aac"?c::import_audio_format::aac_lc:(ext=="m4a"?c::import_audio_format::m4a:c::import_audio_format::unknown));
+    }
+    std::uint32_t get_duration_ms() noexcept override { return durationMs; }
+    std::uint64_t get_source_size() noexcept override { return sourceSize; }
+    void get_source_digest(pfc::string_base& out) override { out.reset(); }
+    void get_target_path(pfc::string_base& out) override { out.reset(); }
+    std::uint32_t get_soundcheck() noexcept override { return soundcheck; }
+    std::uint32_t get_pregap() noexcept override { return pregap; }
+    std::uint32_t get_postgap() noexcept override { return postgap; }
+    std::uint32_t get_encoding_delay() noexcept override { return encodingDelay; }
+    std::uint32_t get_encoding_drain() noexcept override { return encodingDrain; }
+    bool has_audio_analysis() noexcept override { return analysis; }
+    std::uint32_t get_bit_depth() noexcept override { return bitDepth; }
+};
+struct Lifetime { std::atomic<HWND> window{}; std::atomic<bool> pending{}, unavailable{}; };
 class Callback : public c::device_event_callback_v1 {
 public:
     explicit Callback(std::weak_ptr<Lifetime> value) : lifetime_(std::move(value)) {}
@@ -30,7 +61,11 @@ public:
     void on_provider_unavailable() noexcept override { if (auto p=lifetime_.lock()) p->unavailable=true; post(); }
 private:
     void post() noexcept {
-        if (auto p = lifetime_.lock(); p && p->window && !p->pending.exchange(true)) PostMessageW(p->window, updateMessage, 0, 0);
+        if (auto p = lifetime_.lock(); p && p->window.load(std::memory_order_acquire)
+            && !p->pending.exchange(true)) {
+            const auto window = p->window.load(std::memory_order_acquire);
+            if (!window || !PostMessageW(window, updateMessage, 0, 0)) p->pending = false;
+        }
     }
     std::weak_ptr<Lifetime> lifetime_;
 };
@@ -68,6 +103,7 @@ struct DeviceBrowser::Impl {
     struct Node {
         c::device_snapshot_readonly_v1::ptr device;
         c::library_snapshot_v1::ptr library;
+        std::string displayName;
         std::string token;
         std::uint64_t generation{}, playlistId{};
         std::uint32_t playlistIndex{}, members{};
@@ -76,15 +112,16 @@ struct DeviceBrowser::Impl {
     };
     std::vector<Node> nodes;
     std::optional<Node> selected;
+    std::optional<Node> importTarget;
     devices::LibraryIndex library;
     std::vector<std::size_t> rows;
     std::uint32_t trackCursor{}, memberCursor{};
     std::wstring status;
     ~Impl() { destroy(); }
     void destroy() {
-        if (life) life->window = nullptr;
+        if (life) life->window.store(nullptr, std::memory_order_release);
         if (subscription.is_valid()) subscription->cancel();
-        subscription.release(); provider.release(); selected.reset(); nodes.clear();
+        subscription.release(); provider.release(); selected.reset(); importTarget.reset(); nodes.clear();
         for (auto h : {tree,table,text,divider}) if (h && IsWindow(h)) DestroyWindow(h);
         tree=table=text=divider=nullptr;
         if (font) DeleteObject(font); font=nullptr;
@@ -123,22 +160,28 @@ struct DeviceBrowser::Impl {
         return TreeView_InsertItem(tree,&item);
     }
     void overviewText() {
-        std::wstring value=L"Device overview\r\n\r\n"+status;
-        if (selected && provider.is_valid() && provider->is_current(selected->token.c_str(),selected->generation,selected->device->get_revision())) {
+        std::wstring value = L"Device overview\\r\
+" + status;
+        if (selected && provider.is_valid() && provider->is_current(selected->token.c_str(), selected->generation, selected->device->get_revision())) {
             pfc::string8 description; selected->device->get_status_description(description);
-            std::uint64_t total{},free{};
-            if (selected->device->get_capacity(total,free)) {
+            std::uint64_t total{}, free{};
+            if (selected->device->get_capacity(total, free)) {
                 std::wostringstream summary; summary.setf(std::ios::fixed); summary.precision(2);
-                summary << L"\r\nCapacity: " << static_cast<double>(total)/1073741824.0 << L" GiB\r\nFree: " << static_cast<double>(free)/1073741824.0 << L" GiB";
-                value+=summary.str();
+                summary << L"\\r\
+Capacity: " << static_cast<double>(total) / 1073741824.0 << L" GiB\\r\
+Free: " << static_cast<double>(free) / 1073741824.0 << L" GiB";
+                value += summary.str();
             }
-            value+=L"\r\n\r\n"+wide(description.c_str());
+            value += L"\\r\
+\\r\
+" + wide(description.c_str());
         }
-        SetWindowTextW(text,value.c_str());
+        SetWindowTextW(text, value.c_str());
     }
+
     void refresh() {
         if (life && life->unavailable) {
-            provider.release(); servicePresent=false; context.leave(); selected.reset();
+            provider.release(); servicePresent=false; context.leave(); selected.reset(); importTarget.reset();
         }
         rebuilding=true; clearRows(); nodes.clear(); TreeView_DeleteAllItems(tree);
         const auto root=insert(TVI_ROOT,L"Devices",-1);
@@ -151,7 +194,7 @@ struct DeviceBrowser::Impl {
                 c::device_snapshot_v1::ptr base; Node node;
                 if (!list->get_item(i,base) || !base->service_query_t(node.device)) continue;
                 pfc::string8 name,token; node.device->get_display_name(name); node.device->get_stable_id(token);
-                node.token=token.c_str(); node.generation=node.device->get_generation(); pfc::string8 mount; node.device->get_mount_root(mount); node.mountRoot=mount.c_str(); node.device->get_library(node.library);
+                node.displayName=name.c_str(); node.token=token.c_str(); node.generation=node.device->get_generation(); pfc::string8 mount; node.device->get_mount_root(mount); node.mountRoot=mount.c_str(); node.device->get_library(node.library);
                 const auto deviceIndex=nodes.size(); nodes.push_back(node);
                 const auto device=insert(root,wide(name.c_str()),static_cast<LPARAM>(deviceIndex));
                 if (node.library.is_valid()) {
@@ -172,6 +215,11 @@ struct DeviceBrowser::Impl {
             }
             if (nodes.empty()) insert(root,status,-1);
         }
+        if (provider.is_valid()) {
+            const auto target = std::find_if(nodes.begin(), nodes.end(), [](const Node& node) { return !node.playlist; });
+            if (target != nodes.end()) importTarget = *target;
+            else importTarget.reset();
+        } else importTarget.reset();
         TreeView_Expand(tree,root,TVE_EXPAND);
         rebuilding=false;
         if (restore) TreeView_SelectItem(tree,restore);
@@ -185,6 +233,7 @@ struct DeviceBrowser::Impl {
     void choose(std::size_t index) {
         if (index>=nodes.size()) return;
         selected=nodes[index]; context.enter(); clearRows();
+        importTarget=*selected; importTarget->playlist=false;
         status=L"Reading device library...";
         if (selected->library.is_valid()) {
             trackCursor=memberCursor=0; projecting=true;
@@ -194,6 +243,38 @@ struct DeviceBrowser::Impl {
     }
     bool current() const {
         return selected && provider.is_valid() && provider->is_current(selected->token.c_str(),selected->generation,selected->device->get_revision());
+    }
+    bool targetCurrent() const {
+        return importTarget && provider.is_valid()
+            && provider->is_current(importTarget->token.c_str(), importTarget->generation,
+                importTarget->device->get_revision());
+    }
+    bool prepareFirstTarget() {
+        if (!provider.is_valid()) {
+            service_enum_t<c::service_v1> services; c::service_v1::ptr service;
+            while (services.next(service)) {
+                c::device_provider_v1::ptr base;
+                if (service->get_contract_major() == 1 && service->get_device_provider(base) && base.is_valid()) {
+                    base->service_query_t(provider); break;
+                }
+            }
+        }
+        if (!provider.is_valid()) return false;
+        c::device_snapshot_list_v1::ptr list; provider->get_snapshots(list);
+        if (!list.is_valid()) return false;
+        for (std::uint32_t i = 0; i < list->get_count(); ++i) {
+            c::device_snapshot_v1::ptr base; Node node;
+            if (!list->get_item(i, base) || !base->service_query_t(node.device)) continue;
+            pfc::string8 name, token, mount;
+            node.device->get_display_name(name); node.displayName = name.c_str();
+            node.device->get_stable_id(token); node.token = token.c_str();
+            node.generation = node.device->get_generation();
+            node.device->get_mount_root(mount); node.mountRoot = mount.c_str();
+            node.device->get_library(node.library); node.playlist = false;
+            importTarget = std::move(node);
+            return true;
+        }
+        importTarget.reset(); return false;
     }
     void project() {
         if (!projecting || !selected) return;
@@ -252,12 +333,56 @@ struct DeviceBrowser::Impl {
         playlists->set_playing_playlist(bridge);
         playlists->playlist_execute_default_action(bridge, 0);
     }
+    void importTrack(const std::string& sourcePath, const std::string& title,
+        const std::string& artist, const std::string& album,
+        double durationSeconds, std::uint64_t sourceSize) {
+        if (!importTarget) {
+            MessageBoxW(parent,L"当前没有可用的 iPod 设备。",L"FooPodBridge",MB_OK|MB_ICONINFORMATION);
+            return;
+        }
+        if (!provider.is_valid() || !targetCurrent()) {
+            MessageBoxW(parent,L"目标 iPod 快照已失效，请刷新设备后重试。",L"FooPodBridge",MB_OK|MB_ICONWARNING);
+            return;
+        }
+        auto folded=[](std::string value) { std::replace(value.begin(),value.end(),'\\','/'); std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){ return static_cast<char>(std::tolower(c)); }); return value; };
+        const auto deviceRoot=folded(importTarget->mountRoot);
+        const auto sourceRoot=folded(sourcePath);
+        if (!deviceRoot.empty() && (sourceRoot==deviceRoot || (sourceRoot.size()>deviceRoot.size() && sourceRoot.compare(0,deviceRoot.size(),deviceRoot)==0 && sourceRoot[deviceRoot.size()]=='/'))) { MessageBoxW(parent,L"来源文件必须位于本机本地库，不能从目标 iPod 读取。",L"FooPodBridge",MB_OK|MB_ICONWARNING); return; }
+        auto request = new service_impl_t<MusicImportRequest>();
+        const auto sourceHandle = metadb::get()->handle_create(sourcePath.c_str(), 0);
+        if (sourceHandle.is_valid()) {
+            const auto info = sourceHandle->get_info_ref();
+            const auto& f = info->info(); request->bitDepth = static_cast<std::uint32_t>(f.info_get_int("bitspersample")); const auto gain = f.get_replaygain().m_track_gain;
+            if (gain != replaygain_info::gain_invalid) { request->soundcheck = static_cast<std::uint32_t>(std::clamp(1000.0 * std::pow(10.0, -0.1 * static_cast<double>(gain)), 0.0, 65535.0)); request->analysis = true; }
+            const auto delay = f.info_get_int("encoding_delay"); request->encodingDelay = static_cast<std::uint32_t>(delay > 0 ? delay : 0);
+            const auto drain = f.info_get_int("encoding_drain"); request->encodingDrain = static_cast<std::uint32_t>(drain > 0 ? drain : 0);
+            request->analysis = request->analysis || request->encodingDelay != 0 || request->encodingDrain != 0;
+        }
+        request->device=importTarget->token; request->generation=importTarget->generation; request->source=sourcePath; request->title=title; request->artist=artist; request->album=album; request->durationMs=static_cast<std::uint32_t>(std::max(0.0,durationSeconds)*1000.0); request->sourceSize=sourceSize;
+        c::operation_request_v1::ptr base=request; c::operation_handle_v1::ptr operation; if (!provider->begin_plan(base,operation) || !operation.is_valid()) { MessageBoxW(parent,L"服务无法为选中曲目生成导入计划。",L"FooPodBridge",MB_OK|MB_ICONERROR); return; }
+        c::operation_plan_v1::ptr plan; pfc::string8 planText; if (!operation->get_plan(plan) || !plan.is_valid()) { MessageBoxW(parent,L"导入计划不可用。",L"FooPodBridge",MB_OK|MB_ICONERROR); return; }
+        plan->get_summary(planText); const auto summary=L"目标设备："+wide(importTarget->displayName.c_str())+L"\r\n\r\n"+wide(planText.c_str()); if (!plan->is_executable()) { MessageBoxW(parent,summary.c_str(),L"导入计划被阻断",MB_OK|MB_ICONWARNING); return; }
+        if (MessageBoxW(parent,summary.c_str(),L"确认导入到设备",MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) return;
+        c::operation_handle_v1::ptr execution; if (!provider->execute_plan(plan,execution)) MessageBoxW(parent,L"导入执行未启动，请查看计划状态。",L"FooPodBridge",MB_OK|MB_ICONERROR);
+    }
 };
 
-DeviceBrowser::DeviceBrowser() : impl_(std::make_unique<Impl>()) {}
-DeviceBrowser::~DeviceBrowser() = default;
+DeviceBrowser::DeviceBrowser() : impl_(std::make_unique<Impl>()) { g_currentDeviceBrowser=this; }
+DeviceBrowser::~DeviceBrowser() { if (g_currentDeviceBrowser==this) g_currentDeviceBrowser=nullptr; }
+DeviceBrowser* currentDeviceBrowser() noexcept { return g_currentDeviceBrowser; }
+bool importTrackToFirstDevice(const std::string& source, const std::string& title,
+    const std::string& artist, const std::string& album, double durationSeconds,
+    std::uint64_t sourceSize) {
+    if (auto* browser = currentDeviceBrowser()) {
+        browser->importTrackToFirstDevice(source,title,artist,album,durationSeconds,sourceSize);
+        return true;
+    }
+    DeviceBrowser temporary;
+    temporary.importTrackToFirstDevice(source,title,artist,album,durationSeconds,sourceSize);
+    return true;
+}
 void DeviceBrowser::create(HWND parent,std::function<void(int)> changed) {
-    auto& p=*impl_; p.parent=parent; p.changed=std::move(changed); p.life=std::make_shared<Lifetime>(); p.life->window=parent;
+    auto& p=*impl_; p.parent=parent; p.changed=std::move(changed); p.life=std::make_shared<Lifetime>(); p.life->window.store(parent, std::memory_order_release);
     service_enum_t<c::service_v1> services; c::service_v1::ptr service;
     while (services.next(service)) {
         p.servicePresent=true;
@@ -328,10 +453,23 @@ void DeviceBrowser::layout(RECT sidebar,RECT table,RECT lower,bool visible,UINT 
     ListView_SetColumnWidth(p.table,1,static_cast<int>(width*27/100));
     ListView_SetColumnWidth(p.table,2,static_cast<int>(width*28/100));
 }
+void DeviceBrowser::importTrack(const std::string& source, const std::string& title,
+    const std::string& artist, const std::string& album, double durationSeconds,
+    std::uint64_t sourceSize) { impl_->importTrack(source,title,artist,album,durationSeconds,sourceSize); }
+void DeviceBrowser::importTrackToFirstDevice(const std::string& source, const std::string& title,
+    const std::string& artist, const std::string& album, double durationSeconds,
+    std::uint64_t sourceSize) {
+    auto& p = *impl_;
+    if (!p.prepareFirstTarget()) {
+        MessageBoxW(nullptr,L"当前没有可用的 iPod 设备。",L"FooPodBridge",MB_OK|MB_ICONINFORMATION);
+        return;
+    }
+    p.importTrack(source,title,artist,album,durationSeconds,sourceSize);
+}
 bool DeviceBrowser::message(UINT msg,WPARAM wp,LPARAM lp,LRESULT& result) {
     auto& p=*impl_; if (!p.tree) return false; result=0;
     try {
-        if (msg==updateMessage) { p.life->pending=false; p.refresh(); return true; }
+        if (msg==updateMessage) { if (!p.life) return true; p.life->pending=false; p.refresh(); return true; }
         if (msg==projectMessage) { p.project(); return true; }
         if ((msg==WM_CTLCOLOREDIT || msg==WM_CTLCOLORSTATIC) && reinterpret_cast<HWND>(lp)==p.text) {
             auto dc=reinterpret_cast<HDC>(wp); SetTextColor(dc,p.foreground); SetBkColor(dc,p.background); result=reinterpret_cast<LRESULT>(p.brush); return true;
@@ -364,7 +502,10 @@ bool DeviceBrowser::message(UINT msg,WPARAM wp,LPARAM lp,LRESULT& result) {
             auto info=reinterpret_cast<NMLVDISPINFOW*>(lp);
             if (!p.current()) {
                 if ((info->item.mask&LVIF_TEXT) && info->item.cchTextMax>0) info->item.pszText[0]=L'\0';
-                if (!p.life->pending.exchange(true)) PostMessageW(p.parent,updateMessage,0,0);
+                if (p.life && !p.life->pending.exchange(true)) {
+                    const auto window = p.life->window.load(std::memory_order_acquire);
+                    if (!window || !PostMessageW(window, updateMessage, 0, 0)) p.life->pending = false;
+                }
                 return true;
             }
             if ((info->item.mask&LVIF_TEXT) && info->item.iItem>=0 && static_cast<std::size_t>(info->item.iItem)<p.rows.size()) {

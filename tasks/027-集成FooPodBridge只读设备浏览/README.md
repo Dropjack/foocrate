@@ -40,7 +40,7 @@
 
 用户确认可安装后，补齐 ATL，重新完成 Debug/Release 全构建及全部测试，再生成 `dist/FooCrate-1.1.0-beta.1.fb2k-component` 并审计唯一 `foo_crate.dll`。若候选已交付后再改源码，使用下一个 beta 号。
 
-首个人工检查在 `D:/dev/foo/FooCrate/.local/foobar-test`：手动安装 FooCrate 新包与 FooPodBridge beta.4，打开左侧设备 Library，核对真实列表、右上播放不变、右下 Device 入口只在设备上下文出现且不抢歌词。一次检查一个点，等待反馈后再验证刷新/切换/移除/缺失服务和主题/DPI。
+首个人工检查在 `D:/dev/foo/FooCrate/.local/foobar-test`：手动安装 FooCrate 新包与 FooPodBridge beta.21，打开左侧设备 Library，核对真实列表、右上播放不变、右下 Device 入口只在设备上下文出现且不抢歌词。一次检查一个点，等待反馈后再验证刷新/切换/移除/缺失服务和主题/DPI。
 
 ## 2026-09-21 ATL 补齐后的完整验证
 
@@ -52,7 +52,7 @@ FooCrate x64 Debug/Release 全构建成功，各 15/15 测试通过，包括 dev
 
 首次打包已完成归档及结构检查，但最后 Get-FileHash 因嵌套 PowerShell 环境缺失命令而退出；改用 .NET SHA256，既有候选不覆盖，独立 Python 审计已通过。该修改不改变组件二进制。
 
-未部署、启动或操作应用，未访问真实设备文件，未提交或推送。人工组件加载、布局、播放隔离、刷新/移除、服务缺失、主题/DPI 仍待用户逐项验证。第一检查点：在 foobar-test 手动安装 FooCrate 本包及 FooPodBridge 0.1.0-beta.4，点击设备 Library，反馈界面截图；核对真实曲目表与右下条件 Device 入口。DUP-001 仍暂缓。
+未部署、启动或操作应用，未访问真实设备文件，未提交或推送。人工组件加载、布局、播放隔离、刷新/移除、服务缺失、主题/DPI 仍待用户逐项验证。第一检查点：在 foobar-test 手动安装 FooCrate 本包及 FooPodBridge 0.1.0-beta.22，点击设备 Library，反馈界面截图；核对真实曲目表与右下条件 Device 入口。DUP-001 仍暂缓。
 
 
 ## 2026-09-21 用户修订：隐藏页面入口
@@ -130,3 +130,16 @@ FooCrate x64 Debug/Release 全构建成功，各 15/15 测试通过，包括 dev
 ## 2026-09-24 beta.3 实机只读播放反馈
 
 用户在 `foobar-test` 接入此前那台 Classic 后反馈“能放歌了！显示了！”，并提供 FooCrate 截图。设备 Library 显示 1862 首；`Space Song` 正在播放，右上显示 Beach House / Depression Cherry，底部播放进度在前进；左侧出现含 1 首的 `FooPodBridge playback` 专用列表，原普通 Library (full) 仍显示 1703 首。记录这首曲目的设备读取和播放单项通过。截图不能单独证明普通列表内容逐项未变或设备完全无写入；尚未检查连接期间的 FooPodBridge 恢复状态。左侧仍有第二条同名 Classic 项，DUP-001 保持待查，不能以此次播放成功解除写入门禁。
+
+## beta.14：FooPodBridge 单曲导入入口与拔出生命周期修复（实现完成待验收）
+
+- FooCrate 版本：`1.1.0-beta.14`；FooPodBridge 版本：`0.1.0-beta.23`。
+- 新增本地 playlist 曲目上下文菜单 `FooPodBridge: Import to device`，从选中的本地曲目构造 Music 导入请求，调用 FooPodBridge 的 `begin_plan` 与 `execute_plan`；设备树不再提供导入入口。当前批次服务仍明确拒绝多选，避免拆成多个数据库提交；导入目标独立保留，未进入设备页面时自动取发现列表中的第一个设备。
+- 右键入口先使用 foobar 的 native-path 转换，将 `file://` 等虚拟路径转换为本机文件路径后再交给 FooPodBridge 事务服务。
+- FooCrate 设备面板的回调窗口句柄使用原子生命周期标记；窗口销毁后不再投递更新消息，投递失败会清除待处理标志。FooPodBridge Windows 设备通知在注销期间清空回调并等待已进入回调退出，避免设备拔出检测造成堆损坏。
+- 导入入口不自动扫描设备或导入曲库；实际导入、弹出、重启播放和重新连接由用户在 `foobar-test` 手动完成。
+- 包路径：`D:/Dev/FooCrate/dist/FooCrate-1.1.0-beta.14.fb2k-component` 与 `D:/Dev/FooPodBridge/FooPodBridge/dist/FooPodBridge-0.1.0-beta.23.fb2k-component`。
+
+### 2026-09-26：实机拔出崩溃记录
+
+用户在 `foobar-test` 观察到设备正在接入/读取时拔出会使 foobar2000 闪退。Windows 应用事件记录为 `0xc0000374` 堆损坏；本轮未读取设备 Music 数据，也未执行真实写入。新候选已完成 Debug/Release 与各 15/15 自动测试；拔出回归仍由用户手动验证。

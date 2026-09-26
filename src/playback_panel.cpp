@@ -104,6 +104,8 @@ constexpr GUID kShowInDefaultPlaylistCommandGuid{
     0xa44197ed, 0xec0a, 0x45a5, {0x98, 0xba, 0x93, 0xd8, 0x73, 0x16, 0xcc, 0x59}};
 constexpr GUID kShowInDefaultPlaylistGroupGuid{
     0xc783b38f, 0x7d8c, 0x48de, {0x8f, 0x0e, 0x82, 0x68, 0x73, 0xb5, 0xfe, 0xe0}};
+constexpr GUID kImportToDeviceCommandGuid{
+    0x8d6fb987, 0x6b34, 0x4d44, {0x9e, 0x7a, 0x10, 0x39, 0x6f, 0x53, 0x27, 0x71}};
 constexpr UINT_PTR kPlaylistDragTimer = 0x5271;
 constexpr UINT_PTR kArtworkRotationTimer = 0x5272;
 constexpr UINT_PTR kStatusTimer = 0x5273;
@@ -188,6 +190,47 @@ public:
 };
 
 contextmenu_item_factory_t<ShowInDefaultPlaylistCommand> g_showInDefaultPlaylistCommandFactory;
+
+class ImportToDeviceCommand : public contextmenu_item_simple {
+public:
+    unsigned get_num_items() override { return 1; }
+    void get_item_name(unsigned, pfc::string_base& out) override { out = "FooPodBridge: Import to device"; }
+    GUID get_item_guid(unsigned) override { return kImportToDeviceCommandGuid; }
+    GUID get_parent() override { return contextmenu_groups::root; }
+    bool get_item_description(unsigned, pfc::string_base& out) override {
+        out = "Import the selected local tracks to the selected iPod device";
+        return true;
+    }
+    void context_command(unsigned, metadb_handle_list_cref items, const GUID&) override {
+        if (items.get_count() == 0) return;
+        if (items.get_count() > 1) {
+            MessageBoxW(nullptr, L"当前事务服务只接受单曲导入；批量导入需要批次数据库计划。", L"FooPodBridge", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        const auto handle = items[0];
+        if (!handle.is_valid()) return;
+        std::string title, artist, album;
+        const auto info = handle->get_info_ref();
+        if (info.is_valid()) {
+            const auto& f = info->info();
+            const auto value = [&](const char* key) { const auto* v = f.meta_get(key, 0); return v ? std::string(v) : std::string{}; };
+            title = value("TITLE"); artist = value("ARTIST"); album = value("ALBUM");
+        }
+        // foobar paths may use a file:// handler or another virtual syntax.
+        // The transaction service intentionally accepts native local paths
+        // only, so resolve the selected playlist item before crossing the
+        // FooCrate/FooPodBridge service boundary.
+        pfc::string8 nativePath;
+        if (!filesystem::g_get_native_path(handle->get_path(), nativePath) || nativePath.empty()) {
+            MessageBoxW(nullptr, L"选中的曲目不是可访问的本地文件。", L"FooPodBridge", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        (void)importTrackToFirstDevice(nativePath.c_str(), title, artist, album,
+            handle->get_length(), handle->get_filesize());
+    }
+};
+
+contextmenu_item_factory_t<ImportToDeviceCommand> g_importToDeviceCommandFactory;
 
 class AlbumViewPlaylistLock : public playlist_lock {
 public:
@@ -3684,7 +3727,7 @@ private:
                 m_oleDropHandledByThisPanel = true;
             } else if (m_externalDropNative) {
                 metadb_handle_list items;
-                const pfc::com_ptr_t<IDataObject> object(data);
+                pfc::com_ptr_t<IDataObject> object(data);
                 if (SUCCEEDED(ole_interaction::get()->parse_dataobject_immediate(object, items))) {
                     for (const auto& item : items) playlist_manager::get()->queue_add_item(item);
                     added = items.get_count() > 0;
@@ -3705,7 +3748,7 @@ private:
             bool inserted{};
             if (m_externalDropNative) {
                 metadb_handle_list items;
-                const pfc::com_ptr_t<IDataObject> object(data);
+                pfc::com_ptr_t<IDataObject> object(data);
                 if (SUCCEEDED(ole_interaction::get()->parse_dataobject_immediate(object, items))
                     && items.get_count() > 0) {
                     auto guid = targetGuid;
@@ -3751,7 +3794,7 @@ private:
         }
         if (m_externalDropNative) {
             metadb_handle_list items;
-            const pfc::com_ptr_t<IDataObject> object(data);
+            pfc::com_ptr_t<IDataObject> object(data);
             bool insertedAll{};
             if (SUCCEEDED(ole_interaction::get()->parse_dataobject_immediate(object, items))
                 && insertDroppedItems(guid, snapshot, insertion, items, &insertedAll)) {
