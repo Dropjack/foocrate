@@ -10,6 +10,7 @@
 #include <cctype>
 #include <sstream>
 #include <cmath>
+#include <cstdlib>
 
 namespace foocrate {
 namespace {
@@ -26,9 +27,9 @@ std::wstring wide(const char* value) {
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, result.data(), count);
     result.pop_back(); return result;
 }
-class MusicImportRequest : public c::music_import_request_v1 {
+class MusicImportRequest : public c::music_import_request_rating_v1 {
 public:
-    std::string device, source, title, artist, album; std::uint64_t generation{}, sourceSize{}; std::uint32_t durationMs{}, soundcheck{}, pregap{}, postgap{}, encodingDelay{}, encodingDrain{}; bool analysis{}; std::uint32_t bitDepth{};
+    std::string device, source, title, artist, album; std::uint64_t generation{}, sourceSize{}; std::uint32_t durationMs{}, soundcheck{}, pregap{}, postgap{}, encodingDelay{}, encodingDrain{}, rating{}; bool analysis{}; std::uint32_t bitDepth{};
     c::operation_kind get_kind() noexcept override { return c::operation_kind::import_music; }
     void get_request_id(pfc::string_base& out) override { out="foocrate-import"; }
     void get_device_id(pfc::string_base& out) override { out=device.c_str(); }
@@ -52,6 +53,7 @@ public:
     std::uint32_t get_encoding_drain() noexcept override { return encodingDrain; }
     bool has_audio_analysis() noexcept override { return analysis; }
     std::uint32_t get_bit_depth() noexcept override { return bitDepth; }
+    std::uint32_t get_rating() noexcept override { return rating; }
 };
 struct Lifetime { std::atomic<HWND> window{}; std::atomic<bool> pending{}, unavailable{}; };
 class Callback : public c::device_event_callback_v1 {
@@ -357,6 +359,11 @@ Free: " << static_cast<double>(free) / 1073741824.0 << L" GiB";
             const auto delay = f.info_get_int("encoding_delay"); request->encodingDelay = static_cast<std::uint32_t>(delay > 0 ? delay : 0);
             const auto drain = f.info_get_int("encoding_drain"); request->encodingDrain = static_cast<std::uint32_t>(drain > 0 ? drain : 0);
             request->analysis = request->analysis || request->encodingDelay != 0 || request->encodingDrain != 0;
+            titleformat_object::ptr ratingScript; titleformat_compiler::get()->compile_safe(ratingScript, "%rating%");
+            pfc::string8 ratingText; if (sourceHandle->format_title(nullptr, ratingText, ratingScript, nullptr)) {
+                const auto parsed = std::strtoul(ratingText.c_str(), nullptr, 10);
+                request->rating = parsed > 5 ? 0 : static_cast<std::uint32_t>(parsed);
+            }
         }
         request->device=importTarget->token; request->generation=importTarget->generation; request->source=sourcePath; request->title=title; request->artist=artist; request->album=album; request->durationMs=static_cast<std::uint32_t>(std::max(0.0,durationSeconds)*1000.0); request->sourceSize=sourceSize;
         c::operation_request_v1::ptr base=request; c::operation_handle_v1::ptr operation; if (!provider->begin_plan(base,operation) || !operation.is_valid()) { MessageBoxW(parent,L"服务无法为选中曲目生成导入计划。",L"FooPodBridge",MB_OK|MB_ICONERROR); return; }

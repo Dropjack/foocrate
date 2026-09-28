@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-tool_root = Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin")
+tool_root = Path(r"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin")
 tool = tool_root / ("ctest.exe" if sys.argv[1:2] == ["test"] else "cmake.exe")
 if not tool.is_file():
     raise SystemExit("Approved Visual Studio tool is missing; consult task 002.")

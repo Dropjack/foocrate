@@ -144,6 +144,15 @@ public:
     FB2K_MAKE_SERVICE_INTERFACE(music_import_request_v1, operation_request_v1);
 };
 
+// Optional extension kept separate so ABI 1.0 music-import consumers retain
+// the original vtable. Consumers may expose this interface in addition to the
+// base request when they can provide Playback Statistics rating.
+class music_import_request_rating_v1 : public music_import_request_v1 {
+public:
+    virtual std::uint32_t get_rating() noexcept = 0;
+    FB2K_MAKE_SERVICE_INTERFACE(music_import_request_rating_v1, music_import_request_v1);
+};
+
 class operation_plan_v1 : public service_base {
 public:
     virtual void get_plan_id(pfc::string_base& out) = 0;

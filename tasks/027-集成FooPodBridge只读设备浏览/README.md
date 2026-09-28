@@ -140,6 +140,13 @@ FooCrate x64 Debug/Release 全构建成功，各 15/15 测试通过，包括 dev
 - 导入入口不自动扫描设备或导入曲库；实际导入、弹出、重启播放和重新连接由用户在 `foobar-test` 手动完成。
 - 包路径：`D:/Dev/FooCrate/dist/FooCrate-1.1.0-beta.14.fb2k-component` 与 `D:/Dev/FooPodBridge/FooPodBridge/dist/FooPodBridge-0.1.0-beta.23.fb2k-component`。
 
+## beta.18：单曲导入请求传递 Playback Statistics Rating
+
+- FooCrate 请求接口增加可选 `get_rating()`，旧消费者默认返回 0；导入入口从选中本地曲目的 `%rating%` 读取 0–5 并传给 FooPodBridge。
+- FooCrate Debug/Release CTest 各 15/15 通过；FooPodBridge beta.34 Debug/Release CTest 各 15/15 通过。
+- 包路径：`D:/Dev/FooCrate/dist/FooCrate-1.1.0-beta.18.fb2k-component`（SHA-256 `0C280E196B6D3B65EA5FEB9FEF8B15ABB3D6BF2F84A96E7F0F4BF2F331D368CE`）。FooPodBridge 包路径记录在任务 008 验证记录。
+- 未执行 foobar-test UI 或真实设备导入；两者仍由用户按任务 008 步骤手动完成。
+
 ### 2026-09-26：实机拔出崩溃记录
 
 用户在 `foobar-test` 观察到设备正在接入/读取时拔出会使 foobar2000 闪退。Windows 应用事件记录为 `0xc0000374` 堆损坏；本轮未读取设备 Music 数据，也未执行真实写入。新候选已完成 Debug/Release 与各 15/15 自动测试；拔出回归仍由用户手动验证。
