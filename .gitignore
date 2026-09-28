@@ -7,6 +7,8 @@ third_party/*.fb2k-component
 build/
 out/
 dist/
+# 组件包只用于本地手动安装，不进入 Git 历史
+*.fb2k-component
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
